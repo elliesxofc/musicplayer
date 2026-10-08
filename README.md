@@ -2,9 +2,9 @@
 
 a little private music player, just for me.
 
-a dreamy vinyl turntable that spins while your songs play, with a soft
-visualizer ring that dances to the music and a background that takes on
-the colours of the album cover.
+a pink see-through vinyl that spins while your songs play, with a glowing
+visualizer ring that dances to the music, floating hearts, and a background
+that takes on the colours of the album cover.
 
 ## privacy
 
@@ -21,8 +21,9 @@ drag audio files onto the page or tap **add songs**.
   use their filename (`Artist - Title.mp3`).
 - loved songs, search, shuffle, repeat (all / one)
 - picks up where you left off
-- six themes: moonlight, peach fuzz, sakura, matcha, night swim, noir
-- tap the greeting to tell it your name
+- six pink themes: midnight rose, strawberry milk, cherry noir, bubblegum, sakura dusk, rosé gold
+- customize panel (sliders icon): theme, your name for the greeting, optional watermark
+- **OBS now playing**: keeps a `nowplaying.txt` updated with the current song for an OBS text source. see [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - works with media keys and the lock screen
 
 ### keyboard

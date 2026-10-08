@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>moonlit</title>
   <meta name="description" content="a little private music player, just for you">
-  <meta name="theme-color" content="#0f0c1d">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23171327'/%3E%3Cpath d='M40 14a19 19 0 1 0 10 31A16 16 0 0 1 40 14z' fill='%23d9c8ff'/%3E%3C/svg%3E">
+  <meta name="theme-color" content="#170a14">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%232a0f22'/%3E%3Cpath d='M40 14a19 19 0 1 0 10 31A16 16 0 0 1 40 14z' fill='%23ff7eb6'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
-<body data-theme="moonlight">
+<body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" fill="currentColor"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.5" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.5" fill="currentColor"/></symbol>
@@ -30,6 +30,9 @@
     <symbol id="i-palette" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.8-.8 1.8-1.7 0-1.2-1-1.5-1-2.6 0-1 .8-1.7 1.8-1.7h2.2c2.1 0 3.7-1.6 3.7-3.7 0-4.2-3.8-7.3-8.5-7.3z"/><circle cx="7.8" cy="11.5" r="1.1" fill="currentColor"/><circle cx="10.5" cy="7.6" r="1.1" fill="currentColor"/><circle cx="15" cy="7.8" r="1.1" fill="currentColor"/></g></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-note" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5V6l10-2v11.5"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="15.5" r="2.5"/></g></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></g></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 2.5c.5 4.6 2.4 6.9 7.5 7.5-5.1.6-7 2.9-7.5 7.5-.5-4.6-2.4-6.9-7.5-7.5 5.1-.6 7-2.9 7.5-7.5z" fill="currentColor"/></symbol>
+    <symbol id="i-broadcast" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></g></symbol>
   </svg>
 
   <div class="sky" aria-hidden="true">
@@ -37,6 +40,7 @@
     <div class="blob b2"></div>
     <div class="blob b3"></div>
     <div class="stars"></div>
+    <div class="floaties" id="floaties"></div>
   </div>
   <div class="grain" aria-hidden="true"></div>
 
@@ -48,12 +52,10 @@
       </div>
       <button class="greeting" id="greeting" title="tell me your name">good evening</button>
       <div class="top-actions">
-        <div class="theme-picker">
-          <button class="icon-btn" id="themeBtn" aria-label="change theme" aria-expanded="false" aria-haspopup="true">
-            <svg><use href="#i-palette"/></svg>
-          </button>
-          <div class="theme-menu" id="themeMenu" role="menu" hidden></div>
-        </div>
+        <span class="obs-live" id="obsLive" hidden title="writing the song name for OBS"><svg><use href="#i-broadcast"/></svg>obs</span>
+        <button class="icon-btn" id="settingsBtn" aria-label="customize" aria-expanded="false" aria-controls="settings">
+          <svg><use href="#i-sliders"/></svg>
+        </button>
         <button class="icon-btn lib-toggle" id="libToggle" aria-label="open library">
           <svg><use href="#i-list"/></svg>
         </button>
@@ -62,13 +64,14 @@
 
     <main class="stage">
       <div class="deck" id="deck">
+        <div class="halo" aria-hidden="true"></div>
         <canvas id="viz" aria-hidden="true"></canvas>
         <div class="vinyl" id="vinyl">
           <div class="grooves"></div>
           <div class="sheen"></div>
           <div class="label" id="label">
             <img id="cover" alt="" hidden>
-            <svg class="label-icon" id="labelIcon"><use href="#i-note"/></svg>
+            <svg class="label-icon" id="labelIcon"><use href="#i-sparkle"/></svg>
           </div>
           <div class="spindle"></div>
         </div>
@@ -80,29 +83,32 @@
       </div>
 
       <div class="now">
+        <span class="now-pill" id="nowPill"><i></i><span id="nowState">ready when you are</span></span>
         <h1 id="title">nothing playing yet</h1>
         <p id="artist">add a few songs to begin</p>
       </div>
 
-      <div class="progress">
-        <span class="time" id="curTime">0:00</span>
-        <input type="range" id="seek" min="0" max="1000" value="0" step="1" aria-label="seek">
-        <span class="time" id="durTime">0:00</span>
-      </div>
+      <div class="console">
+        <div class="progress">
+          <span class="time" id="curTime">0:00</span>
+          <input type="range" id="seek" min="0" max="1000" value="0" step="1" aria-label="seek">
+          <span class="time" id="durTime">0:00</span>
+        </div>
 
-      <div class="controls">
-        <button class="icon-btn toggle" id="shuffleBtn" aria-label="shuffle" aria-pressed="false"><svg><use href="#i-shuffle"/></svg></button>
-        <button class="icon-btn big" id="prevBtn" aria-label="previous"><svg><use href="#i-prev"/></svg></button>
-        <button class="play" id="playBtn" aria-label="play"><svg><use href="#i-play" id="playIcon"/></svg></button>
-        <button class="icon-btn big" id="nextBtn" aria-label="next"><svg><use href="#i-next"/></svg></button>
-        <button class="icon-btn toggle" id="repeatBtn" aria-label="repeat: off" aria-pressed="false"><svg><use href="#i-repeat" id="repeatIcon"/></svg></button>
-      </div>
+        <div class="controls">
+          <button class="icon-btn toggle" id="shuffleBtn" aria-label="shuffle" aria-pressed="false"><svg><use href="#i-shuffle"/></svg></button>
+          <button class="icon-btn big" id="prevBtn" aria-label="previous"><svg><use href="#i-prev"/></svg></button>
+          <button class="play" id="playBtn" aria-label="play"><span class="play-ring" aria-hidden="true"></span><svg><use href="#i-play" id="playIcon"/></svg></button>
+          <button class="icon-btn big" id="nextBtn" aria-label="next"><svg><use href="#i-next"/></svg></button>
+          <button class="icon-btn toggle" id="repeatBtn" aria-label="repeat: off" aria-pressed="false"><svg><use href="#i-repeat" id="repeatIcon"/></svg></button>
+        </div>
 
-      <div class="extras">
-        <button class="icon-btn heart" id="favBtn" aria-label="love this song" aria-pressed="false"><svg><use href="#i-heart"/></svg></button>
-        <div class="volume">
-          <button class="icon-btn" id="muteBtn" aria-label="mute"><svg><use href="#i-volume" id="volIcon"/></svg></button>
-          <input type="range" id="volume" min="0" max="1" step="0.01" value="0.8" aria-label="volume">
+        <div class="extras">
+          <button class="icon-btn heart" id="favBtn" aria-label="love this song" aria-pressed="false"><svg><use href="#i-heart"/></svg></button>
+          <div class="volume">
+            <button class="icon-btn" id="muteBtn" aria-label="mute"><svg><use href="#i-volume" id="volIcon"/></svg></button>
+            <input type="range" id="volume" min="0" max="1" step="0.01" value="0.8" aria-label="volume">
+          </div>
         </div>
       </div>
     </main>
@@ -126,7 +132,7 @@
         </div>
       </div>
       <div class="empty" id="empty">
-        <div class="empty-art" aria-hidden="true"><svg><use href="#i-note"/></svg></div>
+        <div class="empty-art" aria-hidden="true"><svg><use href="#i-heart"/></svg></div>
         <p class="empty-title">your shelf is empty</p>
         <p class="empty-sub">drop audio files anywhere, or tap <b>add songs</b>.<br>they stay on this device. nobody else can see them.</p>
       </div>
@@ -134,11 +140,48 @@
       <p class="kbd-hint">space play · ← → seek · n / p skip · l love</p>
     </aside>
     <div class="scrim" id="scrim"></div>
+    <div class="watermark" id="watermark" hidden></div>
+  </div>
+
+  <div class="panel" id="settings" role="dialog" aria-label="customize" hidden>
+    <div class="panel-head">
+      <h3>make it yours</h3>
+      <button class="icon-btn" id="settingsClose" aria-label="close"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <section>
+      <p class="eyebrow">theme</p>
+      <div class="theme-grid" id="themeGrid" role="radiogroup" aria-label="theme"></div>
+    </section>
+    <section>
+      <p class="eyebrow">you</p>
+      <label class="field"><span>your name</span><input type="text" id="nameInput" maxlength="32" placeholder="for the greeting"></label>
+      <label class="field"><span>watermark</span><input type="text" id="wmInput" maxlength="40" placeholder="optional, e.g. @yourname"></label>
+    </section>
+    <section>
+      <p class="eyebrow">obs · now playing</p>
+      <p class="hint">keeps a <b>.txt</b> file updated with the current song, so an OBS text source can show it on stream. needs chrome or edge on a computer.</p>
+      <div class="obs-row">
+        <button class="pill" id="obsLink"><svg><use href="#i-broadcast"/></svg><span id="obsLinkText">link nowplaying.txt</span></button>
+        <span class="obs-status" id="obsStatus">not linked</span>
+      </div>
+      <label class="field"><span>format</span>
+        <select id="obsFormat">
+          <option value="{artist} - {title}">Artist - Title</option>
+          <option value="{title} - {artist}">Title - Artist</option>
+          <option value="{title}">Title only</option>
+          <option value="♪ {title} — {artist}">♪ Title — Artist</option>
+          <option value="now playing: {title} by {artist}">now playing: Title by Artist</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="obsPause"> clear the text while paused</label>
+      <label class="check"><input type="checkbox" id="obsPad"> add spacing at the end (for the OBS scroll filter)</label>
+      <button class="link-btn" id="obsUnlink" hidden>unlink file</button>
+    </section>
   </div>
 
   <div class="drop" id="drop" aria-hidden="true">
     <div class="drop-inner">
-      <svg><use href="#i-note"/></svg>
+      <svg><use href="#i-heart"/></svg>
       <p>let go to add to your library</p>
     </div>
   </div>

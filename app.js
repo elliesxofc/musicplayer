@@ -7,12 +7,12 @@
 const $ = (s, r = document) => r.querySelector(s);
 
 const THEMES = [
-  { id: 'moonlight', name: 'moonlight', swatch: 'linear-gradient(135deg,#1a1530,#c8b4ff)', color: '#0f0c1d' },
-  { id: 'peach', name: 'peach fuzz', swatch: 'linear-gradient(135deg,#ffe5d6,#e9876f)', color: '#fff3ea' },
-  { id: 'sakura', name: 'sakura', swatch: 'linear-gradient(135deg,#f8dde7,#e07aa2)', color: '#fdf0f4' },
-  { id: 'matcha', name: 'matcha', swatch: 'linear-gradient(135deg,#e3e8d2,#7d9a5f)', color: '#f1f2e6' },
-  { id: 'ocean', name: 'night swim', swatch: 'linear-gradient(135deg,#0d2a38,#7fe0d4)', color: '#071a24' },
-  { id: 'noir', name: 'noir', swatch: 'linear-gradient(135deg,#161617,#e8e3d8)', color: '#0b0b0c' },
+  { id: 'midnight-rose', name: 'midnight rose', swatch: 'linear-gradient(135deg,#2a0f22 30%,#ff7eb6)', color: '#170a14' },
+  { id: 'strawberry-milk', name: 'strawberry milk', swatch: 'linear-gradient(135deg,#ffdbe7 30%,#f0609e)', color: '#fff1f5' },
+  { id: 'cherry-noir', name: 'cherry noir', swatch: 'linear-gradient(135deg,#0a0709 35%,#ff2e7e)', color: '#0a0709' },
+  { id: 'bubblegum', name: 'bubblegum', swatch: 'linear-gradient(135deg,#ff5fa8,#8f7bff)', color: '#fde9ff' },
+  { id: 'sakura-dusk', name: 'sakura dusk', swatch: 'linear-gradient(135deg,#4a2440,#ffa3c4 60%,#ffd29a)', color: '#24142b' },
+  { id: 'rose-gold', name: 'rosé gold', swatch: 'linear-gradient(135deg,#f8ebe6,#d97a8a 55%,#c9a27a)', color: '#f8ebe6' },
 ];
 
 /* ───────────── tiny storage helpers ───────────── */
@@ -26,19 +26,23 @@ const DB = (() => {
   function open() {
     if (!dbp) {
       dbp = new Promise((resolve, reject) => {
-        const req = indexedDB.open('moonlit', 1);
-        req.onupgradeneeded = () => req.result.createObjectStore('tracks', { keyPath: 'id' });
+        const req = indexedDB.open('moonlit', 2);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('tracks')) db.createObjectStore('tracks', { keyPath: 'id' });
+          if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       });
     }
     return dbp;
   }
-  async function run(mode, fn) {
+  async function run(mode, fn, store = 'tracks') {
     const db = await open();
     return new Promise((resolve, reject) => {
-      const tx = db.transaction('tracks', mode);
-      const req = fn(tx.objectStore('tracks'));
+      const tx = db.transaction(store, mode);
+      const req = fn(tx.objectStore(store));
       tx.oncomplete = () => resolve(req ? req.result : undefined);
       tx.onerror = tx.onabort = () => reject(tx.error);
     });
@@ -47,6 +51,9 @@ const DB = (() => {
     all: () => run('readonly', s => s.getAll()),
     put: rec => run('readwrite', s => { s.put(rec); }),
     del: id => run('readwrite', s => { s.delete(id); }),
+    // small key/value store, used for the OBS file handle
+    getKV: key => run('readonly', s => s.get(key), 'kv'),
+    setKV: (key, val) => run('readwrite', s => { val === undefined ? s.delete(key) : s.put(val, key); }, 'kv'),
   };
 })();
 
@@ -184,7 +191,10 @@ const el = {
   fav: $('#favBtn'), vol: $('#volume'), mute: $('#muteBtn'), volIcon: $('#volIcon'),
   list: $('#tracks'), empty: $('#empty'), count: $('#libCount'), search: $('#search'),
   library: $('#library'), scrim: $('#scrim'), file: $('#fileInput'), drop: $('#drop'), toastEl: $('#toast'),
-  greeting: $('#greeting'), themeBtn: $('#themeBtn'), themeMenu: $('#themeMenu'),
+  greeting: $('#greeting'), settingsBtn: $('#settingsBtn'), settings: $('#settings'), themeGrid: $('#themeGrid'),
+  nameInput: $('#nameInput'), wmInput: $('#wmInput'), watermark: $('#watermark'), nowState: $('#nowState'),
+  obsLink: $('#obsLink'), obsLinkText: $('#obsLinkText'), obsStatus: $('#obsStatus'), obsFormat: $('#obsFormat'),
+  obsPause: $('#obsPause'), obsPad: $('#obsPad'), obsUnlink: $('#obsUnlink'), obsLive: $('#obsLive'),
 };
 
 const byId = id => state.tracks.find(t => t.id === id);
@@ -204,47 +214,85 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.toastEl.classList.remove('show'), 2600);
 }
 
-/* ───────────── theme + greeting ───────────── */
+/* ───────────── theme, greeting, watermark ───────────── */
 function applyTheme(id) {
   const t = THEMES.find(x => x.id === id) || THEMES[0];
   document.body.dataset.theme = t.id;
   $('meta[name="theme-color"]').content = t.color;
   prefs.set('theme', t.id);
-  el.themeMenu.querySelectorAll('.theme-opt').forEach(b => b.setAttribute('aria-checked', b.dataset.theme === t.id));
+  el.themeGrid.querySelectorAll('.theme-opt').forEach(b => b.setAttribute('aria-checked', String(b.dataset.theme === t.id)));
   viz.refreshColor();
 }
 
-function buildThemeMenu() {
-  el.themeMenu.innerHTML = '';
+function buildThemeGrid() {
+  el.themeGrid.innerHTML = '';
   for (const t of THEMES) {
     const b = document.createElement('button');
     b.className = 'theme-opt';
     b.dataset.theme = t.id;
-    b.setAttribute('role', 'menuitemradio');
+    b.setAttribute('role', 'radio');
     b.innerHTML = `<span class="swatch" style="background:${t.swatch}"></span>${t.name}`;
-    b.onclick = () => { applyTheme(t.id); closeThemeMenu(); };
-    el.themeMenu.append(b);
+    b.onclick = () => applyTheme(t.id);
+    el.themeGrid.append(b);
   }
 }
-function closeThemeMenu() { el.themeMenu.hidden = true; el.themeBtn.setAttribute('aria-expanded', 'false'); }
-el.themeBtn.onclick = e => {
-  e.stopPropagation();
-  const open = el.themeMenu.hidden;
-  el.themeMenu.hidden = !open;
-  el.themeBtn.setAttribute('aria-expanded', String(open));
-};
-document.addEventListener('click', e => { if (!el.themeMenu.hidden && !e.target.closest('.theme-picker')) closeThemeMenu(); });
+
+function setSettings(open) {
+  el.settings.hidden = !open;
+  el.settingsBtn.setAttribute('aria-expanded', String(open));
+}
+el.settingsBtn.onclick = e => { e.stopPropagation(); setSettings(el.settings.hidden); };
+$('#settingsClose').onclick = () => setSettings(false);
+document.addEventListener('click', e => {
+  if (!el.settings.hidden && !e.target.closest('#settings, #settingsBtn')) setSettings(false);
+});
 
 function updateGreeting() {
   const h = new Date().getHours();
   const part = h < 5 ? 'still up' : h < 12 ? 'good morning' : h < 17 ? 'good afternoon' : h < 22 ? 'good evening' : 'sweet dreams';
   const name = prefs.get('name', '');
-  el.greeting.textContent = name ? `${part}, ${name} ☾` : `${part} ☾`;
+  el.greeting.textContent = name ? `${part}, ${name} ♡` : `${part} ♡`;
 }
-el.greeting.onclick = () => {
-  const name = prompt('what should i call you?', prefs.get('name', ''));
-  if (name !== null) { prefs.set('name', name.trim().slice(0, 32)); updateGreeting(); }
-};
+el.greeting.onclick = () => { setSettings(true); el.nameInput.focus(); };
+el.nameInput.addEventListener('input', () => { prefs.set('name', el.nameInput.value.trim()); updateGreeting(); });
+
+function updateWatermark() {
+  const text = prefs.get('watermark', '');
+  el.watermark.textContent = text;
+  el.watermark.hidden = !text;
+}
+el.wmInput.addEventListener('input', () => { prefs.set('watermark', el.wmInput.value.trim()); updateWatermark(); });
+
+/* floating hearts + sparkles in the background */
+function buildFloaties() {
+  const box = $('#floaties');
+  const n = matchMedia('(max-width: 900px)').matches ? 8 : 14;
+  for (let i = 0; i < n; i++) {
+    const f = document.createElement('div');
+    const size = 8 + Math.random() * 14;
+    f.className = 'floaty';
+    f.style.cssText = `left:${Math.random() * 100}%;width:${size}px;height:${size}px;` +
+      `animation-duration:${18 + Math.random() * 22}s;animation-delay:${-Math.random() * 40}s;` +
+      `--dx:${(Math.random() - 0.5) * 120}px;--o:${0.15 + Math.random() * 0.3}`;
+    f.innerHTML = `<svg style="--heart-fill:currentColor"><use href="#i-${i % 3 ? 'sparkle' : 'heart'}"/></svg>`;
+    box.append(f);
+  }
+}
+
+function heartBurst(from) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const r = from.getBoundingClientRect();
+  for (let i = 0; i < 8; i++) {
+    const b = document.createElement('div');
+    const a = (i / 8) * Math.PI * 2;
+    b.className = 'burst';
+    b.style.cssText = `left:${r.left + r.width / 2 - 8}px;top:${r.top + r.height / 2 - 8}px;` +
+      `--bx:${Math.cos(a) * 46}px;--by:${Math.sin(a) * 46 - 10}px;--br:${(Math.random() - 0.5) * 90}deg`;
+    b.innerHTML = `<svg style="--heart-fill:currentColor"><use href="#i-${i % 2 ? 'sparkle' : 'heart'}"/></svg>`;
+    document.body.append(b);
+    setTimeout(() => b.remove(), 1000);
+  }
+}
 
 /* ───────────── visualizer ───────────── */
 const viz = (() => {
@@ -252,7 +300,7 @@ const viz = (() => {
   const g = canvas.getContext('2d');
   const BARS = 72;
   const levels = new Float32Array(BARS);
-  let ctx = null, analyser = null, freq = null, color = '#fff';
+  let ctx = null, analyser = null, freq = null, color = '#fff', color2 = '#fff';
 
   function ensureAudioGraph() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
@@ -276,7 +324,11 @@ const viz = (() => {
   }
   new ResizeObserver(resize).observe(canvas);
 
-  function refreshColor() { color = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#fff'; }
+  function refreshColor() {
+    const cs = getComputedStyle(document.body);
+    color = cs.getPropertyValue('--accent').trim() || '#fff';
+    color2 = cs.getPropertyValue('--accent2').trim() || color;
+  }
 
   function frame(t) {
     requestAnimationFrame(frame);
@@ -291,7 +343,12 @@ const viz = (() => {
     const maxLen = w * 0.13;
     g.lineCap = 'round';
     g.lineWidth = Math.max(2, w * 0.006);
-    g.strokeStyle = color;
+    const grad = g.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, color2);
+    g.strokeStyle = grad;
+    g.shadowColor = color;
+    g.shadowBlur = playing ? w * 0.012 : 0;
     const half = BARS / 2;
     for (let i = 0; i < BARS; i++) {
       // mirror the spectrum so the ring is symmetrical
@@ -446,6 +503,7 @@ async function toggleFav(id = state.currentId) {
   t.fav = !t.fav;
   if (state.persistent) DB.put(t).catch(() => {});
   if (id === state.currentId) syncFav(true);
+  if (t.fav) heartBurst(id === state.currentId ? el.fav : el.list.querySelector(`[data-id="${id}"] .t-fav`) || el.fav);
   renderList();
 }
 function syncFav(pulse) {
@@ -461,6 +519,8 @@ function clearNowPlaying() {
   audio.removeAttribute('src');
   audio.load();
   el.title.textContent = 'nothing playing yet';
+  el.nowState.textContent = 'ready when you are';
+  queueObsWrite();
   el.artist.textContent = 'add a few songs to begin';
   el.cover.hidden = true; el.labelIcon.hidden = false;
   document.documentElement.style.removeProperty('--glow');
@@ -480,6 +540,8 @@ async function loadTrack(id, startAt = 0) {
   prefs.set('last', { id, time: startAt });
 
   el.title.textContent = t.title;
+  el.title.title = t.title;
+  queueObsWrite();
   el.artist.textContent = [t.artist, t.album].filter(Boolean).join(' — ') || 'unknown artist';
   document.title = `${t.title} · moonlit`;
   const url = coverUrl(t);
@@ -516,6 +578,7 @@ function play() {
     return;
   }
   viz.ensureAudioGraph();
+  maybeReconnectObs();
   audio.play().catch(err => { if (err.name !== 'AbortError') toast("couldn't play that one — the format may not be supported"); });
 }
 function togglePlay() { audio.paused ? play() : audio.pause(); }
@@ -558,8 +621,8 @@ function prev() {
   if (id) { loadTrack(id).then(play); }
 }
 
-audio.addEventListener('play', () => { document.body.classList.add('playing'); syncPlayBtn(); });
-audio.addEventListener('pause', () => { document.body.classList.remove('playing'); syncPlayBtn(); saveProgress(true); });
+audio.addEventListener('play', () => { document.body.classList.add('playing'); syncPlayBtn(); queueObsWrite(); });
+audio.addEventListener('pause', () => { document.body.classList.remove('playing'); syncPlayBtn(); saveProgress(true); queueObsWrite(); });
 audio.addEventListener('ended', () => {
   if (state.repeat === 'one') { audio.currentTime = 0; play(); return; }
   next(true);
@@ -570,6 +633,7 @@ function syncPlayBtn() {
   const playing = !audio.paused;
   el.playIcon.setAttribute('href', playing ? '#i-pause' : '#i-play');
   el.play.setAttribute('aria-label', playing ? 'pause' : 'play');
+  el.nowState.textContent = playing ? 'now playing' : state.currentId ? 'paused' : 'ready when you are';
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
 }
 
@@ -666,7 +730,7 @@ document.addEventListener('keydown', e => {
   else if (k === 's') el.shuffle.click();
   else if (k === 'r') el.repeat.click();
   else if (k === 'm') el.mute.click();
-  else if (k === 'escape') { closeThemeMenu(); setLibrary(false); }
+  else if (k === 'escape') { setSettings(false); setLibrary(false); }
 });
 
 /* ───────────── files in ───────────── */
@@ -696,11 +760,121 @@ el.scrim.onclick = () => setLibrary(false);
 
 window.addEventListener('pagehide', () => saveProgress(true));
 
+/* ───────────── OBS: now playing → .txt file ─────────────
+   OBS can't read from a web page, but its Text source can "read from file".
+   With the File System Access API (Chrome / Edge) we keep one .txt file you
+   choose up to date with the current song. */
+const obs = { handle: null, granted: false, asked: false };
+let obsTimer = null, obsChain = Promise.resolve();
+
+function obsText() {
+  const t = byId(state.currentId);
+  if (!t || (prefs.get('obsPause', false) && audio.paused)) return '';
+  let s = prefs.get('obsFormat', '{artist} - {title}');
+  if (!t.artist) s = s.replace(/\s*[-—]\s*\{artist\}|\{artist\}\s*[-—]\s*|\s+by\s+\{artist\}/g, '');
+  s = s.replace('{title}', () => t.title).replace('{artist}', () => t.artist || '');
+  return s + (prefs.get('obsPad', false) ? '        ' : '');
+}
+
+function queueObsWrite() {
+  if (!obs.handle || !obs.granted) return;
+  clearTimeout(obsTimer);
+  obsTimer = setTimeout(() => { obsChain = obsChain.then(writeObs); }, 150);
+}
+
+async function writeObs() {
+  if (!obs.handle) return;
+  try {
+    if ((await obs.handle.queryPermission({ mode: 'readwrite' })) !== 'granted') { obs.granted = false; return; }
+    const w = await obs.handle.createWritable();
+    await w.write(obsText());
+    await w.close();
+  } catch {
+    obs.granted = false;
+  } finally {
+    syncObsUi();
+  }
+}
+
+async function linkObs() {
+  if (obs.handle && !obs.granted) {
+    try { obs.granted = (await obs.handle.requestPermission({ mode: 'readwrite' })) === 'granted'; } catch { /* dismissed */ }
+    syncObsUi();
+    if (obs.granted) { queueObsWrite(); toast('obs file reconnected ♡'); }
+    return;
+  }
+  if (!window.showSaveFilePicker) { toast('the OBS link needs chrome or edge on a computer'); return; }
+  try {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: 'nowplaying.txt',
+      types: [{ description: 'Text file', accept: { 'text/plain': ['.txt'] } }],
+    });
+    obs.handle = handle;
+    obs.granted = true;
+    DB.setKV('obsHandle', handle).catch(() => {});
+    syncObsUi();
+    queueObsWrite();
+    toast(`linked! now point OBS at ${handle.name}`);
+  } catch (e) {
+    if (e.name !== 'AbortError') toast("couldn't link that file");
+  }
+}
+
+function unlinkObs() {
+  obs.handle = null;
+  obs.granted = false;
+  DB.setKV('obsHandle', undefined).catch(() => {});
+  syncObsUi();
+}
+
+// Browsers forget file permission between visits; ask again on your first play.
+function maybeReconnectObs() {
+  if (!obs.handle || obs.granted || obs.asked || !navigator.userActivation?.isActive) return;
+  obs.asked = true;
+  obs.handle.requestPermission({ mode: 'readwrite' })
+    .then(p => { obs.granted = p === 'granted'; syncObsUi(); queueObsWrite(); })
+    .catch(() => {});
+}
+
+function syncObsUi() {
+  const linked = !!obs.handle;
+  el.obsStatus.textContent = !linked ? 'not linked'
+    : obs.granted ? `writing to ${obs.handle.name}` : `${obs.handle.name} · tap reconnect`;
+  el.obsStatus.classList.toggle('ok', linked && obs.granted);
+  el.obsLinkText.textContent = !linked ? 'link nowplaying.txt' : obs.granted ? 'pick another file' : 'reconnect';
+  el.obsUnlink.hidden = !linked;
+  el.obsLive.hidden = !(linked && obs.granted);
+}
+
+el.obsLink.onclick = linkObs;
+el.obsUnlink.onclick = unlinkObs;
+el.obsFormat.onchange = () => { prefs.set('obsFormat', el.obsFormat.value); queueObsWrite(); };
+el.obsPause.onchange = () => { prefs.set('obsPause', el.obsPause.checked); queueObsWrite(); };
+el.obsPad.onchange = () => { prefs.set('obsPad', el.obsPad.checked); queueObsWrite(); };
+
+async function restoreObs() {
+  el.obsFormat.value = prefs.get('obsFormat', '{artist} - {title}');
+  el.obsPause.checked = prefs.get('obsPause', false);
+  el.obsPad.checked = prefs.get('obsPad', false);
+  try {
+    const handle = await DB.getKV('obsHandle');
+    if (handle) {
+      obs.handle = handle;
+      obs.granted = (await handle.queryPermission({ mode: 'readwrite' })) === 'granted';
+    }
+  } catch { /* no saved file */ }
+  syncObsUi();
+}
+
 /* ───────────── boot ───────────── */
 (async function init() {
-  buildThemeMenu();
-  applyTheme(prefs.get('theme', 'moonlight'));
+  buildThemeGrid();
+  buildFloaties();
+  applyTheme(prefs.get('theme', 'midnight-rose'));
+  el.nameInput.value = prefs.get('name', '');
+  el.wmInput.value = prefs.get('watermark', '');
   updateGreeting();
+  updateWatermark();
   setInterval(updateGreeting, 60_000);
   setVolume(prefs.get('volume', 0.8), false);
   syncModes();
@@ -717,6 +891,7 @@ window.addEventListener('pagehide', () => saveProgress(true));
     state.persistent = false;
   }
   renderList(true);
+  await restoreObs();
 
   const last = prefs.get('last', null);
   if (last && byId(last.id)) loadTrack(last.id, last.time || 0);

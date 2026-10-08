@@ -1,0 +1,66 @@
+moonlit → OBS Studio: show the song you're playing on stream
+=============================================================
+
+how it works
+------------
+moonlit keeps a little text file (nowplaying.txt) updated with the current
+song. OBS reads that file and shows it as text in your scene. it updates by
+itself every time the song changes.
+
+you need: Chrome or Edge on a computer (Safari / Firefox / phones can't
+write files, so the OBS link only works in Chrome or Edge).
+
+
+1. link the text file in moonlit
+---------------------------------
+  1. open moonlit in Chrome or Edge
+  2. click the sliders button (top right) → "obs · now playing"
+  3. click "link nowplaying.txt"
+  4. save it somewhere easy to find, e.g.  Documents/moonlit/nowplaying.txt
+  5. a pink "OBS" badge appears in the top bar while it's linked
+
+  pick a format there too:
+     Artist - Title   (default)
+     Title - Artist
+     Title only
+     ♪ Title — Artist
+     now playing: Title by Artist
+
+  optional:
+     "clear the text while paused"  → the text disappears when you pause
+     "add spacing at the end"       → use this if you add a scroll filter (step 3)
+
+
+2. add it in OBS Studio
+-----------------------
+  1. in your scene, Sources → +  → "Text (GDI+)"
+     (on Mac / Linux it's "Text (FreeType 2)")
+  2. name it "now playing" → OK
+  3. tick "Read from file"
+  4. Browse → pick the same nowplaying.txt from step 1
+  5. choose a font / colour (pink, obviously ♡) → OK
+
+  OBS checks the file every second or so, so the song name follows along.
+
+
+3. (optional) make it scroll like a ticker
+------------------------------------------
+  right-click the text source → Filters → +  → "Scroll"
+  set Horizontal Speed to ~30, and turn on "add spacing at the end" in moonlit.
+
+
+every time you come back
+------------------------
+browsers forget file permission when you close them. the first time you press
+play, Chrome/Edge asks "let moonlit edit nowplaying.txt?" → click Allow
+(or "Allow on every visit", if it's offered, so it stops asking).
+if the badge isn't showing, open the sliders panel and click "reconnect".
+
+
+troubleshooting
+---------------
+  - text not changing?  check the OBS badge is showing in moonlit, and that OBS
+    points at the exact same file.
+  - weird characters (Ã© etc.)?  the file is saved as UTF-8, so pick a font in
+    OBS that supports accents and symbols. Segoe UI and Arial both work.
+  - want it gone between songs?  turn on "clear the text while paused".

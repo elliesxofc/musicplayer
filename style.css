@@ -471,6 +471,7 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .check input { width: 17px; height: 17px; accent-color: var(--accent); margin: 0; }
 .link-btn { font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 .link-btn:hover { color: var(--ink); }
+.version { margin: 14px 0 0; font-size: 11.5px; color: var(--muted); opacity: .7; }
 
 /* ───────────── overlays ───────────── */
 .drop {

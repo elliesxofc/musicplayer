@@ -411,6 +411,7 @@ function renderList(animate = false) {
   el.empty.hidden = total > 0;
   el.list.hidden = total === 0;
   el.list.innerHTML = '';
+  renderToken++;
   el.list.classList.toggle('intro', animate);
   if (total && !items.length) {
     const li = document.createElement('li');
@@ -420,27 +421,37 @@ function renderList(animate = false) {
     el.list.append(li);
     return;
   }
-  const frag = document.createDocumentFragment();
-  items.forEach((t, i) => {
-    const li = document.createElement('li');
-    li.className = 'track' + (t.id === state.currentId ? ' current' : '');
-    li.dataset.id = t.id;
-    li.style.animationDelay = Math.min(i * 18, 300) + 'ms';
-    const url = coverUrl(t);
-    li.innerHTML = `
-      <div class="thumb">${url ? `<img src="${url}" alt="" loading="lazy">` : '<svg><use href="#i-note"/></svg>'}
-        <div class="bars"><i></i><i></i><i></i></div></div>
-      <div class="t-text"><div class="t-title"></div><div class="t-artist"></div></div>
-      <span class="t-dur">${t.duration ? fmt(t.duration) : ''}</span>
-      <div class="t-actions">
-        <button class="icon-btn t-fav" aria-label="love" aria-pressed="${!!t.fav}"><svg><use href="#i-heart"/></svg></button>
-        <button class="icon-btn t-del" aria-label="remove from library"><svg><use href="#i-x"/></svg></button>
-      </div>`;
-    li.querySelector('.t-title').textContent = t.title;
-    li.querySelector('.t-artist').textContent = [t.artist, t.album].filter(Boolean).join(' · ') || 'unknown artist';
-    frag.append(li);
-  });
-  el.list.append(frag);
+  // Draw the first screenful right away and the rest a chunk per frame,
+  // so even a 1,000+ song list never freezes the app.
+  const token = ++renderToken;
+  const drawRows = (from, to) => {
+    const frag = document.createDocumentFragment();
+    for (let i = from; i < Math.min(to, items.length); i++) frag.append(trackRow(items[i], i));
+    el.list.append(frag);
+    if (to < items.length) requestAnimationFrame(() => { if (token === renderToken) drawRows(to, to + 150); });
+  };
+  drawRows(0, 60);
+}
+
+let renderToken = 0;
+function trackRow(t, i) {
+  const li = document.createElement('li');
+  li.className = 'track' + (t.id === state.currentId ? ' current' : '');
+  li.dataset.id = t.id;
+  li.style.animationDelay = Math.min(i * 18, 300) + 'ms';
+  const url = coverUrl(t);
+  li.innerHTML = `
+    <div class="thumb">${url ? `<img src="${url}" alt="" loading="lazy">` : '<svg><use href="#i-note"/></svg>'}
+      <div class="bars"><i></i><i></i><i></i></div></div>
+    <div class="t-text"><div class="t-title"></div><div class="t-artist"></div></div>
+    <span class="t-dur">${t.duration ? fmt(t.duration) : ''}</span>
+    <div class="t-actions">
+      <button class="icon-btn t-fav" aria-label="love" aria-pressed="${!!t.fav}"><svg><use href="#i-heart"/></svg></button>
+      <button class="icon-btn t-del" aria-label="remove from library"><svg><use href="#i-x"/></svg></button>
+    </div>`;
+  li.querySelector('.t-title').textContent = t.title;
+  li.querySelector('.t-artist').textContent = [t.artist, t.album].filter(Boolean).join(' · ') || 'unknown artist';
+  return li;
 }
 
 el.list.addEventListener('click', e => {

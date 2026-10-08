@@ -1117,7 +1117,19 @@ $('#installBtn').onclick = async () => {
 };
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  const hadWorker = !!navigator.serviceWorker.controller;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      // look for updates whenever the app comes back to the front
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+    }).catch(() => {});
+  });
+  // A new version took over: reload into it, but never cut off music that's playing.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadWorker) return;
+    if (audio.paused && !importing) location.reload();
+    else toast('moonlit was updated ✦ it switches over next time you open it', 5000);
+  });
 }
 
 /* ───────────── boot ───────────── */
@@ -1138,8 +1150,8 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
       if (ok === false) toast("your chosen sound output isn't connected, so music is on the default device", 6000);
     });
   }
-  // OBS lives on a computer; hide that section on phones that can't write files anyway.
-  el.obsLink.closest('section').hidden = !window.showSaveFilePicker && matchMedia('(hover: none)').matches;
+  // OBS lives on a computer: hide that section on phones and tablets (and browsers that can't write files).
+  el.obsLink.closest('section').hidden = !window.showSaveFilePicker || matchMedia('(hover: none) and (pointer: coarse)').matches;
   setInterval(updateGreeting, 60_000);
   setVolume(prefs.get('volume', 0.8), false);
   syncModes();

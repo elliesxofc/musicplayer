@@ -1,9 +1,9 @@
 /* moonlit service worker: makes the app installable and lets it open offline.
    Your songs aren't cached here (they already live in the browser's own storage).
    Only the app's own files and fonts are. */
-const CACHE = 'moonlit-v9';
+const CACHE = 'moonlit-v10';
 const SHELL = [
-  './', 'index.html', 'style.css?v=9', 'app.js?v=9', 'manifest.webmanifest?v=9',
+  './', 'index.html', 'style.css?v=10', 'app.js?v=10', 'manifest.webmanifest?v=10',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png',
 ];
 
@@ -34,10 +34,14 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // App files: try the network first so updates show up, fall back to cache offline.
+  // App files: ask the server for the latest copy (skipping the browser's own
+  // short-term cache, so updates show up right away), fall back to cache offline.
   if (url.origin === self.location.origin) {
+    const fresh = req.mode === 'navigate'
+      ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
+      : fetch(req, { cache: 'no-cache' });
     e.respondWith(
-      fetch(req)
+      fresh
         .then(r => {
           if (r.ok) { const copy = r.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
           return r;

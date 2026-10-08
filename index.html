@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=11">
+  <link rel="manifest" href="manifest.webmanifest?v=12">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -202,12 +202,18 @@
       <button class="pill" id="outputScan"><svg><use href="#i-search"/></svg>find my devices</button>
       <p class="hint small" id="outputNote">chrome asks for microphone permission only so it can show device names. moonlit never records anything.</p>
     </section>
+    <section id="desktopSection" hidden>
+      <p class="eyebrow">desktop app</p>
+      <label class="check"><input type="checkbox" id="openAtLogin"> open moonlit when the PC starts</label>
+      <label class="check"><input type="checkbox" id="autoResume"> start playing by itself when it opens</label>
+      <p class="hint small">turn both on for an always-on stream PC: after a restart the music comes back without you touching anything.</p>
+    </section>
     <section id="appSection">
       <p class="eyebrow">app</p>
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v11</p>
+      <p class="version">moonlit v12</p>
     </section>
   </div>
 
@@ -220,6 +226,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

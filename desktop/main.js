@@ -1,0 +1,165 @@
+'use strict';
+
+/* moonlit desktop: the same player as the website, as a real app.
+   It serves the web files from inside the app (no internet needed), and adds a
+   few things a browser can't do: write the OBS now-playing file without asking
+   for permission every time, never get put to sleep, and start with the PC. */
+
+const { app, BrowserWindow, protocol, net, session, ipcMain, dialog, shell, Menu } = require('electron');
+const path = require('node:path');
+const fs = require('node:fs');
+const { pathToFileURL } = require('node:url');
+
+const ROOT = path.join(__dirname, '..');
+const ORIGIN = 'moonlit://app';
+// Only the player's own files are served to the window.
+const SERVED = new Set(['index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'sw.js']);
+const SERVED_DIRS = ['icons'];
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'moonlit', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, codeCache: true } },
+]);
+
+/* ───────────── small settings file in the app's data folder ───────────── */
+const configPath = () => path.join(app.getPath('userData'), 'desktop.json');
+function readConfig() {
+  try { return JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { return {}; }
+}
+function writeConfig(patch) {
+  const next = { ...readConfig(), ...patch };
+  try { fs.writeFileSync(configPath(), JSON.stringify(next, null, 2)); } catch { /* read-only disk */ }
+  return next;
+}
+
+/* ───────────── one window, one player ───────────── */
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  let win = null;
+
+  app.on('second-instance', () => {
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+
+  function createWindow() {
+    const saved = readConfig().window || {};
+    win = new BrowserWindow({
+      width: saved.width || 1280,
+      height: saved.height || 800,
+      x: saved.x,
+      y: saved.y,
+      minWidth: 360,
+      minHeight: 560,
+      title: 'moonlit',
+      backgroundColor: '#170a14',
+      icon: path.join(ROOT, 'icons', 'icon-512.png'),
+      autoHideMenuBar: true,
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        sandbox: true,
+        // keep playing at full speed when minimized or covered by OBS
+        backgroundThrottling: false,
+        autoplayPolicy: 'no-user-gesture-required',
+      },
+    });
+    if (saved.maximized) win.maximize();
+    win.once('ready-to-show', () => win.show());
+
+    const remember = () => {
+      if (!win || win.isMinimized()) return;
+      writeConfig({ window: { ...win.getNormalBounds(), maximized: win.isMaximized() } });
+    };
+    win.on('resize', remember);
+    win.on('move', remember);
+    win.on('close', remember);
+    win.on('closed', () => { win = null; });
+
+    // links (e.g. the VB-CABLE site) open in your normal browser
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:/.test(url)) shell.openExternal(url);
+      return { action: 'deny' };
+    });
+    win.webContents.on('will-navigate', (e, url) => {
+      if (!url.startsWith(ORIGIN)) { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); }
+    });
+
+    win.loadURL(`${ORIGIN}/index.html`);
+  }
+
+  app.whenReady().then(() => {
+    Menu.setApplicationMenu(null);
+
+    protocol.handle('moonlit', req => {
+      const { pathname } = new URL(req.url);
+      const rel = decodeURIComponent(pathname).replace(/^\/+/, '') || 'index.html';
+      const top = rel.split('/')[0];
+      const file = path.normalize(path.join(ROOT, rel));
+      const inside = file.startsWith(ROOT + path.sep);
+      if (!inside || !(SERVED.has(rel) || SERVED_DIRS.includes(top))) {
+        return new Response('not found', { status: 404 });
+      }
+      return net.fetch(pathToFileURL(file).toString());
+    });
+
+    // microphone permission is only used to read sound-output device names
+    // (for the virtual cable picker); nothing is ever recorded
+    const allowed = new Set(['media', 'speaker-selection', 'fileSystem', 'clipboard-sanitized-write']);
+    session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+      const videoAsked = (details.mediaTypes || []).includes('video');
+      callback(allowed.has(permission) && !videoAsked);
+    });
+    session.defaultSession.setPermissionCheckHandler((wc, permission) => allowed.has(permission));
+
+    createWindow();
+    app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
+  });
+
+  app.on('window-all-closed', () => app.quit());
+}
+
+/* ───────────── things the page can ask the app to do ───────────── */
+
+// OBS now-playing file: picked once, remembered, written directly.
+ipcMain.handle('obs:choose', async () => {
+  const current = readConfig().nowPlayingPath;
+  const res = await dialog.showSaveDialog({
+    title: 'Where should moonlit save the song name for OBS?',
+    defaultPath: current || path.join(app.getPath('documents'), 'nowplaying.txt'),
+    filters: [{ name: 'Text file', extensions: ['txt'] }],
+  });
+  if (res.canceled || !res.filePath) return null;
+  writeConfig({ nowPlayingPath: res.filePath });
+  return { path: res.filePath, name: path.basename(res.filePath) };
+});
+
+ipcMain.handle('obs:get', () => {
+  const p = readConfig().nowPlayingPath;
+  return p ? { path: p, name: path.basename(p) } : null;
+});
+
+ipcMain.handle('obs:unlink', () => { writeConfig({ nowPlayingPath: null }); return true; });
+
+ipcMain.handle('obs:write', async (_e, text) => {
+  const p = readConfig().nowPlayingPath;
+  if (!p || typeof text !== 'string') return false;
+  try {
+    await fs.promises.writeFile(p, text.slice(0, 2000), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+// Start with Windows / macOS login.
+ipcMain.handle('startup:get', () => app.getLoginItemSettings().openAtLogin);
+ipcMain.handle('startup:set', (_e, on) => {
+  app.setLoginItemSettings({ openAtLogin: !!on });
+  return app.getLoginItemSettings().openAtLogin;
+});
+
+ipcMain.handle('app:version', () => app.getVersion());

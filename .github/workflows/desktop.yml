@@ -1,0 +1,38 @@
+# Builds the moonlit desktop app for Windows.
+# Run it from the Actions tab ("Run workflow"), or push a tag like desktop-v1.0.0
+# to also publish the installer as a GitHub Release.
+name: desktop app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --win --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moonlit-windows
+          path: dist/*.exe
+          if-no-files-found: error
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/*.exe \
+            --title "moonlit desktop ${{ github.ref_name }}" \
+            --notes "moonlit-setup installs moonlit like a normal program. moonlit-portable runs without installing."

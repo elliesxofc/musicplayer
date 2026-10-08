@@ -42,6 +42,33 @@ drag audio files onto the page or tap **add songs**.
 - **OBS now playing**: keeps a `nowplaying.txt` updated with the current song for an OBS text source. see [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - works with media keys and the lock screen
 
+## desktop app (Windows / Mac / Linux)
+
+the same player as a real program, built with Electron. made for an always-on
+stream PC: it never gets put to sleep, writes the OBS song file without asking
+for permission every time, and can start with the PC and resume playing by itself
+(sliders panel → **desktop app**).
+
+**easiest: download it.** open the repo's **Actions** tab → **desktop app** →
+the latest run → download **moonlit-windows** (unzip it):
+
+- `moonlit-setup-….exe` installs it like a normal program
+- `moonlit-portable-….exe` runs without installing
+
+Windows may say "Windows protected your PC" because the app isn't signed:
+click **More info → Run anyway**.
+
+**or run it from the source code** (needs [Node.js](https://nodejs.org) LTS):
+
+```
+npm install
+npm start          # opens moonlit
+npm run dist:win   # builds the Windows installer into dist/ (run this on Windows)
+```
+
+the desktop app keeps its own library, separate from the website and the phone app,
+so add your songs inside it.
+
 ### keyboard
 
 | key | does |

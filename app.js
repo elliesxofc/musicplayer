@@ -5,6 +5,8 @@
    settings in localStorage. Nothing is ever uploaded anywhere. */
 
 const $ = (s, r = document) => r.querySelector(s);
+// set when running as the desktop app (Electron); see desktop/preload.js
+const desktop = window.moonlitDesktop || null;
 
 const THEMES = [
   { id: 'midnight-rose', name: 'midnight rose', swatch: 'linear-gradient(135deg,#2a0f22 30%,#ff7eb6)', color: '#170a14' },
@@ -969,6 +971,11 @@ function queueObsWrite() {
 
 async function writeObs() {
   if (!obs.handle) return;
+  if (desktop) {
+    obs.granted = await desktop.writeNowPlaying(obsText()).catch(() => false);
+    syncObsUi();
+    return;
+  }
   try {
     if ((await obs.handle.queryPermission({ mode: 'readwrite' })) !== 'granted') { obs.granted = false; return; }
     const w = await obs.handle.createWritable();
@@ -982,6 +989,16 @@ async function writeObs() {
 }
 
 async function linkObs() {
+  if (desktop) {
+    const file = await desktop.chooseNowPlayingFile().catch(() => null);
+    if (!file) return;
+    obs.handle = file;
+    obs.granted = true;
+    syncObsUi();
+    queueObsWrite();
+    toast(`linked! now point OBS at ${file.name}`);
+    return;
+  }
   if (obs.handle && !obs.granted) {
     try { obs.granted = (await obs.handle.requestPermission({ mode: 'readwrite' })) === 'granted'; } catch { /* dismissed */ }
     syncObsUi();
@@ -1006,6 +1023,7 @@ async function linkObs() {
 }
 
 function unlinkObs() {
+  if (desktop) desktop.unlinkNowPlaying().catch(() => {});
   obs.handle = null;
   obs.granted = false;
   DB.setKV('obsHandle', undefined).catch(() => {});
@@ -1014,7 +1032,7 @@ function unlinkObs() {
 
 // Browsers forget file permission between visits; ask again on your first play.
 function maybeReconnectObs() {
-  if (!obs.handle || obs.granted || obs.asked || !navigator.userActivation?.isActive) return;
+  if (desktop || !obs.handle || obs.granted || obs.asked || !navigator.userActivation?.isActive) return;
   obs.asked = true;
   obs.handle.requestPermission({ mode: 'readwrite' })
     .then(p => { obs.granted = p === 'granted'; syncObsUi(); queueObsWrite(); })
@@ -1024,9 +1042,10 @@ function maybeReconnectObs() {
 function syncObsUi() {
   const linked = !!obs.handle;
   el.obsStatus.textContent = !linked ? 'not linked'
-    : obs.granted ? `writing to ${obs.handle.name}` : `${obs.handle.name} · tap reconnect`;
+    : obs.granted ? `writing to ${obs.handle.name}`
+    : desktop ? `can't write to ${obs.handle.name}, try picking it again` : `${obs.handle.name} · tap reconnect`;
   el.obsStatus.classList.toggle('ok', linked && obs.granted);
-  el.obsLinkText.textContent = !linked ? 'link nowplaying.txt' : obs.granted ? 'pick another file' : 'reconnect';
+  el.obsLinkText.textContent = !linked ? 'link nowplaying.txt' : obs.granted || desktop ? 'pick another file' : 'reconnect';
   el.obsUnlink.hidden = !linked;
   el.obsLive.hidden = !(linked && obs.granted);
 }
@@ -1041,6 +1060,12 @@ async function restoreObs() {
   el.obsFormat.value = prefs.get('obsFormat', '{artist} - {title}');
   el.obsPause.checked = prefs.get('obsPause', false);
   el.obsPad.checked = prefs.get('obsPad', false);
+  if (desktop) {
+    const file = await desktop.getNowPlayingFile().catch(() => null);
+    if (file) { obs.handle = file; obs.granted = true; queueObsWrite(); }
+    syncObsUi();
+    return;
+  }
   try {
     const handle = await DB.getKV('obsHandle');
     if (handle) {
@@ -1121,6 +1146,21 @@ if (sinkSupported && navigator.mediaDevices) {
   navigator.mediaDevices.addEventListener?.('devicechange', () => listOutputs());
 }
 
+/* ───────────── desktop app extras ───────────── */
+async function setupDesktop() {
+  $('#desktopSection').hidden = false;
+  const login = $('#openAtLogin'), resume = $('#autoResume');
+  login.checked = await desktop.getOpenAtLogin().catch(() => false);
+  resume.checked = prefs.get('autoResume', false);
+  login.onchange = async () => {
+    login.checked = await desktop.setOpenAtLogin(login.checked).catch(() => false);
+    toast(login.checked ? 'moonlit will open when your PC starts' : "moonlit won't open by itself any more");
+  };
+  resume.onchange = () => prefs.set('autoResume', resume.checked);
+  const v = $('.version');
+  v.textContent += ` · desktop ${await desktop.version().catch(() => '')}`.trimEnd();
+}
+
 /* ───────────── install as an app ───────────── */
 let installPrompt = null;
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -1128,6 +1168,11 @@ const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platfo
 
 function syncInstallUi() {
   const btn = $('#installBtn'), hint = $('#appHint');
+  if (desktop) {
+    hint.textContent = "you're using the desktop app ♡";
+    btn.hidden = true;
+    return;
+  }
   if (isStandalone()) {
     hint.textContent = "you're using the app version ♡";
     btn.hidden = true;
@@ -1183,7 +1228,12 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     });
   }
   // OBS lives on a computer: hide that section on phones and tablets (and browsers that can't write files).
-  el.obsLink.closest('section').hidden = !window.showSaveFilePicker || matchMedia('(hover: none) and (pointer: coarse)').matches;
+  const obsSection = el.obsLink.closest('section');
+  obsSection.hidden = !desktop && (!window.showSaveFilePicker || matchMedia('(hover: none) and (pointer: coarse)').matches);
+  if (desktop) {
+    obsSection.querySelector('.hint').innerHTML = 'keeps a <b>.txt</b> file updated with the current song, so an OBS text source can show it on stream.';
+    setupDesktop();
+  }
   setInterval(updateGreeting, 60_000);
   setVolume(prefs.get('volume', 0.8), false);
   syncModes();
@@ -1205,7 +1255,9 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   await restoreObs();
 
   const last = prefs.get('last', null);
-  if (last && byId(last.id)) loadTrack(last.id, last.time || 0);
-  else if (state.tracks.length) loadTrack(state.tracks[0].id);
+  const first = last && byId(last.id) ? loadTrack(last.id, last.time || 0)
+    : state.tracks.length ? loadTrack(state.tracks[0].id) : null;
   updateTime();
+  // desktop app on an always-on PC: carry on playing after a restart
+  if (desktop && first && prefs.get('autoResume', false)) first.then(play);
 })();

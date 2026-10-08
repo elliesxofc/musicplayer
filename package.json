@@ -1,0 +1,74 @@
+{
+  "name": "moonlit",
+  "productName": "moonlit",
+  "version": "1.0.0",
+  "description": "a little private music player, just for you",
+  "author": "elliesxofc",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "desktop/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "io.github.elliesxofc.moonlit",
+    "productName": "moonlit",
+    "copyright": "made for elliesxofc",
+    "files": [
+      "index.html",
+      "style.css",
+      "app.js",
+      "sw.js",
+      "manifest.webmanifest",
+      "icons/**",
+      "desktop/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icons/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "moonlit",
+      "artifactName": "moonlit-setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "moonlit-portable-${version}.${ext}"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.music",
+      "icon": "icons/icon-512.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Audio",
+      "icon": "icons/icon-512.png"
+    }
+  }
+}

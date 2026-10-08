@@ -555,6 +555,7 @@ body.lite .moon, body.lite .heart[aria-pressed="true"] { filter: none; }
 body.super *, body.super *::before, body.super *::after { animation: none !important; transition: none !important; }
 body.super .now h1 { background: none; color: var(--ink); }
 body.super .play { box-shadow: none; }
+body.super .deck { display: none; }  /* the record is put away in super lite */
 
 @media (prefers-reduced-motion: reduce) {
   .blob, .stars, .empty-art, .floaty, .halo, .play-ring { animation: none !important; }

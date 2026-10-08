@@ -292,20 +292,52 @@ el.wmInput.addEventListener('input', () => { prefs.set('watermark', el.wmInput.v
 const PERF = {
   full: { hint: 'every effect on: the visualizer, floating hearts and glow.', toast: 'all the pretty effects are back ✦' },
   lite: { hint: 'no blur, glow or visualizer. the record still spins. easier on older PCs.', toast: 'lite mode on: easier on your PC' },
-  super: { hint: 'no animations at all. the record stays still. lightest on your PC.', toast: 'super lite on: as light as it gets' },
+  super: { hint: 'no animations, and the record is put away. lightest on your PC.', toast: 'super lite on: as light as it gets' },
 };
-function applyPerf(mode) {
+let deckAnim = null, deckLeaving = false;
+// The record leaves (and comes back) with a little shrink-and-fade while the
+// title and controls glide into its place. Super lite itself has no motion,
+// so this runs just before super lite switches on, and just after it switches off.
+function animateDeck(leaving) {
+  const deck = $('#deck');
+  if (deckAnim) deckAnim.cancel();
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return Promise.resolve();
+  const cs = getComputedStyle(deck);
+  const shown = { height: deck.offsetHeight + 'px', marginBottom: cs.marginBottom, opacity: 1, transform: 'scale(1) rotate(0deg)' };
+  const gone = { height: '0px', marginBottom: '0px', opacity: 0, transform: 'scale(.55) rotate(-25deg)' };
+  deckLeaving = leaving;
+  deckAnim = deck.animate(leaving ? [shown, gone] : [gone, shown], {
+    duration: 550, easing: 'cubic-bezier(.2, .8, .2, 1)', fill: leaving ? 'forwards' : 'none',
+  });
+  return deckAnim.finished.catch(() => {});
+}
+
+async function applyPerf(mode, animate = false) {
   if (!PERF[mode]) mode = 'full';
-  document.body.classList.toggle('lite', mode !== 'full');
-  document.body.classList.toggle('super', mode === 'super');
-  viz.setEnabled(mode === 'full');
+  const wasSuper = document.body.classList.contains('super');
+  const toSuper = mode === 'super';
   prefs.set('perf', mode);
   document.querySelectorAll('#perfSeg button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.perf === mode)));
   $('#perfHint').textContent = PERF[mode].hint;
+  document.body.classList.toggle('lite', mode !== 'full');
+  viz.setEnabled(mode === 'full');
+  if (animate && toSuper && !wasSuper) {
+    await animateDeck(true);
+    if (prefs.get('perf') !== 'super') return; // switched again mid-animation
+  }
+  document.body.classList.toggle('super', toSuper);
+  if (deckAnim && toSuper) { deckAnim.cancel(); deckAnim = null; deckLeaving = false; }
+  if (!toSuper && deckLeaving && deckAnim) {
+    // changed your mind while the record was leaving: send it back from where it is
+    const a = deckAnim;
+    deckLeaving = false;
+    a.reverse();
+    a.finished.then(() => a.cancel(), () => {});
+  } else if (animate && wasSuper && !toSuper) animateDeck(false);
 }
 document.querySelectorAll('#perfSeg button').forEach(b => b.onclick = () => {
   if (prefs.get('perf', 'full') === b.dataset.perf) return;
-  applyPerf(b.dataset.perf);
+  applyPerf(b.dataset.perf, true);
   toast(PERF[b.dataset.perf].toast);
 });
 

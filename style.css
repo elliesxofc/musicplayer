@@ -82,14 +82,14 @@ svg { width: 22px; height: 22px; display: block; }
 /* ───────────── atmosphere ───────────── */
 .sky { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
 .blob {
-  position: absolute; width: 62vmax; height: 62vmax; border-radius: 50%;
-  filter: blur(100px); opacity: .42;
-  transition: background 1.4s var(--ease);
+  /* soft-edged gradients instead of blur filters: same look, a fraction of the work */
+  position: absolute; width: 80vmax; height: 80vmax; border-radius: 50%;
+  opacity: .5; will-change: transform;
   animation: drift 26s ease-in-out infinite alternate;
 }
-.b1 { background: rgb(var(--glow, var(--blob1)) / .85); top: -22vmax; left: -16vmax; }
-.b2 { background: rgb(var(--blob2) / .65); bottom: -26vmax; right: -20vmax; animation-duration: 32s; animation-delay: -8s; }
-.b3 { background: rgb(var(--glow2, var(--blob3)) / .55); top: 32%; left: 30%; width: 38vmax; height: 38vmax; animation-duration: 38s; animation-delay: -16s; }
+.b1 { background: radial-gradient(circle closest-side, rgb(var(--glow, var(--blob1)) / .85), rgb(var(--glow, var(--blob1)) / .35) 45%, transparent); top: -30vmax; left: -24vmax; }
+.b2 { background: radial-gradient(circle closest-side, rgb(var(--blob2) / .65), rgb(var(--blob2) / .25) 45%, transparent); bottom: -34vmax; right: -28vmax; animation-duration: 32s; animation-delay: -8s; }
+.b3 { background: radial-gradient(circle closest-side, rgb(var(--glow2, var(--blob3)) / .55), rgb(var(--glow2, var(--blob3)) / .2) 45%, transparent); top: 22%; left: 24%; width: 52vmax; height: 52vmax; animation-duration: 38s; animation-delay: -16s; }
 body.playing .blob { opacity: .55; }
 @keyframes drift {
   0% { transform: translate(0, 0) scale(1); }
@@ -185,9 +185,8 @@ body.playing .obs-live svg { animation: blink 1.6s ease-in-out infinite; }
   display: grid; place-items: center; margin-bottom: 10px;
 }
 .halo {
-  position: absolute; inset: -6%; border-radius: 50%;
-  background: radial-gradient(circle, rgb(var(--glow, var(--blob1)) / .45), transparent 65%);
-  filter: blur(30px); opacity: .6; transition: opacity 1s, background 1.4s;
+  position: absolute; inset: -12%; border-radius: 50%;
+  background: radial-gradient(circle closest-side, rgb(var(--glow, var(--blob1)) / .45), rgb(var(--glow, var(--blob1)) / .15) 60%, transparent); opacity: .6; transition: opacity 1s, background 1.4s;
 }
 body.playing .halo { opacity: 1; animation: breathe 4s ease-in-out infinite; }
 @keyframes breathe { 50% { transform: scale(1.06); } }
@@ -200,7 +199,6 @@ body.playing .halo { opacity: 1; animation: breathe 4s ease-in-out infinite; }
     radial-gradient(circle at 50% 50%, rgb(var(--vinyl) / calc(var(--vinyl-a) + .25)) 0 33%, transparent 33.5%),
     radial-gradient(circle at 30% 25%, rgb(255 255 255 / .18), transparent 45%),
     radial-gradient(circle, rgb(var(--vinyl) / var(--vinyl-a)), rgb(var(--vinyl) / calc(var(--vinyl-a) + .35)));
-  backdrop-filter: blur(6px) saturate(1.4); -webkit-backdrop-filter: blur(6px) saturate(1.4);
   box-shadow:
     0 40px 80px -30px rgb(var(--shadow) / .55),
     0 0 0 1px rgb(255 255 255 / .12),
@@ -474,6 +472,8 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .link-btn { font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 .link-btn:hover { color: var(--ink); }
 .storage { margin: 14px 0 0; }
+.lite-check { margin: 14px 0 0; align-items: flex-start; line-height: 1.45; }
+.lite-check input { margin-top: 2px; flex: none; }
 .hint.small { margin: 10px 0 0; font-size: 12px; opacity: .8; }
 .version { margin: 10px 0 0; font-size: 11.5px; color: var(--muted); opacity: .7; }
 
@@ -530,6 +530,23 @@ body:not(.playing) .bars i { animation-play-state: paused; }
   .deck { width: min(36vh, 280px); }
   .now-pill { display: none; }
 }
+/* ───────────── lite mode: same colours and layout, much less work ───────────── */
+body.lite .blob, body.lite .stars, body.lite .floaties, body.lite .grain, body.lite .halo, body.lite #viz { display: none; }
+body.lite .sky {
+  background:
+    radial-gradient(70vmax 70vmax at 0% 0%, rgb(var(--blob1) / .22), transparent 70%),
+    radial-gradient(70vmax 70vmax at 100% 100%, rgb(var(--blob2) / .18), transparent 70%);
+}
+body.lite .library, body.lite .console, body.lite .panel, body.lite .drop, body.lite .drop-inner {
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+body.lite .library, body.lite .console, body.lite .panel { background: color-mix(in srgb, var(--bg2) 85%, var(--bg)); }
+body.lite .play-ring { display: none; }
+/* the record still turns, but in 12 small steps a second instead of 60 smooth frames */
+body.lite .vinyl { animation-timing-function: steps(72); }
+body.lite .now-pill i, body.lite .bars i, body.lite .obs-live svg, body.lite .empty-art, body.lite .tracks.intro .track { animation: none !important; }
+body.lite .moon, body.lite .heart[aria-pressed="true"] { filter: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .blob, .stars, .empty-art, .floaty, .halo, .play-ring { animation: none !important; }
   .floaties { display: none; }

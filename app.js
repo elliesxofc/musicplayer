@@ -136,7 +136,17 @@ function probeDuration(blob) {
   return new Promise(resolve => {
     const a = new Audio();
     const url = URL.createObjectURL(blob);
-    const done = d => { URL.revokeObjectURL(url); a.src = ''; resolve(Number.isFinite(d) ? d : 0); };
+    let finished = false;
+    const done = d => {
+      if (finished) return;
+      finished = true;
+      // detach handlers before unloading, otherwise unloading fires 'error' and calls us again
+      a.onloadedmetadata = a.onerror = null;
+      a.removeAttribute('src');
+      a.load();
+      URL.revokeObjectURL(url);
+      resolve(Number.isFinite(d) ? d : 0);
+    };
     const timer = setTimeout(() => done(0), 8000);
     a.preload = 'metadata';
     a.onloadedmetadata = () => { clearTimeout(timer); done(a.duration); };
@@ -278,6 +288,14 @@ function updateWatermark() {
 el.wmInput.addEventListener('input', () => { prefs.set('watermark', el.wmInput.value.trim()); updateWatermark(); });
 
 /* floating hearts + sparkles in the background */
+function applyLite(on) {
+  document.body.classList.toggle('lite', on);
+  viz.setEnabled(!on);
+  prefs.set('lite', on);
+  $('#liteMode').checked = on;
+}
+$('#liteMode').onchange = e => { applyLite(e.target.checked); toast(e.target.checked ? 'lite mode on: easier on your PC' : 'all the pretty effects are back ✦'); };
+
 function buildFloaties() {
   const box = $('#floaties');
   const n = matchMedia('(max-width: 900px)').matches ? 8 : 14;
@@ -347,12 +365,16 @@ const viz = (() => {
     color2 = cs.getPropertyValue('--accent2').trim() || color;
   }
 
+  let raf = 0, enabled = true, lastDraw = 0;
   function frame(t) {
-    requestAnimationFrame(frame);
+    raf = requestAnimationFrame(frame);
     if (document.hidden) return;
     const w = canvas.width, h = canvas.height;
     if (!w) return;
     const playing = !audio.paused;
+    // nothing playing and the ring has settled: 12 frames a second is plenty for the gentle idle shimmer
+    if (!playing && t - lastDraw < 83 && levels.every(v => v < 0.07)) return;
+    lastDraw = t;
     if (analyser && playing) analyser.getByteFrequencyData(freq);
     g.clearRect(0, 0, w, h);
     const cx = w / 2, cy = h / 2;
@@ -387,8 +409,16 @@ const viz = (() => {
     }
     g.globalAlpha = 1;
   }
-  requestAnimationFrame(frame);
-  return { ensureAudioGraph, refreshColor, getCtx: () => ctx };
+  raf = requestAnimationFrame(frame);
+  // lite mode switches the visualizer off completely (no drawing loop at all)
+  function setEnabled(on) {
+    if (on === enabled) return;
+    enabled = on;
+    cancelAnimationFrame(raf);
+    if (on) raf = requestAnimationFrame(frame);
+    else g.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  return { ensureAudioGraph, refreshColor, setEnabled, getCtx: () => ctx };
 })();
 
 /* ───────────── library rendering ───────────── */
@@ -1081,6 +1111,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 (async function init() {
   buildThemeGrid();
   buildFloaties();
+  applyLite(prefs.get('lite', false));
   applyTheme(prefs.get('theme', 'midnight-rose'));
   el.nameInput.value = prefs.get('name', '');
   el.wmInput.value = prefs.get('watermark', '');

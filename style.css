@@ -380,6 +380,8 @@ body.playing .play-ring { opacity: .9; }
   padding: 8px 10px; border-radius: 16px; cursor: pointer; transition: background .2s;
 }
 .tracks.intro .track { animation: rise .4s var(--ease) both; }
+/* only draw rows that are on screen, so huge libraries scroll smoothly */
+.track { content-visibility: auto; contain-intrinsic-size: auto 62px; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 .track:hover { background: var(--faint); }
 .track.current { background: linear-gradient(90deg, rgb(var(--blob1) / .2), rgb(var(--blob2) / .08)); }
@@ -471,7 +473,8 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .check input { width: 17px; height: 17px; accent-color: var(--accent); margin: 0; }
 .link-btn { font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 .link-btn:hover { color: var(--ink); }
-.version { margin: 14px 0 0; font-size: 11.5px; color: var(--muted); opacity: .7; }
+.storage { margin: 14px 0 0; }
+.version { margin: 10px 0 0; font-size: 11.5px; color: var(--muted); opacity: .7; }
 
 /* ───────────── overlays ───────────── */
 .drop {

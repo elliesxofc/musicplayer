@@ -50,6 +50,7 @@ const DB = (() => {
   return {
     all: () => run('readonly', s => s.getAll()),
     put: rec => run('readwrite', s => { s.put(rec); }),
+    putMany: recs => run('readwrite', s => { for (const r of recs) s.put(r); }),
     del: id => run('readwrite', s => { s.delete(id); }),
     // small key/value store, used for the OBS file handle
     getKV: key => run('readonly', s => s.get(key), 'kv'),
@@ -197,7 +198,10 @@ const el = {
   obsPause: $('#obsPause'), obsPad: $('#obsPad'), obsUnlink: $('#obsUnlink'), obsLive: $('#obsLive'),
 };
 
-const byId = id => state.tracks.find(t => t.id === id);
+// id → track lookup, so big libraries stay quick
+const trackMap = new Map();
+const reindex = () => { trackMap.clear(); for (const t of state.tracks) trackMap.set(t.id, t); };
+const byId = id => trackMap.get(id);
 const fmt = s => { if (!Number.isFinite(s) || s < 0) s = 0; const m = Math.floor(s / 60); return m + ':' + String(Math.floor(s % 60)).padStart(2, '0'); };
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
 const coverUrl = t => {
@@ -207,11 +211,11 @@ const coverUrl = t => {
 };
 
 let toastTimer;
-function toast(msg) {
+function toast(msg, ms = 2600) {
   el.toastEl.textContent = msg;
   el.toastEl.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.toastEl.classList.remove('show'), 2600);
+  if (ms) toastTimer = setTimeout(() => el.toastEl.classList.remove('show'), ms);
 }
 
 /* ───────────── theme, greeting, watermark ───────────── */
@@ -241,7 +245,17 @@ function setSettings(open) {
   el.settings.hidden = !open;
   el.settingsBtn.setAttribute('aria-expanded', String(open));
 }
-el.settingsBtn.onclick = e => { e.stopPropagation(); setSettings(el.settings.hidden); };
+el.settingsBtn.onclick = e => { e.stopPropagation(); setSettings(el.settings.hidden); if (!el.settings.hidden) showStorage(); };
+
+const fmtBytes = b => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(b / 1e6)) + ' MB';
+async function showStorage() {
+  const box = $('#storageInfo');
+  try {
+    const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+    box.textContent = `your songs are using ${fmtBytes(usage)} · room for about ${fmtBytes(Math.max(0, quota - usage))} more`;
+    box.hidden = false;
+  } catch { box.hidden = true; }
+}
 $('#settingsClose').onclick = () => setSettings(false);
 document.addEventListener('click', e => {
   if (!el.settings.hidden && !e.target.closest('#settings, #settingsBtn')) setSettings(false);
@@ -382,11 +396,18 @@ function visibleTracks() {
     (!q || `${t.title} ${t.artist || ''} ${t.album || ''}`.toLowerCase().includes(q)));
 }
 
+function updateCount() {
+  const total = state.tracks.length;
+  const secs = state.tracks.reduce((s, t) => s + (t.duration || 0), 0);
+  const h = Math.floor(secs / 3600);
+  el.count.textContent = `${total.toLocaleString()} song${total === 1 ? '' : 's'}` +
+    (secs ? ` · ${h ? `${h}h ${Math.floor((secs % 3600) / 60)}m` : fmt(secs)}` : '');
+}
+
 function renderList(animate = false) {
   const items = visibleTracks();
   const total = state.tracks.length;
-  el.count.textContent = `${total} song${total === 1 ? '' : 's'}` +
-    (total ? ` · ${fmt(state.tracks.reduce((s, t) => s + (t.duration || 0), 0))}` : '');
+  updateCount();
   el.empty.hidden = total > 0;
   el.list.hidden = total === 0;
   el.list.innerHTML = '';
@@ -440,43 +461,91 @@ document.querySelectorAll('.tab').forEach(tab => tab.onclick = () => {
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t === tab));
   renderList();
 });
-el.search.addEventListener('input', () => { state.query = el.search.value.trim(); renderList(); });
+let searchTimer;
+el.search.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { state.query = el.search.value.trim(); renderList(); }, state.tracks.length > 300 ? 150 : 0);
+});
 
 /* ───────────── adding / removing ───────────── */
 const AUDIO_EXT = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|webm|weba|aiff?)$/i;
 
+async function makeRecord(f) {
+  const tags = await readTags(f);
+  const guess = fromFilename(f.name);
+  return {
+    id: uid(),
+    title: tags.title || guess.title || f.name,
+    artist: tags.artist || guess.artist || '',
+    album: tags.album || '',
+    cover: tags.cover || null,
+    duration: 0, // measured in the background afterwards, see fillDurations()
+    file: f,
+    fav: false,
+    added: Date.now(),
+  };
+}
+
+let importing = false;
 async function addFiles(fileList) {
   const files = [...fileList].filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
   if (!files.length) { toast("those don't look like songs"); return; }
-  toast(`adding ${files.length} song${files.length === 1 ? '' : 's'}…`);
+  if (importing) { toast('still adding the last batch, one sec…'); return; }
+  importing = true;
+  const total = files.length;
+  const CHUNK = 40;
   let added = 0;
-  for (const f of files) {
-    const tags = await readTags(f);
-    const guess = fromFilename(f.name);
-    const rec = {
-      id: uid(),
-      title: tags.title || guess.title || f.name,
-      artist: tags.artist || guess.artist || '',
-      album: tags.album || '',
-      cover: tags.cover || null,
-      duration: await probeDuration(f),
-      file: f,
-      fav: false,
-      added: Date.now(),
-    };
-    if (state.persistent) {
-      try { await DB.put(rec); } catch {
-        state.persistent = false;
-        toast("couldn't save to this browser — songs will last until you close the tab");
+  try {
+    for (let i = 0; i < total; i += CHUNK) {
+      if (total > CHUNK) toast(`adding songs… ${added} / ${total}`, 0);
+      const recs = await Promise.all(files.slice(i, i + CHUNK).map(makeRecord));
+      if (state.persistent) {
+        try { await DB.putMany(recs); } catch (err) {
+          state.persistent = false;
+          toast(err && err.name === 'QuotaExceededError'
+            ? 'your device ran out of room for more songs. the rest will only last until you close the app'
+            : "couldn't save to this browser. songs will last until you close the tab", 6000);
+        }
       }
+      for (const r of recs) { state.tracks.push(r); trackMap.set(r.id, r); }
+      added += recs.length;
+      // re-draw the list now and then so you can see it filling up
+      if (i === 0 || (i / CHUNK) % 5 === 4 || added === total) renderList(i === 0);
     }
-    state.tracks.push(rec);
-    added++;
+  } finally {
+    importing = false;
   }
   saveOrder();
-  renderList(true);
-  toast(`added ${added} song${added === 1 ? '' : 's'} ✦`);
+  renderList();
+  if (state.persistent || added < 2) toast(`added ${added} song${added === 1 ? '' : 's'} ✦`);
   if (!state.currentId && state.tracks.length) loadTrack(state.tracks[0].id);
+  fillDurations();
+}
+
+// Song lengths are measured a few at a time in the background,
+// so adding a big folder doesn't have to wait for every file to be opened.
+const durationTried = new Set();
+let filling = false;
+async function fillDurations() {
+  if (filling) return;
+  filling = true;
+  const work = async () => {
+    for (;;) {
+      const t = state.tracks.find(x => !x.duration && !durationTried.has(x.id));
+      if (!t) return;
+      durationTried.add(t.id);
+      const d = await probeDuration(t.file);
+      if (d && byId(t.id)) setDuration(t, d);
+    }
+  };
+  try { await Promise.all([work(), work(), work()]); } finally { filling = false; }
+  updateCount();
+}
+function setDuration(t, d) {
+  t.duration = d;
+  if (state.persistent) DB.put(t).catch(() => {});
+  const cell = el.list.querySelector(`[data-id="${t.id}"] .t-dur`);
+  if (cell) cell.textContent = fmt(d);
 }
 
 async function removeTrack(id) {
@@ -488,6 +557,7 @@ async function removeTrack(id) {
     if (next && next !== id) loadTrack(next); else clearNowPlaying();
   }
   state.tracks = state.tracks.filter(x => x.id !== id);
+  trackMap.delete(id);
   state.queue = state.queue.filter(x => x !== id);
   if (coverUrls.has(id)) { URL.revokeObjectURL(coverUrls.get(id)); coverUrls.delete(id); }
   if (state.persistent) DB.del(id).catch(() => {});
@@ -503,8 +573,10 @@ async function toggleFav(id = state.currentId) {
   t.fav = !t.fav;
   if (state.persistent) DB.put(t).catch(() => {});
   if (id === state.currentId) syncFav(true);
-  if (t.fav) heartBurst(id === state.currentId ? el.fav : el.list.querySelector(`[data-id="${id}"] .t-fav`) || el.fav);
-  renderList();
+  const rowBtn = el.list.querySelector(`[data-id="${id}"] .t-fav`);
+  if (t.fav) heartBurst(id === state.currentId ? el.fav : rowBtn || el.fav);
+  if (state.view === 'loved') renderList();
+  else if (rowBtn) rowBtn.setAttribute('aria-pressed', String(t.fav));
 }
 function syncFav(pulse) {
   const t = byId(state.currentId);
@@ -650,7 +722,11 @@ function updateTime() {
   if (!seeking) { el.seek.value = d ? Math.round((c / d) * 1000) : 0; setFill(el.seek); }
 }
 audio.addEventListener('timeupdate', () => { updateTime(); saveProgress(); });
-audio.addEventListener('loadedmetadata', updateTime);
+audio.addEventListener('loadedmetadata', () => {
+  updateTime();
+  const t = byId(state.currentId);
+  if (t && !t.duration && Number.isFinite(audio.duration)) { setDuration(t, audio.duration); updateCount(); }
+});
 el.seek.addEventListener('input', () => {
   seeking = true;
   setFill(el.seek);
@@ -920,11 +996,13 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     const pos = new Map(order.map((id, i) => [id, i]));
     recs.sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9) || a.added - b.added);
     state.tracks = recs;
+    reindex();
     navigator.storage?.persist?.().catch(() => {});
   } catch {
     state.persistent = false;
   }
   renderList(true);
+  fillDurations();
   await restoreObs();
 
   const last = prefs.get('last', null);

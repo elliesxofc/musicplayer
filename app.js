@@ -866,6 +866,39 @@ async function restoreObs() {
   syncObsUi();
 }
 
+/* ───────────── install as an app ───────────── */
+let installPrompt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function syncInstallUi() {
+  const btn = $('#installBtn'), hint = $('#appHint');
+  if (isStandalone()) {
+    hint.textContent = "you're using the app version ♡";
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = !installPrompt;
+  if (installPrompt) hint.textContent = 'add moonlit to your home screen so it opens like a real app, full screen and even offline.';
+  else if (isIOS) hint.innerHTML = 'on iPhone / iPad: open this page in <b>Safari</b>, tap <b>Share</b> → <b>Add to Home Screen</b>.';
+  else hint.innerHTML = 'open your browser menu (⋮) and choose <b>Install app</b> or <b>Add to Home screen</b>.';
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; syncInstallUi(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; toast('moonlit is on your home screen ♡'); syncInstallUi(); });
+$('#installBtn').onclick = async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => {});
+  installPrompt = null;
+  syncInstallUi();
+  // OBS lives on a computer; hide that section on phones that can't write files anyway.
+  el.obsLink.closest('section').hidden = !window.showSaveFilePicker && matchMedia('(hover: none)').matches;
+};
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+
 /* ───────────── boot ───────────── */
 (async function init() {
   buildThemeGrid();
@@ -875,6 +908,7 @@ async function restoreObs() {
   el.wmInput.value = prefs.get('watermark', '');
   updateGreeting();
   updateWatermark();
+  syncInstallUi();
   setInterval(updateGreeting, 60_000);
   setVolume(prefs.get('volume', 0.8), false);
   syncModes();

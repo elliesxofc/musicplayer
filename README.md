@@ -12,6 +12,19 @@ that takes on the colours of the album cover.
 - your library is saved in this browser's own storage (IndexedDB), so it's still
   there next time you open the page. clearing site data removes it.
 
+## live
+
+**https://elliesxofc.github.io/musicplayer/**
+
+## install it as an app
+
+- **iPhone / iPad:** open the link in Safari → Share → **Add to Home Screen**
+- **Android:** open the link in Chrome → ⋮ menu → **Install app** (or use the install button in the sliders panel)
+- **computer:** Chrome / Edge show an install icon in the address bar
+
+the app opens full screen with its own icon and works offline. each install has
+its own library, so add your songs inside the app itself.
+
 ## using it
 
 open `index.html` through any static host (GitHub Pages works great), then

@@ -6,7 +6,14 @@
   <title>moonlit</title>
   <meta name="description" content="a little private music player, just for you">
   <meta name="theme-color" content="#170a14">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%232a0f22'/%3E%3Cpath d='M40 14a19 19 0 1 0 10 31A16 16 0 0 1 40 14z' fill='%23ff7eb6'/%3E%3C/svg%3E">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="moonlit">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
@@ -176,6 +183,11 @@
       <label class="check"><input type="checkbox" id="obsPause"> clear the text while paused</label>
       <label class="check"><input type="checkbox" id="obsPad"> add spacing at the end (for the OBS scroll filter)</label>
       <button class="link-btn" id="obsUnlink" hidden>unlink file</button>
+    </section>
+    <section id="appSection">
+      <p class="eyebrow">app</p>
+      <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
+      <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
     </section>
   </div>
 

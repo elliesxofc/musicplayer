@@ -49,6 +49,43 @@ write files, so the OBS link only works in Chrome or Edge).
   set Horizontal Speed to ~30, and turn on "add spacing at the end" in moonlit.
 
 
+4. send the music to the stream without hearing it yourself (virtual cable)
+--------------------------------------------------------------------------
+the stream gets the music, your speakers stay quiet, and you never have to
+mute anything. only moonlit's music goes to the cable. the rest of your PC's
+sound stays on your speakers.
+
+  a) install the free VB-CABLE driver
+       https://vb-audio.com/Cable/  → download → unzip → right-click
+       VBCABLE_Setup_x64.exe → Run as administrator → Install Driver → restart the PC
+
+  b) check your speakers are still the default
+       Windows Settings → System → Sound → Output → pick your normal
+       speakers / headphones (sometimes Windows switches to the cable after
+       installing it)
+
+  c) point moonlit at the cable
+       moonlit → sliders button → "sound output"
+       → click "find my devices" (Chrome asks for microphone permission; that's
+         only so it can show device names. moonlit never records anything) → Allow
+       → "play music through": CABLE Input (VB-Audio Virtual Cable)
+       moonlit remembers this, even after restarting.
+
+  d) let OBS listen to the cable
+       Sources → +  → "Audio Input Capture" → name it "moonlit music" → OK
+       → Device: CABLE Output (VB-Audio Virtual Cable) → OK
+       (if you used Application Audio Capture or Desktop Audio for moonlit before,
+        remove or mute that, so the music isn't on the stream twice)
+
+  e) want to hear it sometimes?
+       in OBS: Edit → Advanced Audio Properties → "moonlit music"
+       → Audio Monitoring: "Monitor and Output". switch it back to
+       "Monitor Off" to go quiet again. the stream isn't affected either way.
+
+  if the cable is ever missing (unplugged / driver removed), moonlit plays
+  through your normal speakers instead and tells you so.
+
+
 every time you come back
 ------------------------
 browsers forget file permission when you close them. the first time you press

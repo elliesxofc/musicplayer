@@ -474,6 +474,7 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .link-btn { font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 .link-btn:hover { color: var(--ink); }
 .storage { margin: 14px 0 0; }
+.hint.small { margin: 10px 0 0; font-size: 12px; opacity: .8; }
 .version { margin: 10px 0 0; font-size: 11.5px; color: var(--muted); opacity: .7; }
 
 /* ───────────── overlays ───────────── */

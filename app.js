@@ -327,6 +327,9 @@ const viz = (() => {
       freq = new Uint8Array(analyser.frequencyBinCount);
       src.connect(analyser);
       analyser.connect(ctx.destination);
+      // once audio runs through the AudioContext, the context decides the output device
+      const sink = prefs.get('sinkId', '');
+      if (sink && ctx.setSinkId) ctx.setSinkId(sink).catch(() => toast("your chosen sound output isn't connected, so music is on the default device", 6000));
     } catch { ctx = null; }
   }
 
@@ -385,7 +388,7 @@ const viz = (() => {
     g.globalAlpha = 1;
   }
   requestAnimationFrame(frame);
-  return { ensureAudioGraph, refreshColor };
+  return { ensureAudioGraph, refreshColor, getCtx: () => ctx };
 })();
 
 /* ───────────── library rendering ───────────── */
@@ -973,6 +976,76 @@ async function restoreObs() {
   syncObsUi();
 }
 
+/* ───────────── sound output (e.g. a virtual cable for OBS) ───────────── */
+const sinkSupported = typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype;
+const outSel = $('#outputSelect');
+
+async function applySink(id) {
+  try {
+    if (audio.setSinkId) await audio.setSinkId(id);
+    const ctx = viz.getCtx();
+    if (ctx) await ctx.setSinkId(id);
+    return true;
+  } catch { return false; }
+}
+
+// Device ids can change (browser updates, cleared data), so we also remember
+// the device's name and find it again by name if its id is gone.
+async function resolveSink() {
+  const id = prefs.get('sinkId', '');
+  if (!id) return '';
+  try {
+    const outs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+    if (outs.some(d => d.deviceId === id)) return id;
+    const label = prefs.get('sinkLabel', '');
+    const match = label && outs.find(d => d.label === label);
+    if (match) { prefs.set('sinkId', match.deviceId); return match.deviceId; }
+  } catch { /* no device access */ }
+  return id;
+}
+
+async function listOutputs(askForNames = false) {
+  if (askForNames) {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach(t => t.stop());
+    } catch { toast("no problem. without that, chrome won't show device names", 5000); }
+  }
+  let devs = [];
+  try {
+    devs = (await navigator.mediaDevices.enumerateDevices())
+      .filter(d => d.kind === 'audiooutput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
+  } catch { /* no device access */ }
+  const saved = await resolveSink();
+  outSel.innerHTML = '';
+  outSel.append(new Option('system default', ''));
+  devs.forEach((d, i) => outSel.append(new Option(d.label || `sound output ${i + 1}`, d.deviceId)));
+  if (saved && !devs.some(d => d.deviceId === saved)) {
+    outSel.append(new Option(`${prefs.get('sinkLabel', '') || 'your saved device'} (not connected)`, saved));
+  }
+  outSel.value = saved;
+  const named = devs.length > 0 && devs.every(d => d.label);
+  $('#outputScan').hidden = named;
+  $('#outputNote').hidden = named;
+}
+
+outSel.onchange = async () => {
+  const id = outSel.value;
+  const label = outSel.selectedOptions[0]?.textContent || 'that device';
+  if (await applySink(id)) {
+    prefs.set('sinkId', id);
+    prefs.set('sinkLabel', id && !/^sound output \d+$/.test(label) ? label.replace(/ \(not connected\)$/, '') : '');
+    toast(id ? `music now plays through ${label}` : 'music is back on the default device');
+  } else {
+    toast("couldn't switch to that device. is it plugged in?", 5000);
+    outSel.value = prefs.get('sinkId', '');
+  }
+};
+$('#outputScan').onclick = () => listOutputs(true);
+if (sinkSupported && navigator.mediaDevices) {
+  navigator.mediaDevices.addEventListener?.('devicechange', () => listOutputs());
+}
+
 /* ───────────── install as an app ───────────── */
 let installPrompt = null;
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -998,8 +1071,6 @@ $('#installBtn').onclick = async () => {
   await installPrompt.userChoice.catch(() => {});
   installPrompt = null;
   syncInstallUi();
-  // OBS lives on a computer; hide that section on phones that can't write files anyway.
-  el.obsLink.closest('section').hidden = !window.showSaveFilePicker && matchMedia('(hover: none)').matches;
 };
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
@@ -1016,6 +1087,15 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   updateGreeting();
   updateWatermark();
   syncInstallUi();
+  if (sinkSupported && navigator.mediaDevices) {
+    $('#outputSection').hidden = false;
+    listOutputs();
+    resolveSink().then(sink => sink && applySink(sink)).then(ok => {
+      if (ok === false) toast("your chosen sound output isn't connected, so music is on the default device", 6000);
+    });
+  }
+  // OBS lives on a computer; hide that section on phones that can't write files anyway.
+  el.obsLink.closest('section').hidden = !window.showSaveFilePicker && matchMedia('(hover: none)').matches;
   setInterval(updateGreeting, 60_000);
   setVolume(prefs.get('volume', 0.8), false);
   syncModes();

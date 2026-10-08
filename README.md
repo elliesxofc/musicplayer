@@ -36,6 +36,8 @@ drag audio files onto the page or tap **add songs**.
 - picks up where you left off
 - six pink themes: midnight rose, strawberry milk, cherry noir, bubblegum, sakura dusk, rosé gold
 - customize panel (sliders icon): theme, your name for the greeting, optional watermark
+- **sound output picker**: send the music to a virtual cable (VB-CABLE) so OBS streams it without it playing on your speakers. setup in [`OBS-SETUP.txt`](OBS-SETUP.txt)
+- skips songs that won't play, so a 24/7 stream never goes silent
 - **OBS now playing**: keeps a `nowplaying.txt` updated with the current song for an OBS text source. see [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - works with media keys and the lock screen
 

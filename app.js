@@ -662,9 +662,12 @@ function play() {
   }
   viz.ensureAudioGraph();
   maybeReconnectObs();
-  audio.play().catch(err => { if (err.name !== 'AbortError') toast("couldn't play that one — the format may not be supported"); });
+  state.wantPlaying = true;
+  // NotSupportedError is handled by the 'error' listener below, which skips the song
+  audio.play().catch(err => { if (err.name === 'NotAllowedError') toast('tap play to start the music'); });
 }
-function togglePlay() { audio.paused ? play() : audio.pause(); }
+function pause() { state.wantPlaying = false; audio.pause(); }
+function togglePlay() { audio.paused ? play() : pause(); }
 
 function currentQueue() {
   const q = state.queue.filter(id => byId(id));
@@ -691,7 +694,7 @@ function neighbour(dir, fromEnded = false) {
 function next(fromEnded = false) {
   const id = neighbour(1, fromEnded);
   if (id) playTrack(id);
-  else { audio.pause(); audio.currentTime = 0; }
+  else { pause(); audio.currentTime = 0; }
 }
 function prev() {
   if (audio.currentTime > 3) { audio.currentTime = 0; return; }
@@ -710,7 +713,24 @@ audio.addEventListener('ended', () => {
   if (state.repeat === 'one') { audio.currentTime = 0; play(); return; }
   next(true);
 });
-audio.addEventListener('error', () => { if (audio.getAttribute('src')) toast("hmm, this file won't play here"); });
+// A broken or unsupported file shouldn't leave a 24/7 stream silent: skip it and
+// keep going, unless several songs in a row fail (then something bigger is wrong).
+let badStreak = 0;
+audio.addEventListener('playing', () => { badStreak = 0; });
+audio.addEventListener('error', () => {
+  if (!audio.getAttribute('src')) return;
+  const t = byId(state.currentId);
+  if (!state.wantPlaying) { toast(`“${t ? t.title : 'this song'}” won't play here`); return; }
+  badStreak++;
+  if (badStreak >= Math.min(10, currentQueue().length)) {
+    badStreak = 0;
+    pause();
+    toast("several songs in a row won't play, so i've paused", 8000);
+    return;
+  }
+  toast(`skipped “${t ? t.title : 'a song'}”, it won't play here`, 3500);
+  setTimeout(() => { if (state.wantPlaying) next(); }, 600);
+});
 
 function syncPlayBtn() {
   const playing = !audio.paused;
@@ -793,7 +813,7 @@ if ('mediaSession' in navigator) {
   const ms = navigator.mediaSession;
   const set = (a, fn) => { try { ms.setActionHandler(a, fn); } catch { /* unsupported */ } };
   set('play', play);
-  set('pause', () => audio.pause());
+  set('pause', pause);
   set('nexttrack', () => next());
   set('previoustrack', prev);
   set('seekto', d => { audio.currentTime = d.seekTime; });

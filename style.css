@@ -472,8 +472,11 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .link-btn { font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 .link-btn:hover { color: var(--ink); }
 .storage { margin: 14px 0 0; }
-.lite-check { margin: 14px 0 0; align-items: flex-start; line-height: 1.45; }
-.lite-check input { margin-top: 2px; flex: none; }
+.field.perf { margin: 16px 0 0; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; border-radius: 13px; background: var(--faint); }
+.seg button { padding: 8px 4px; border-radius: 10px; font-size: 13px; color: var(--muted); transition: background .2s, color .2s; }
+.seg button[aria-checked="true"] { background: var(--grad); color: var(--accent-ink); font-weight: 600; }
+.field.perf .hint.small { margin: 2px 0 0; }
 .hint.small { margin: 10px 0 0; font-size: 12px; opacity: .8; }
 .version { margin: 10px 0 0; font-size: 11.5px; color: var(--muted); opacity: .7; }
 
@@ -546,6 +549,12 @@ body.lite .play-ring { display: none; }
 body.lite .vinyl { animation-timing-function: steps(72); }
 body.lite .now-pill i, body.lite .bars i, body.lite .obs-live svg, body.lite .empty-art, body.lite .tracks.intro .track { animation: none !important; }
 body.lite .moon, body.lite .heart[aria-pressed="true"] { filter: none; }
+
+/* ───────────── super lite: everything from lite, plus no motion at all ─────────────
+   the record is still there, it just doesn't spin */
+body.super *, body.super *::before, body.super *::after { animation: none !important; transition: none !important; }
+body.super .now h1 { background: none; color: var(--ink); }
+body.super .play { box-shadow: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .blob, .stars, .empty-art, .floaty, .halo, .play-ring { animation: none !important; }

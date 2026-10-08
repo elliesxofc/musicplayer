@@ -288,13 +288,26 @@ function updateWatermark() {
 el.wmInput.addEventListener('input', () => { prefs.set('watermark', el.wmInput.value.trim()); updateWatermark(); });
 
 /* floating hearts + sparkles in the background */
-function applyLite(on) {
-  document.body.classList.toggle('lite', on);
-  viz.setEnabled(!on);
-  prefs.set('lite', on);
-  $('#liteMode').checked = on;
+// effects level: full (everything) · lite (no heavy effects, record still spins) · super (no motion at all)
+const PERF = {
+  full: { hint: 'every effect on: the visualizer, floating hearts and glow.', toast: 'all the pretty effects are back ✦' },
+  lite: { hint: 'no blur, glow or visualizer. the record still spins. easier on older PCs.', toast: 'lite mode on: easier on your PC' },
+  super: { hint: 'no animations at all. the record stays still. lightest on your PC.', toast: 'super lite on: as light as it gets' },
+};
+function applyPerf(mode) {
+  if (!PERF[mode]) mode = 'full';
+  document.body.classList.toggle('lite', mode !== 'full');
+  document.body.classList.toggle('super', mode === 'super');
+  viz.setEnabled(mode === 'full');
+  prefs.set('perf', mode);
+  document.querySelectorAll('#perfSeg button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.perf === mode)));
+  $('#perfHint').textContent = PERF[mode].hint;
 }
-$('#liteMode').onchange = e => { applyLite(e.target.checked); toast(e.target.checked ? 'lite mode on: easier on your PC' : 'all the pretty effects are back ✦'); };
+document.querySelectorAll('#perfSeg button').forEach(b => b.onclick = () => {
+  if (prefs.get('perf', 'full') === b.dataset.perf) return;
+  applyPerf(b.dataset.perf);
+  toast(PERF[b.dataset.perf].toast);
+});
 
 function buildFloaties() {
   const box = $('#floaties');
@@ -312,7 +325,7 @@ function buildFloaties() {
 }
 
 function heartBurst(from) {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || document.body.classList.contains('super')) return;
   const r = from.getBoundingClientRect();
   for (let i = 0; i < 8; i++) {
     const b = document.createElement('div');
@@ -1111,7 +1124,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 (async function init() {
   buildThemeGrid();
   buildFloaties();
-  applyLite(prefs.get('lite', false));
+  applyPerf(prefs.get('perf', prefs.get('lite', false) ? 'lite' : 'full')); // older versions saved a lite on/off switch
   applyTheme(prefs.get('theme', 'midnight-rose'));
   el.nameInput.value = prefs.get('name', '');
   el.wmInput.value = prefs.get('watermark', '');

@@ -98,10 +98,65 @@ function readPicture(data, isV22) {
 }
 
 // Small ID3v2 reader for title / artist / album / cover art.
+// Small MP4/M4A reader: title / artist / album / cover from moov › udta › meta › ilst.
+async function readMp4Tags(file) {
+  const out = {};
+  try {
+    const type = (b, i) => String.fromCharCode(b[i], b[i + 1], b[i + 2], b[i + 3]);
+    // find the top-level 'moov' box (it can be at the start or the end of the file)
+    let off = 0, moov = null;
+    while (off + 8 <= file.size) {
+      const h = new Uint8Array(await file.slice(off, off + 16).arrayBuffer());
+      let len = u32(h, 0), hdr = 8;
+      if (len === 1) { len = u32(h, 8) * 2 ** 32 + u32(h, 12); hdr = 16; } else if (len === 0) len = file.size - off;
+      if (len < hdr) break;
+      if (type(h, 4) === 'moov') {
+        if (len > 64 * 1024 * 1024) return out;
+        moov = new Uint8Array(await file.slice(off + hdr, off + len).arrayBuffer());
+        break;
+      }
+      off += len;
+    }
+    if (!moov) return out;
+    const boxes = function* (b, start, end) {
+      for (let p = start; p + 8 <= end;) {
+        const len = u32(b, p);
+        if (len < 8 || p + len > end) return;
+        yield { type: type(b, p + 4), s: p + 8, e: p + len };
+        p += len;
+      }
+    };
+    const child = (b, start, end, name) => { for (const x of boxes(b, start, end)) if (x.type === name) return x; return null; };
+    const udta = child(moov, 0, moov.length, 'udta');
+    const meta = (udta && child(moov, udta.s, udta.e, 'meta')) || child(moov, 0, moov.length, 'meta');
+    if (!meta) return out;
+    // usually a "full box": 4 bytes of version/flags come before its first child (hdlr)
+    const metaStart = type(moov, meta.s + 8) === 'hdlr' ? meta.s + 4 : meta.s;
+    const ilst = child(moov, metaStart, meta.e, 'ilst');
+    if (!ilst) return out;
+    for (const item of boxes(moov, ilst.s, ilst.e)) {
+      const data = child(moov, item.s, item.e, 'data');
+      if (!data) continue;
+      const kind = u32(moov, data.s) & 0xffffff;
+      const value = moov.subarray(data.s + 8, data.e);
+      const text = () => new TextDecoder('utf-8').decode(value).replace(/\0+$/, '').trim();
+      if (item.type === '©nam') out.title = text();
+      else if (item.type === '©ART') out.artist = text();
+      else if (item.type === 'aART' && !out.artist) out.artist = text();
+      else if (item.type === '©alb') out.album = text();
+      else if (item.type === 'covr' && !out.cover && value.length) {
+        out.cover = new Blob([value.slice()], { type: kind === 14 ? 'image/png' : 'image/jpeg' });
+      }
+    }
+  } catch { /* unreadable tags are fine, we fall back to the filename */ }
+  return out;
+}
+
 async function readTags(file) {
   const out = {};
   try {
-    const head = new Uint8Array(await file.slice(0, 10).arrayBuffer());
+    const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    if (String.fromCharCode(...head.subarray(4, 8)) === 'ftyp') return readMp4Tags(file); // .m4a / .mp4
     if (head[0] !== 0x49 || head[1] !== 0x44 || head[2] !== 0x33) return out; // "ID3"
     const ver = head[3], flags = head[5];
     const size = syncsafe(head, 6);

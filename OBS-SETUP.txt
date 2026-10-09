@@ -1,6 +1,27 @@
 moonlit → OBS Studio: show the song you're playing on stream
 =============================================================
 
+NEW (desktop app): control OBS from moonlit
+-------------------------------------------
+go live / end stream, record, switch scenes, show or hide sources, mute and
+set volumes, and see the stream's health, all from moonlit's 🎥 button.
+
+  1. in OBS: Tools → WebSocket Server Settings
+     → tick "Enable WebSocket server" → Apply
+     → "Show Connect Info": note the Server Port (usually 4455) and Password
+  2. in moonlit: click the 🎥 (camera) button at the top → settings
+     → address: localhost, port: 4455, password: paste it → connect
+  3. leave "connect by itself" on: from then on moonlit connects whenever
+     OBS is open, and reconnects if OBS restarts.
+
+  while you're live, a red "● LIVE 1:23:45" badge shows at the top of moonlit
+  (click it to open the panel). "go live" and "end stream" ask first, so a
+  misclick can't start or cut off your stream.
+
+  OBS on a different PC? use that PC's address (e.g. 192.168.1.20) instead of
+  localhost, and allow OBS through that PC's firewall.
+
+
 NEW (desktop app): live "now playing" overlay
 ---------------------------------------------
 a pink card with the cover, song name, artist and a ticking 1:23 / 3:45 bar.

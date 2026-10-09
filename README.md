@@ -36,6 +36,7 @@ drag audio files onto the page or tap **add songs**.
 - picks up where you left off
 - six pink themes: midnight rose, strawberry milk, cherry noir, bubblegum, sakura dusk, rosé gold
 - customize panel (sliders icon): theme, your name for the greeting, optional watermark
+- **stream control** (desktop app): go live, record, switch scenes, show/hide sources and mix audio in OBS from moonlit, through OBS's WebSocket server. see [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - **OBS overlay** (desktop app): a live now-playing card with cover and a ticking time, as an OBS Browser source at `http://localhost:4848/overlay`. see [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - **sound output picker**: send the music to a virtual cable (VB-CABLE) so OBS streams it without it playing on your speakers. setup in [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - **effects** (sliders panel): *full* · *lite* (no blur/glow/visualizer, record still spins) · *super lite* (no animations, record put away) for older or always-on PCs

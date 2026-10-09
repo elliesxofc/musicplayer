@@ -13,7 +13,7 @@ const { pathToFileURL } = require('node:url');
 const ROOT = path.join(__dirname, '..');
 const ORIGIN = 'moonlit://app';
 // Only the player's own files are served to the window.
-const SERVED = new Set(['index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'sw.js']);
+const SERVED = new Set(['index.html', 'style.css', 'app.js', 'obs.js', 'manifest.webmanifest', 'sw.js']);
 const SERVED_DIRS = ['icons'];
 
 protocol.registerSchemesAsPrivileged([

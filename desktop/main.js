@@ -229,3 +229,12 @@ ipcMain.handle('dl:folder', () => dl().folder());
 ipcMain.handle('dl:choose-folder', () => dl().chooseFolder());
 ipcMain.handle('dl:open-folder', () => dl().openFolder());
 app.on('before-quit', () => { if (downloader) downloader.stopAll(); });
+
+/* ───────────── now-playing overlay for OBS (http://localhost:4848/overlay) ───────────── */
+const overlay = require('./overlay').createOverlay();
+const overlayReady = app.whenReady().then(() => overlay.start());
+ipcMain.on('overlay:state', (_e, s) => { if (s && typeof s === 'object') overlay.update(s); });
+ipcMain.on('overlay:cover', (_e, id, type, bytes) => overlay.setCover(id, type, bytes));
+ipcMain.handle('overlay:url', async () => { await overlayReady; return overlay.url(); });
+ipcMain.handle('overlay:open', async (_e, url) => { if (/^http:\/\/localhost:\d+\/overlay/.test(url)) shell.openExternal(url); });
+app.on('before-quit', () => overlay.stop());

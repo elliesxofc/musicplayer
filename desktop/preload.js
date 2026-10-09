@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
   takePendingFiles: () => ipcRenderer.invoke('files:pending'),
   readFile: file => ipcRenderer.invoke('files:read', String(file)),
   onOpenFiles: callback => ipcRenderer.on('files:open', (_e, files) => callback(files)),
+  // now-playing overlay for OBS
+  overlay: {
+    state: s => ipcRenderer.send('overlay:state', s),
+    cover: (id, type, bytes) => ipcRenderer.send('overlay:cover', id, type, bytes),
+    url: () => ipcRenderer.invoke('overlay:url'),
+    open: url => ipcRenderer.invoke('overlay:open', String(url)),
+  },
   // downloader
   download: {
     add: (url, format) => ipcRenderer.invoke('dl:add', String(url), String(format)),

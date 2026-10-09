@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>moonlit · now playing</title>
+<!--
+  moonlit "now playing" overlay. In OBS: Sources → + → Browser → URL http://localhost:4848/overlay
+  options (add to the URL, e.g. /overlay?layout=line&hidepaused=1):
+    layout=card | line     card with cover art (default), or a single line of text
+    hidepaused=1           fade out while the music is paused
+    nocover=1              card without the cover art
+    noprogress=1           no progress bar or time
+    accent=ff7eb6          main colour (hex, without #)
+-->
+<style>
+  :root { --accent: #ff7eb6; --accent2: #c49bff; --ink: #fff3f8; --muted: #e6bfd4; }
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  body { font-family: "DM Sans", "Segoe UI", system-ui, sans-serif; color: var(--ink); padding: 12px; }
+  .np { transition: opacity .5s ease, transform .5s ease; }
+  .np.hidden { opacity: 0; transform: translateY(8px); }
+
+  /* card */
+  .card {
+    display: flex; align-items: center; gap: 16px; width: max-content; max-width: calc(100vw - 24px);
+    padding: 14px 18px 14px 14px; border-radius: 22px;
+    background: linear-gradient(135deg, rgba(40, 12, 34, .86), rgba(26, 10, 24, .86));
+    border: 1px solid rgba(255, 150, 200, .28);
+    box-shadow: 0 12px 40px -12px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .06);
+  }
+  .cover {
+    width: 76px; height: 76px; border-radius: 16px; flex: none; object-fit: cover;
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 6px 18px -6px var(--accent);
+  }
+  .text { min-width: 0; width: 360px; }
+  .label { font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); display: flex; align-items: center; gap: 7px; }
+  .label i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .paused .label i { background: var(--muted); box-shadow: none; }
+  .title { margin-top: 4px; font-size: 22px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .artist { font-size: 15px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .bar { flex: 1; height: 5px; border-radius: 5px; background: rgba(255, 255, 255, .14); overflow: hidden; }
+  .bar b { display: block; height: 100%; width: 0; border-radius: 5px; background: linear-gradient(90deg, var(--accent), var(--accent2)); box-shadow: 0 0 10px var(--accent); }
+
+  /* line */
+  .line {
+    display: inline-flex; align-items: center; gap: 12px; padding: 8px 16px; border-radius: 999px;
+    background: rgba(30, 10, 26, .8); border: 1px solid rgba(255, 150, 200, .28);
+    font-size: 20px; font-weight: 600; white-space: nowrap; max-width: calc(100vw - 24px);
+  }
+  .line .song { overflow: hidden; text-overflow: ellipsis; }
+  .line .time { font-size: 16px; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+
+  .swap { animation: swap .6s ease; }
+  @keyframes swap { from { opacity: 0; transform: translateX(-10px); } }
+</style>
+</head>
+<body>
+<div class="np hidden" id="np"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  if (q.get('accent')) document.documentElement.style.setProperty('--accent', '#' + q.get('accent').replace(/[^0-9a-f]/gi, ''));
+  const layout = q.get('layout') === 'line' ? 'line' : 'card';
+  const np = document.getElementById('np');
+  np.innerHTML = layout === 'card'
+    ? `<div class="card"><img class="cover" alt="">
+         <div class="text"><div class="label"><i></i><span class="state">now playing</span></div>
+         <div class="title"></div><div class="artist"></div>
+         <div class="progress"><span class="cur">0:00</span><div class="bar"><b></b></div><span class="dur">0:00</span></div></div></div>`
+    : `<div class="line"><span class="song"></span><span class="time"></span></div>`;
+  const $ = s => np.querySelector(s);
+  if (q.get('nocover')) $('.cover')?.remove();
+  if (q.get('noprogress')) { $('.progress')?.remove(); $('.time')?.remove(); }
+
+  const fmt = s => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
+  let s = null, got = 0;
+
+  function apply(next) {
+    const changed = !s || s.id !== next.id;
+    s = next; got = performance.now();
+    if (!s.id) { np.classList.add('hidden'); return; }
+    if (changed) {
+      if (layout === 'card') {
+        $('.title').textContent = s.title;
+        $('.artist').textContent = [s.artist, s.album].filter(Boolean).join(' · ');
+        const img = $('.cover');
+        if (img) { img.removeAttribute('src'); img.src = `/cover?id=${encodeURIComponent(s.id)}&t=${Date.now()}`; img.onerror = () => img.removeAttribute('src'); }
+      }
+      const box = np.firstElementChild; box.classList.remove('swap'); void box.offsetWidth; box.classList.add('swap');
+    }
+    // the one-line text follows format changes straight away, not only on the next song
+    if (layout === 'line') $('.song').textContent = s.line || [s.artist, s.title].filter(Boolean).join(' - ');
+    np.classList.toggle('paused', !s.playing);
+    if (layout === 'card') $('.state').textContent = s.playing ? 'now playing' : 'paused';
+    np.classList.toggle('hidden', !!q.get('hidepaused') && !s.playing);
+    tick();
+  }
+
+  function tick() {
+    if (!s || !s.id) return;
+    const pos = Math.min(s.duration || Infinity, s.position + (s.playing ? (performance.now() - got) / 1000 : 0));
+    const dur = s.duration || 0;
+    if (layout === 'card') {
+      const cur = $('.cur'); if (cur) { cur.textContent = fmt(pos); $('.dur').textContent = fmt(dur); $('.bar b').style.width = dur ? `${Math.min(100, pos / dur * 100)}%` : '0%'; }
+    } else {
+      const t = $('.time'); if (t) t.textContent = dur ? `${fmt(pos)} / ${fmt(dur)}` : fmt(pos);
+    }
+  }
+  setInterval(tick, 250);
+
+  function connect() {
+    const es = new EventSource('/events');
+    es.onmessage = e => apply(JSON.parse(e.data));
+    es.onerror = () => { es.close(); setTimeout(connect, 2000); };
+  }
+  connect();
+</script>
+</body>
+</html>

@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=19">
+  <link rel="manifest" href="manifest.webmanifest?v=20">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -221,7 +221,25 @@
     </section>
     <section>
       <p class="eyebrow">obs · now playing</p>
-      <p class="hint">keeps a <b>.txt</b> file updated with the current song, so an OBS text source can show it on stream. needs chrome or edge on a computer.</p>
+      <div class="overlay-box" id="overlayBox" hidden>
+        <p class="hint"><b>overlay</b>: a live “now playing” card with the cover, song and a ticking <b>1:23 / 3:45</b>. in OBS add a <b>Browser</b> source with this address:</p>
+        <div class="overlay-url">
+          <input type="text" id="overlayUrl" readonly aria-label="overlay address">
+          <button class="pill" id="overlayCopy" type="button">copy</button>
+        </div>
+        <div class="overlay-opts">
+          <label class="field"><span>style</span>
+            <select id="overlayLayout">
+              <option value="card">card with cover</option>
+              <option value="line">one line + time</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="overlayHide"> hide while paused</label>
+        </div>
+        <button class="link-btn" id="overlayPreview" type="button">preview in browser</button>
+        <p class="hint small">size in OBS: 520 × 140 for the card, 900 × 70 for one line.</p>
+      </div>
+      <p class="hint" id="obsTxtHint">keeps a <b>.txt</b> file updated with the current song, so an OBS text source can show it on stream. needs chrome or edge on a computer.</p>
       <div class="obs-row">
         <button class="pill" id="obsLink"><svg><use href="#i-broadcast"/></svg><span id="obsLinkText">link nowplaying.txt</span></button>
         <span class="obs-status" id="obsStatus">not linked</span>
@@ -229,11 +247,19 @@
       <label class="field"><span>format</span>
         <select id="obsFormat">
           <option value="{artist} - {title}">Artist - Title</option>
+          <option value="🎵 {artist} - {title}">🎵 Artist - Title</option>
+          <option value="🎵 {title} - {artist}">🎵 Title - Artist</option>
+          <option value="🎧 {artist} - {title}">🎧 Artist - Title</option>
+          <option value="♪ {artist} - {title}">♪ Artist - Title</option>
           <option value="{title} - {artist}">Title - Artist</option>
           <option value="{title}">Title only</option>
           <option value="♪ {title} — {artist}">♪ Title — Artist</option>
           <option value="now playing: {title} by {artist}">now playing: Title by Artist</option>
+          <option value="custom">custom…</option>
         </select>
+      </label>
+      <label class="field" id="obsCustomField" hidden><span>your format: use {artist}, {title} and {album}</span>
+        <input type="text" id="obsCustom" maxlength="120" placeholder="🎵 {artist} - {title}">
       </label>
       <label class="check"><input type="checkbox" id="obsPause"> clear the text while paused</label>
       <label class="check"><input type="checkbox" id="obsPad"> add spacing at the end (for the OBS scroll filter)</label>
@@ -264,7 +290,7 @@
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v19</p>
+      <p class="version">moonlit v20</p>
     </section>
   </div>
 
@@ -277,6 +303,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>

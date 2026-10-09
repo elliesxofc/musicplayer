@@ -769,6 +769,8 @@ function clearNowPlaying() {
   el.title.textContent = 'nothing playing yet';
   el.nowState.textContent = 'ready when you are';
   queueObsWrite();
+  overlayCoverFor = null;
+  pushOverlay();
   el.artist.textContent = 'add a few songs to begin';
   el.cover.hidden = true; el.labelIcon.hidden = false;
   document.documentElement.style.removeProperty('--glow');
@@ -790,6 +792,7 @@ async function loadTrack(id, startAt = 0) {
   el.title.textContent = t.title;
   el.title.title = t.title;
   queueObsWrite();
+  overlayTrack();
   el.artist.textContent = [t.artist, t.album].filter(Boolean).join(' — ') || 'unknown artist';
   document.title = `${t.title} · moonlit`;
   const url = coverUrl(t);
@@ -1047,13 +1050,20 @@ window.addEventListener('pagehide', () => saveProgress(true));
 const obs = { handle: null, granted: false, asked: false };
 let obsTimer = null, obsChain = Promise.resolve();
 
+// the song as one line, in the format picked under "obs · now playing"
+function formatSong(t) {
+  if (!t) return '';
+  let s = prefs.get('obsFormat', '{artist} - {title}');
+  if (s === 'custom') s = prefs.get('obsCustom', '') || '{artist} - {title}';
+  if (!t.artist) s = s.replace(/\s*[-—]\s*\{artist\}|\{artist\}\s*[-—]\s*|\s+by\s+\{artist\}/g, '');
+  if (!t.album) s = s.replace(/\s*[-—·|(\[]?\s*\{album\}\s*[)\]]?/g, '');
+  return s.replace(/\{title\}/g, () => t.title).replace(/\{artist\}/g, () => t.artist || '').replace(/\{album\}/g, () => t.album || '').trim();
+}
+
 function obsText() {
   const t = byId(state.currentId);
   if (!t || (prefs.get('obsPause', false) && audio.paused)) return '';
-  let s = prefs.get('obsFormat', '{artist} - {title}');
-  if (!t.artist) s = s.replace(/\s*[-—]\s*\{artist\}|\{artist\}\s*[-—]\s*|\s+by\s+\{artist\}/g, '');
-  s = s.replace('{title}', () => t.title).replace('{artist}', () => t.artist || '');
-  return s + (prefs.get('obsPad', false) ? '        ' : '');
+  return formatSong(t) + (prefs.get('obsPad', false) ? '        ' : '');
 }
 
 function queueObsWrite() {
@@ -1145,12 +1155,21 @@ function syncObsUi() {
 
 el.obsLink.onclick = linkObs;
 el.obsUnlink.onclick = unlinkObs;
-el.obsFormat.onchange = () => { prefs.set('obsFormat', el.obsFormat.value); queueObsWrite(); };
+el.obsFormat.onchange = () => {
+  prefs.set('obsFormat', el.obsFormat.value);
+  $('#obsCustomField').hidden = el.obsFormat.value !== 'custom';
+  if (el.obsFormat.value === 'custom') $('#obsCustom').focus();
+  queueObsWrite(); pushOverlay();
+};
+$('#obsCustom').addEventListener('input', () => { prefs.set('obsCustom', $('#obsCustom').value); queueObsWrite(); pushOverlay(); });
 el.obsPause.onchange = () => { prefs.set('obsPause', el.obsPause.checked); queueObsWrite(); };
 el.obsPad.onchange = () => { prefs.set('obsPad', el.obsPad.checked); queueObsWrite(); };
 
 async function restoreObs() {
   el.obsFormat.value = prefs.get('obsFormat', '{artist} - {title}');
+  if (!el.obsFormat.value) el.obsFormat.value = '{artist} - {title}'; // a format from an older version
+  $('#obsCustom').value = prefs.get('obsCustom', '');
+  $('#obsCustomField').hidden = el.obsFormat.value !== 'custom';
   el.obsPause.checked = prefs.get('obsPause', false);
   el.obsPad.checked = prefs.get('obsPad', false);
   if (desktop) {
@@ -1297,6 +1316,58 @@ async function openExternalFiles(paths, { play = true, quiet = false, replace = 
   state.history = [];
   await playTrack(ids[0]);
   return fresh.length;
+}
+
+/* ───────────── now-playing overlay for OBS (desktop app) ───────────── */
+let overlayCoverFor = null;
+function pushOverlay() {
+  if (!desktop || !desktop.overlay) return;
+  const t = byId(state.currentId);
+  desktop.overlay.state(t ? {
+    id: t.id, title: t.title, artist: t.artist || '', album: t.album || '', line: formatSong(t),
+    duration: Number.isFinite(audio.duration) ? audio.duration : (t.duration || 0),
+    position: audio.currentTime || 0, playing: !audio.paused,
+  } : {});
+}
+// the cover goes over first, so it's ready when the overlay asks for it
+async function overlayTrack() {
+  if (!desktop || !desktop.overlay) return;
+  const t = byId(state.currentId);
+  if (t && overlayCoverFor !== t.id) {
+    overlayCoverFor = t.id;
+    const bytes = t.cover ? await t.cover.arrayBuffer().catch(() => null) : null;
+    desktop.overlay.cover(t.id, t.cover ? t.cover.type : '', bytes);
+  }
+  pushOverlay();
+}
+
+async function setupOverlay() {
+  if (!desktop.overlay) return;
+  ['play', 'pause', 'seeked', 'loadedmetadata', 'durationchange'].forEach(ev => audio.addEventListener(ev, pushOverlay));
+  setInterval(() => { if (!audio.paused) pushOverlay(); }, 15000); // keep the clock in step
+  const base = await desktop.overlay.url().catch(() => null);
+  if (!base) return;
+  $('#overlayBox').hidden = false;
+  $('#obsTxtHint').innerHTML = 'or keep a <b>.txt</b> file updated with the song name, for an OBS <b>Text</b> source:';
+  const layout = $('#overlayLayout'), hide = $('#overlayHide'), input = $('#overlayUrl');
+  layout.value = prefs.get('overlayLayout', 'card');
+  hide.checked = prefs.get('overlayHide', false);
+  const url = () => {
+    const p = new URLSearchParams();
+    if (layout.value === 'line') p.set('layout', 'line');
+    if (hide.checked) p.set('hidepaused', '1');
+    return base + (p.toString() ? `?${p}` : '');
+  };
+  const show = () => { input.value = url(); };
+  layout.onchange = () => { prefs.set('overlayLayout', layout.value); show(); };
+  hide.onchange = () => { prefs.set('overlayHide', hide.checked); show(); };
+  $('#overlayCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(input.value); } catch { input.select(); document.execCommand('copy'); }
+    toast('overlay address copied ✦ paste it into an OBS Browser source');
+  };
+  $('#overlayPreview').onclick = () => desktop.overlay.open(input.value);
+  show();
+  overlayTrack();
 }
 
 /* ───────────── downloader (desktop app) ───────────── */
@@ -1518,6 +1589,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     obsSection.querySelector('.hint').innerHTML = 'keeps a <b>.txt</b> file updated with the current song, so an OBS text source can show it on stream.';
     setupDesktop();
     setupDownloader();
+    setupOverlay();
   }
   setInterval(updateGreeting, 60_000);
   setVolume(prefs.get('volume', 0.8), false);

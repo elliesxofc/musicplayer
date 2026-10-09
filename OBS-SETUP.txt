@@ -1,6 +1,30 @@
 moonlit → OBS Studio: show the song you're playing on stream
 =============================================================
 
+NEW (desktop app): live "now playing" overlay
+---------------------------------------------
+a pink card with the cover, song name, artist and a ticking 1:23 / 3:45 bar.
+it updates the moment the song changes, and shows "paused" when you pause.
+
+  1. moonlit → sliders button → "obs · now playing" → copy the overlay address
+     (usually  http://localhost:4848/overlay )
+  2. in OBS: Sources → +  → "Browser" → name it "moonlit overlay" → OK
+  3. URL: paste the address. Width 520, Height 140 (card)
+     or pick "one line + time" in moonlit first and use Width 900, Height 70
+  4. leave "Shutdown source when not visible" OFF → OK
+
+  options in moonlit: style (card with cover / one line + time) and
+  "hide while paused". the address changes to match; paste it again in OBS.
+  the overlay only works while the moonlit desktop app is open, and only on
+  this PC (nobody on the internet can reach it).
+
+the song name format (🎵 Artist - Title, custom, …) applies to the one-line
+overlay and to the .txt file below.
+
+
+the .txt file (works in the website version too)
+
+
 how it works
 ------------
 moonlit keeps a little text file (nowplaying.txt) updated with the current

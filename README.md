@@ -72,6 +72,20 @@ portable version can't register itself), then right-click any song → **Open wi
 moonlit, and pick it for .mp3, .m4a, .flac, .wav, .ogg, .opus, .aac. double-clicking a
 song then plays it in moonlit (and adds it to your library the first time).
 
+**download songs (desktop app):** the ⬇ button at the top. paste (or drag in) a link:
+
+- YouTube / YouTube Music songs and playlists, SoundCloud and other sites yt-dlp supports
+- Spotify songs, albums and playlists (first 100 songs). Spotify's own audio is copy-protected
+  and never touched: moonlit reads the song names, finds each one on YouTube and tags the
+  file with the Spotify title, artist, album and cover
+- m4a (fastest, no re-encoding) or mp3; 3 downloads at once, each in 4 parallel chunks
+- saved to Music/moonlit (changeable) and added to your library automatically
+- uses [yt-dlp](https://github.com/yt-dlp/yt-dlp), downloaded on first use and kept up to date,
+  and a bundled ffmpeg
+
+only download what you're allowed to, and keep in mind streaming copyrighted songs can get a
+stream muted or taken down.
+
 the desktop app keeps its own library, separate from the website and the phone app,
 so add your songs inside it.
 

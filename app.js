@@ -309,6 +309,7 @@ function buildThemeGrid() {
 }
 
 function setSettings(open) {
+  if (open) setDownloads(false);
   el.settings.hidden = !open;
   el.settingsBtn.setAttribute('aria-expanded', String(open));
 }
@@ -326,6 +327,7 @@ async function showStorage() {
 $('#settingsClose').onclick = () => setSettings(false);
 document.addEventListener('click', e => {
   if (!el.settings.hidden && !e.target.closest('#settings, #settingsBtn')) setSettings(false);
+  if (!$('#downloads').hidden && !e.target.closest('#downloads, #dlBtn, .toast')) setDownloads(false);
 });
 
 function updateGreeting() {
@@ -633,7 +635,7 @@ async function makeRecord(f) {
 }
 
 let importing = false;
-async function addFiles(fileList) {
+async function addFiles(fileList, { quiet = false } = {}) {
   const files = [...fileList].filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
   if (!files.length) { toast("those don't look like songs"); return; }
   if (importing) { toast('still adding the last batch, one sec…'); return; }
@@ -643,7 +645,7 @@ async function addFiles(fileList) {
   let added = 0;
   try {
     for (let i = 0; i < total; i += CHUNK) {
-      if (total > CHUNK) toast(`adding songs… ${added} / ${total}`, 0);
+      if (total > CHUNK && !quiet) toast(`adding songs… ${added} / ${total}`, 0);
       const recs = await Promise.all(files.slice(i, i + CHUNK).map(makeRecord));
       if (state.persistent) {
         try { await DB.putMany(recs); } catch (err) {
@@ -663,7 +665,7 @@ async function addFiles(fileList) {
   }
   saveOrder();
   renderList();
-  if (state.persistent || added < 2) toast(`added ${added} song${added === 1 ? '' : 's'} ✦`);
+  if (!quiet && (state.persistent || added < 2)) toast(`added ${added} song${added === 1 ? '' : 's'} ✦`);
   if (!state.currentId && state.tracks.length) loadTrack(state.tracks[0].id);
   fillDurations();
 }
@@ -972,7 +974,7 @@ document.addEventListener('keydown', e => {
   else if (k === 's') el.shuffle.click();
   else if (k === 'r') el.repeat.click();
   else if (k === 'm') el.mute.click();
-  else if (k === 'escape') { setSettings(false); setLibrary(false); }
+  else if (k === 'escape') { setSettings(false); setDownloads(false); setLibrary(false); }
 });
 
 /* ───────────── files in ───────────── */
@@ -982,9 +984,17 @@ el.file.onchange = () => { addFiles(el.file.files); el.file.value = ''; };
 let dragDepth = 0;
 const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
 window.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; el.drop.classList.add('show'); });
-window.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+// desktop app: a link dragged in from the browser goes to the downloader
+const hasLink = e => !!desktop && !hasFiles(e) && [...(e.dataTransfer?.types || [])].includes('text/uri-list');
+window.addEventListener('dragover', e => { if (hasFiles(e) || hasLink(e)) e.preventDefault(); });
 window.addEventListener('dragleave', e => { if (!hasFiles(e)) return; if (--dragDepth <= 0) { dragDepth = 0; el.drop.classList.remove('show'); } });
 window.addEventListener('drop', e => {
+  if (hasLink(e)) {
+    e.preventDefault();
+    const url = e.dataTransfer.getData('text/uri-list').split(/\r?\n/).find(l => l && !l.startsWith('#'));
+    if (url && setDownloads.submit) setDownloads.submit(url);
+    return;
+  }
   if (!hasFiles(e)) return;
   e.preventDefault();
   dragDepth = 0;
@@ -1224,7 +1234,7 @@ const sameFile = (t, f) => t.file && t.file.name === f.name && t.file.size === f
 
 // Double-clicking a song plays it. It's added to your library the first time;
 // opening the same song again just plays the copy you already have.
-async function openExternalFiles(paths) {
+async function openExternalFiles(paths, { play = true, quiet = false } = {}) {
   const files = [];
   for (const p of paths) {
     const r = await desktop.readFile(p).catch(() => null);
@@ -1232,16 +1242,135 @@ async function openExternalFiles(paths) {
     const ext = r.name.split('.').pop().toLowerCase();
     files.push(new File([r.data], r.name, { type: MIME[ext] || 'audio/mpeg', lastModified: r.lastModified }));
   }
-  if (!files.length) { toast("couldn't open that file"); return; }
+  if (!files.length) { if (!quiet) toast("couldn't open that file"); return 0; }
   while (importing) await new Promise(r => setTimeout(r, 300));
   const fresh = files.filter(f => !state.tracks.some(t => sameFile(t, f)));
-  if (fresh.length) await addFiles(fresh);
+  if (fresh.length) await addFiles(fresh, { quiet });
   const ids = files.map(f => state.tracks.find(t => sameFile(t, f))?.id).filter(Boolean);
-  if (!ids.length) return;
+  if (!ids.length || !play) return fresh.length;
   // several songs: play just those; one song: play it, then carry on through your library
   state.queue = ids.length > 1 ? ids : state.tracks.map(t => t.id);
   state.history = [];
   await playTrack(ids[0]);
+  return fresh.length;
+}
+
+/* ───────────── downloader (desktop app) ───────────── */
+function setDownloads(open) {
+  const panel = $('#downloads');
+  if (!panel || (open && !desktop)) return;
+  if (open) setSettings(false);
+  panel.hidden = !open;
+  $('#dlBtn').setAttribute('aria-expanded', String(open));
+  if (open) setTimeout(() => $('#dlUrl').focus(), 50);
+}
+
+function setupDownloader() {
+  const D = desktop.download;
+  const list = $('#dlList'), rows = new Map(), jobs = new Map();
+  const imported = new Set();
+  let toImport = [], importTimer = null;
+  $('#dlBtn').hidden = false;
+  $('#dlBtn').onclick = e => { e.stopPropagation(); setDownloads($('#downloads').hidden); };
+  $('#dlClose').onclick = () => setDownloads(false);
+
+  // file type
+  const setFormat = f => {
+    prefs.set('dlFormat', f);
+    document.querySelectorAll('#dlFormat button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.format === f)));
+  };
+  document.querySelectorAll('#dlFormat button').forEach(b => b.onclick = () => setFormat(b.dataset.format));
+  setFormat(prefs.get('dlFormat', 'm4a'));
+
+  const addLib = $('#dlAddLib');
+  addLib.checked = prefs.get('dlAddLib', true);
+  addLib.onchange = () => prefs.set('dlAddLib', addLib.checked);
+
+  // the label is right-aligned so long paths show their end; the marks keep slashes in place
+  const showFolder = dir => { $('#dlFolder').textContent = `\u200e${dir}\u200e`; $('#dlFolder').title = dir; };
+  D.folder().then(showFolder);
+  $('#dlChange').onclick = () => D.chooseFolder().then(showFolder);
+  $('#dlOpen').onclick = () => D.openFolder();
+  $('#dlClear').onclick = () => D.clearFinished();
+
+  async function submit(url) {
+    url = String(url || '').trim();
+    if (!url) return;
+    const res = await D.add(url, prefs.get('dlFormat', 'm4a'));
+    if (!res.ok) toast(res.error, 5000);
+    else if (res.count > 1) toast(`${res.count} songs added to the queue ✦`);
+  }
+  $('#dlForm').onsubmit = e => { e.preventDefault(); const input = $('#dlUrl'); submit(input.value); input.value = ''; };
+  setDownloads.submit = url => { setDownloads(true); submit(url); };
+
+  // finished songs go into the library in small batches, quietly
+  function queueImport(file) {
+    toImport.push(file);
+    clearTimeout(importTimer);
+    importTimer = setTimeout(async () => {
+      const batch = toImport; toImport = [];
+      const n = await openExternalFiles(batch, { play: false, quiet: true });
+      if (n) toast(`${n} downloaded song${n === 1 ? '' : 's'} added to your library ✦`);
+    }, 1200);
+  }
+
+  const statusText = j => ({
+    reading: 'reading the link…',
+    queued: 'waiting…',
+    finding: 'finding it on YouTube…',
+    downloading: [`${Math.round(j.progress || 0)}%`, j.speed, j.eta && `${j.eta} left`].filter(Boolean).join(' · '),
+    converting: 'finishing up…',
+    done: addLib.checked ? 'saved ✦ in your library' : 'saved ✦',
+    error: j.error || 'something went wrong',
+  })[j.status] || j.status;
+
+  function render(job) {
+    jobs.set(job.id, job);
+    let li = rows.get(job.id);
+    if (!li) {
+      li = document.createElement('li');
+      li.className = 'dl-item';
+      li.innerHTML = `<div class="t"></div><div class="s"></div>
+        <div class="acts">
+          <button class="icon-btn retry" aria-label="try again" hidden><svg><use href="#i-retry"/></svg></button>
+          <button class="icon-btn cancel" aria-label="remove"><svg><use href="#i-x"/></svg></button>
+        </div>
+        <div class="bar"><i></i></div>`;
+      li.querySelector('.cancel').onclick = () => D.cancel(job.id);
+      li.querySelector('.retry').onclick = () => D.retry(job.id);
+      rows.set(job.id, li);
+      list.append(li);
+    }
+    li.dataset.status = job.status;
+    li.querySelector('.t').textContent = job.title + (job.artist && job.status !== 'reading' ? ` · ${job.artist}` : '');
+    li.querySelector('.s').textContent = statusText(job);
+    li.querySelector('.bar i').style.width = `${job.status === 'downloading' ? job.progress : 0}%`;
+    li.querySelector('.retry').hidden = job.status !== 'error';
+    li.querySelector('.cancel').setAttribute('aria-label', ['done', 'error'].includes(job.status) ? 'remove from list' : 'cancel');
+    if (job.status === 'done' && job.file && !imported.has(job.id)) {
+      imported.add(job.id);
+      if (addLib.checked) queueImport(job.file);
+    }
+    summary();
+  }
+
+  function summary() {
+    const all = [...jobs.values()];
+    const active = all.filter(j => !['done', 'error'].includes(j.status)).length;
+    const done = all.filter(j => j.status === 'done').length;
+    const failed = all.filter(j => j.status === 'error').length;
+    $('#dlEmpty').hidden = all.length > 0;
+    $('#dlFoot').hidden = all.length === 0;
+    $('#dlSummary').textContent = [active && `${active} to go`, done && `${done} done`, failed && `${failed} failed`].filter(Boolean).join(' · ');
+    $('#dlBadge').hidden = !active;
+    $('#dlBadge').textContent = active;
+  }
+
+  D.onUpdate(render);
+  D.onRemove(id => { rows.get(id)?.remove(); rows.delete(id); jobs.delete(id); summary(); });
+  D.onStatus(text => { $('#dlStatus').textContent = text; $('#dlStatus').hidden = !text; });
+  D.list().then(js => js.forEach(render));
+  summary();
 }
 
 /* ───────────── install as an app ───────────── */
@@ -1316,6 +1445,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   if (desktop) {
     obsSection.querySelector('.hint').innerHTML = 'keeps a <b>.txt</b> file updated with the current song, so an OBS text source can show it on stream.';
     setupDesktop();
+    setupDownloader();
   }
   setInterval(updateGreeting, 60_000);
   setVolume(prefs.get('volume', 0.8), false);

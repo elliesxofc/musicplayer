@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=15">
+  <link rel="manifest" href="manifest.webmanifest?v=16">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=15">
+  <link rel="stylesheet" href="style.css?v=16">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -39,6 +39,9 @@
     <symbol id="i-note" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5V6l10-2v11.5"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="15.5" r="2.5"/></g></symbol>
     <symbol id="i-sliders" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></g></symbol>
     <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 2.5c.5 4.6 2.4 6.9 7.5 7.5-5.1.6-7 2.9-7.5 7.5-.5-4.6-2.4-6.9-7.5-7.5 5.1-.6 7-2.9 7.5-7.5z" fill="currentColor"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/></g></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v4h4"/></g></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
     <symbol id="i-broadcast" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></g></symbol>
   </svg>
 
@@ -60,6 +63,9 @@
       <button class="greeting" id="greeting" title="tell me your name">good evening</button>
       <div class="top-actions">
         <span class="obs-live" id="obsLive" hidden title="writing the song name for OBS"><svg><use href="#i-broadcast"/></svg>obs</span>
+        <button class="icon-btn" id="dlBtn" aria-label="download songs" aria-expanded="false" aria-controls="downloads" hidden>
+          <svg><use href="#i-download"/></svg><span class="dl-badge" id="dlBadge" hidden></span>
+        </button>
         <button class="icon-btn" id="settingsBtn" aria-label="customize" aria-expanded="false" aria-controls="settings">
           <svg><use href="#i-sliders"/></svg>
         </button>
@@ -150,6 +156,36 @@
     <div class="watermark" id="watermark" hidden></div>
   </div>
 
+  <div class="panel dl-panel" id="downloads" role="dialog" aria-label="download songs" hidden>
+    <div class="panel-head">
+      <h3>download songs</h3>
+      <button class="icon-btn" id="dlClose" aria-label="close"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <form class="dl-form" id="dlForm" autocomplete="off">
+      <input type="text" id="dlUrl" placeholder="paste a YouTube or Spotify link…" spellcheck="false" aria-label="link to download">
+      <button class="pill" type="submit"><svg><use href="#i-download"/></svg>get</button>
+    </form>
+    <div class="seg dl-format" id="dlFormat" role="radiogroup" aria-label="file type">
+      <button type="button" role="radio" data-format="m4a">m4a · fastest</button>
+      <button type="button" role="radio" data-format="mp3">mp3 · plays anywhere</button>
+    </div>
+    <p class="hint small">YouTube and YouTube Music songs or playlists, SoundCloud, and Spotify songs, albums and playlists (first 100 songs). Spotify songs are found on YouTube and tagged with their Spotify name, artist and cover.</p>
+    <label class="check"><input type="checkbox" id="dlAddLib"> add finished songs to my library</label>
+    <div class="dl-folder">
+      <svg><use href="#i-folder"/></svg>
+      <span id="dlFolder" title=""></span>
+      <button class="link-btn" id="dlChange">change</button>
+      <button class="link-btn" id="dlOpen">open</button>
+    </div>
+    <p class="dl-status" id="dlStatus" hidden></p>
+    <ol class="dl-list" id="dlList"></ol>
+    <p class="dl-empty" id="dlEmpty">nothing downloading. paste a link above ♡</p>
+    <div class="dl-foot" id="dlFoot" hidden>
+      <span id="dlSummary"></span>
+      <button class="link-btn" id="dlClear">clear finished</button>
+    </div>
+  </div>
+
   <div class="panel" id="settings" role="dialog" aria-label="customize" hidden>
     <div class="panel-head">
       <h3>make it yours</h3>
@@ -213,7 +249,7 @@
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v15</p>
+      <p class="version">moonlit v16</p>
     </section>
   </div>
 
@@ -226,6 +262,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

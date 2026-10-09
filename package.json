@@ -1,7 +1,7 @@
 {
   "name": "moonlit",
   "productName": "moonlit",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "a little private music player, just for you",
   "author": "elliesxofc",
   "license": "UNLICENSED",
@@ -127,6 +127,13 @@
         "role": "Viewer",
         "icon": "icons/audio-file.ico"
       }
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
     ]
+  },
+  "dependencies": {
+    "ffmpeg-static": "5.3.0",
+    "spotify-url-info": "3.3.3"
   }
 }

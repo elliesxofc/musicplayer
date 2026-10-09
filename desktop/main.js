@@ -204,3 +204,27 @@ ipcMain.handle('files:read', async (_e, file) => {
     return null;
   }
 });
+
+/* ───────────── downloader (YouTube / Spotify links → songs) ───────────── */
+let downloader = null;
+function dl() {
+  if (!downloader) {
+    const { createDownloader } = require('./downloader');
+    downloader = createDownloader({
+      send: (channel, payload) => BrowserWindow.getAllWindows().forEach(w => w.webContents.send(channel, payload)),
+      readConfig,
+      writeConfig,
+      allowRead: file => opened.add(file), // so the page can add finished songs to the library
+    });
+  }
+  return downloader;
+}
+ipcMain.handle('dl:add', (_e, url, format) => dl().add(url, format));
+ipcMain.handle('dl:list', () => dl().list());
+ipcMain.handle('dl:cancel', (_e, id) => dl().cancel(Number(id)));
+ipcMain.handle('dl:retry', (_e, id) => dl().retry(Number(id)));
+ipcMain.handle('dl:clear', () => dl().clearFinished());
+ipcMain.handle('dl:folder', () => dl().folder());
+ipcMain.handle('dl:choose-folder', () => dl().chooseFolder());
+ipcMain.handle('dl:open-folder', () => dl().openFolder());
+app.on('before-quit', () => { if (downloader) downloader.stopAll(); });

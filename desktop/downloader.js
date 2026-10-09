@@ -39,7 +39,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   const update = job => { if (jobs.has(job.id)) send('dl:update', publicJob(job)); };
   const publicJob = j => ({
     id: j.id, title: j.title, artist: j.artist, source: j.source, status: j.status,
-    progress: j.progress, speed: j.speed, eta: j.eta, error: j.error, file: j.file, format: j.format,
+    progress: j.progress, speed: j.speed, eta: j.eta, error: j.error, file: j.file, format: j.format, note: j.note || '',
   });
   const status = text => send('dl:status', text);
 
@@ -201,19 +201,30 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
         job.url = await findOnYouTube(job);
       }
       if (job.status === 'cancelled') return;
-      job.status = 'downloading'; update(job);
+      job.status = 'downloading'; job.note = ''; update(job);
       const file = await download(job);
       job.file = job.source === 'spotify' ? await retag(file, job) : file;
       allowRead(job.file);
       Object.assign(job, { status: 'done', progress: 100, speed: '', eta: '' });
     } catch (err) {
-      if (job.status !== 'cancelled') Object.assign(job, { status: 'error', error: err.message || String(err) });
+      const message = err.message || String(err);
+      if (job.status === 'cancelled') { /* nothing to do */ }
+      else if (RETRYABLE.test(message) && (job.attempts || 0) < 2) {
+        // YouTube sometimes refuses a download (403), mostly when it's busy: wait, then try again more gently
+        job.attempts = (job.attempts || 0) + 1;
+        Object.assign(job, { status: 'waiting', note: `YouTube said no, trying again (${job.attempts}/2)…`, progress: 0, speed: '', eta: '' });
+        setTimeout(() => { if (job.status === 'waiting') { job.status = 'queued'; update(job); pump(); } }, 3000 * job.attempts);
+      } else {
+        Object.assign(job, { status: 'error', error: message });
+      }
     } finally {
       running.delete(job.id);
       update(job);
       pump();
     }
   }
+
+  const RETRYABLE = /403|forbidden|timed out|connection (reset|aborted)|temporar|incomplete|429/i;
 
   function download(job) {
     const dir = outDir();
@@ -224,8 +235,8 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
       '-f', job.format === 'm4a' ? 'bestaudio[ext=m4a]/bestaudio/best' : 'bestaudio/best',
       '-x', '--audio-format', job.format, '--audio-quality', '0',
       '--embed-metadata', '--embed-thumbnail', '--convert-thumbnails', 'jpg',
-      // speed: fetch several pieces at once, in larger chunks
-      '-N', '4', '--http-chunk-size', '10M',
+      // speed: fetch several pieces at once, in larger chunks (retries go one piece at a time)
+      ...(job.attempts ? ['--retries', '10', '--fragment-retries', '10'] : ['-N', '4', '--http-chunk-size', '10M', '--retries', '5']),
       '--no-mtime', '--newline', '--progress',
       '--progress-template', 'download:MOONLIT_PROGRESS %(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s',
       '--print', 'after_move:MOONLIT_FILE %(filepath)s',
@@ -323,10 +334,16 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     pump();
   }
 
+  function cancelAll() {
+    for (const job of [...jobs.values()]) {
+      if (!['done', 'error'].includes(job.status)) cancel(job.id);
+    }
+  }
+
   function retry(id) {
     const job = jobs.get(id);
     if (!job || job.status !== 'error') return;
-    Object.assign(job, { status: 'queued', error: '', progress: 0 });
+    Object.assign(job, { status: 'queued', error: '', note: '', attempts: 0, progress: 0 });
     update(job);
     ensureReady().then(pump, err => { Object.assign(job, { status: 'error', error: err.message }); update(job); });
   }
@@ -359,7 +376,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   }
 
   return {
-    add, cancel, retry, clearFinished, chooseFolder, openFolder, stopAll,
+    add, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll,
     list: () => [...jobs.values()].map(publicJob),
     folder: outDir,
   };

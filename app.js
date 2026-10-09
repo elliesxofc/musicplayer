@@ -54,6 +54,7 @@ const DB = (() => {
     put: rec => run('readwrite', s => { s.put(rec); }),
     putMany: recs => run('readwrite', s => { for (const r of recs) s.put(r); }),
     del: id => run('readwrite', s => { s.delete(id); }),
+    clear: () => run('readwrite', s => { s.clear(); }),
     // small key/value store, used for the OBS file handle
     getKV: key => run('readonly', s => s.get(key), 'kv'),
     setKV: (key, val) => run('readwrite', s => { val === undefined ? s.delete(key) : s.put(val, key); }, 'kv'),
@@ -313,7 +314,7 @@ function setSettings(open) {
   el.settings.hidden = !open;
   el.settingsBtn.setAttribute('aria-expanded', String(open));
 }
-el.settingsBtn.onclick = e => { e.stopPropagation(); setSettings(el.settings.hidden); if (!el.settings.hidden) showStorage(); };
+el.settingsBtn.onclick = e => { e.stopPropagation(); setSettings(el.settings.hidden); if (!el.settings.hidden) { showStorage(); showLibraryInfo(); } };
 
 const fmtBytes = b => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(b / 1e6)) + ' MB';
 async function showStorage() {
@@ -714,6 +715,33 @@ async function removeTrack(id) {
 }
 
 function saveOrder() { prefs.set('order', state.tracks.map(t => t.id)); }
+
+// Empties moonlit's library (the song copies it keeps). Files on your PC aren't touched.
+async function clearLibrary() {
+  const n = state.tracks.length;
+  if (!n) { toast('your library is already empty'); return; }
+  if (!confirm(`remove all ${n.toLocaleString()} songs from moonlit?\n\nthis empties moonlit's library. song files on your computer stay where they are.`)) return;
+  pause();
+  clearNowPlaying();
+  for (const url of coverUrls.values()) URL.revokeObjectURL(url);
+  coverUrls.clear();
+  state.tracks = [];
+  state.queue = [];
+  state.history = [];
+  reindex();
+  if (state.persistent) await DB.clear().catch(() => {});
+  prefs.set('last', null);
+  saveOrder();
+  renderList();
+  showLibraryInfo();
+  toast('library cleared. add songs whenever you like ♡');
+}
+function showLibraryInfo() {
+  const n = state.tracks.length;
+  $('#libInfo').textContent = n ? `${n.toLocaleString()} song${n === 1 ? '' : 's'} in your library` : 'your library is empty';
+  $('#libClear').hidden = !n;
+}
+$('#libClear').onclick = clearLibrary;
 
 async function toggleFav(id = state.currentId) {
   const t = byId(id);
@@ -1292,6 +1320,10 @@ function setupDownloader() {
   $('#dlChange').onclick = () => D.chooseFolder().then(showFolder);
   $('#dlOpen').onclick = () => D.openFolder();
   $('#dlClear').onclick = () => D.clearFinished();
+  $('#dlStopAll').onclick = () => {
+    const n = [...jobs.values()].filter(j => !['done', 'error'].includes(j.status)).length;
+    if (n && confirm(`stop all ${n} downloads that haven't finished?`)) D.cancelAll();
+  };
 
   async function submit(url, { askPlaylist = true } = {}) {
     url = String(url || '').trim();
@@ -1333,7 +1365,8 @@ function setupDownloader() {
 
   const statusText = j => ({
     reading: 'reading the link…',
-    queued: 'waiting…',
+    queued: j.note || 'waiting…',
+    waiting: j.note || 'trying again soon…',
     finding: 'finding it on YouTube…',
     downloading: [`${Math.round(j.progress || 0)}%`, j.speed, j.eta && `${j.eta} left`].filter(Boolean).join(' · '),
     converting: 'finishing up…',
@@ -1379,6 +1412,8 @@ function setupDownloader() {
     $('#dlEmpty').hidden = all.length > 0;
     $('#dlFoot').hidden = all.length === 0;
     $('#dlSummary').textContent = [active && `${active} to go`, done && `${done} done`, failed && `${failed} failed`].filter(Boolean).join(' · ');
+    $('#dlStopAll').hidden = !active;
+    $('#dlClear').hidden = !(done + failed);
     $('#dlBadge').hidden = !active;
     $('#dlBadge').textContent = active;
   }

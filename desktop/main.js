@@ -223,6 +223,7 @@ ipcMain.handle('dl:add', (_e, url, format) => dl().add(url, format));
 ipcMain.handle('dl:list', () => dl().list());
 ipcMain.handle('dl:cancel', (_e, id) => dl().cancel(Number(id)));
 ipcMain.handle('dl:retry', (_e, id) => dl().retry(Number(id)));
+ipcMain.handle('dl:cancel-all', () => dl().cancelAll());
 ipcMain.handle('dl:clear', () => dl().clearFinished());
 ipcMain.handle('dl:folder', () => dl().folder());
 ipcMain.handle('dl:choose-folder', () => dl().chooseFolder());

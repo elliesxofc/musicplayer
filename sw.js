@@ -1,9 +1,9 @@
 /* moonlit service worker: makes the app installable and lets it open offline.
    Your songs aren't cached here (they already live in the browser's own storage).
    Only the app's own files and fonts are. */
-const CACHE = 'moonlit-v17';
+const CACHE = 'moonlit-v18';
 const SHELL = [
-  './', 'index.html', 'style.css?v=17', 'app.js?v=17', 'manifest.webmanifest?v=17',
+  './', 'index.html', 'style.css?v=18', 'app.js?v=18', 'manifest.webmanifest?v=18',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png',
 ];
 

@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
     list: () => ipcRenderer.invoke('dl:list'),
     cancel: id => ipcRenderer.invoke('dl:cancel', id),
     retry: id => ipcRenderer.invoke('dl:retry', id),
+    cancelAll: () => ipcRenderer.invoke('dl:cancel-all'),
     clearFinished: () => ipcRenderer.invoke('dl:clear'),
     folder: () => ipcRenderer.invoke('dl:folder'),
     chooseFolder: () => ipcRenderer.invoke('dl:choose-folder'),

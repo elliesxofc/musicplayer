@@ -131,12 +131,13 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     try {
       await ensureReady();
       const items = isSpotify(url) ? await readSpotify(url) : await readLink(url);
+      const skipped = items.skipped || 0;
       jobs.delete(placeholder.id);
       send('dl:remove', placeholder.id);
-      if (!items.length) return { ok: false, error: 'no songs found in that link' };
+      if (!items.length) return { ok: false, error: skipped ? 'every video in that playlist is deleted or private' : 'no songs found in that link' };
       for (const it of items) newJob({ ...it, format });
       pump();
-      return { ok: true, count: items.length };
+      return { ok: true, count: items.length, skipped };
     } catch (err) {
       Object.assign(placeholder, { status: 'error', title: url, error: err.message || String(err) });
       update(placeholder);
@@ -146,13 +147,18 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
 
   async function readLink(url) {
     const info = await runJson(['--flat-playlist', '-J', '--no-playlist', url]);
-    const entries = info._type === 'playlist' ? (info.entries || []).filter(Boolean) : [info];
-    return entries.map(e => ({
+    const all = info._type === 'playlist' ? (info.entries || []).filter(Boolean) : [info];
+    // playlists keep placeholders for removed videos; those can't be downloaded
+    const gone = e => /^\[(deleted|private) video\]$/i.test(e.title || '') || e.availability === 'private';
+    const entries = all.filter(e => !gone(e));
+    const items = entries.map(e => ({
       source: 'youtube',
       url: e.webpage_url || e.url || (e.id && /youtube/i.test(e.ie_key || info.extractor || '') ? `https://www.youtube.com/watch?v=${e.id}` : url),
       title: e.title || 'untitled',
       artist: e.artist || e.channel || e.uploader || '',
     }));
+    items.skipped = all.length - entries.length;
+    return items;
   }
 
   async function readSpotify(url) {

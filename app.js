@@ -1293,12 +1293,29 @@ function setupDownloader() {
   $('#dlOpen').onclick = () => D.openFolder();
   $('#dlClear').onclick = () => D.clearFinished();
 
-  async function submit(url) {
+  async function submit(url, { askPlaylist = true } = {}) {
     url = String(url || '').trim();
     if (!url) return;
+    // a song opened from inside a playlist: ask whether to get the song or the whole list
+    // (YouTube "Mix" lists, which start with RD, are endless auto-mixes, so those stay one song)
+    const list = (url.match(/[?&]list=([\w-]+)/) || [])[1];
+    if (askPlaylist && list && /[?&]v=/.test(url) && !/^RD/.test(list)) {
+      const choice = $('#dlChoice');
+      choice.hidden = false;
+      choice.querySelector('[data-pick="song"]').onclick = () => { choice.hidden = true; submit(url, { askPlaylist: false }); };
+      choice.querySelector('[data-pick="list"]').onclick = () => {
+        choice.hidden = true;
+        const host = /music\.youtube\.com/i.test(url) ? 'music.youtube.com' : 'www.youtube.com';
+        submit(`https://${host}/playlist?list=${list}`, { askPlaylist: false });
+      };
+      return;
+    }
     const res = await D.add(url, prefs.get('dlFormat', 'm4a'));
-    if (!res.ok) toast(res.error, 5000);
-    else if (res.count > 1) toast(`${res.count} songs added to the queue ✦`);
+    if (!res.ok) { toast(res.error, 5000); return; }
+    const parts = [];
+    if (res.count > 1) parts.push(`${res.count} songs added to the queue ✦`);
+    if (res.skipped) parts.push(`skipped ${res.skipped} deleted or private video${res.skipped === 1 ? '' : 's'}`);
+    if (parts.length) toast(parts.join(' · '), 5000);
   }
   $('#dlForm').onsubmit = e => { e.preventDefault(); const input = $('#dlUrl'); submit(input.value); input.value = ''; };
   setDownloads.submit = url => { setDownloads(true); submit(url); };

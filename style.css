@@ -495,6 +495,11 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .dl-form input:focus { border-color: var(--accent); }
 .dl-form .pill { flex: none; }
 .dl-format { grid-template-columns: 1fr 1fr; margin-bottom: 10px; }
+.dl-choice { margin: 0 0 12px; padding: 12px; border-radius: 14px; background: var(--faint); border: 1px solid var(--accent); }
+.dl-choice p { margin: 0 0 10px; font-size: 13px; }
+.dl-choice div { display: flex; gap: 8px; flex-wrap: wrap; }
+.dl-choice .pill { padding: 8px 14px; font-size: 13px; }
+.dl-choice .pill[data-pick="song"] { background: var(--glass); color: var(--ink); box-shadow: none; border: 1px solid var(--glass-line); }
 .dl-panel .hint.small { margin: 0 0 12px; }
 .dl-folder { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin: 2px 0 12px; }
 .dl-folder svg { width: 16px; height: 16px; flex: none; }

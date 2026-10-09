@@ -53,7 +53,6 @@ for permission every time, and can start with the PC and resume playing by itsel
 the latest run → download **moonlit-windows** (unzip it):
 
 - `moonlit-setup-….exe` installs it like a normal program
-- `moonlit-portable-….exe` runs without installing
 
 Windows may say "Windows protected your PC" because the app isn't signed:
 click **More info → Run anyway**.
@@ -66,8 +65,7 @@ npm start          # opens moonlit
 npm run dist:win   # builds the Windows installer into dist/ (run this on Windows)
 ```
 
-**make it your default music player (Windows):** install with `moonlit-setup` (the
-portable version can't register itself), then right-click any song → **Open with** →
+**make it your default music player (Windows):** install with `moonlit-setup`, then right-click any song → **Open with** →
 **Choose another app** → **moonlit** → **Always**. or: Settings → Apps → Default apps →
 moonlit, and pick it for .mp3, .m4a, .flac, .wav, .ogg, .opus, .aac. double-clicking a
 song then plays it in moonlit (and adds it to your library the first time).

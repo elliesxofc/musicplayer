@@ -35,4 +35,4 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" dist/*.exe \
             --title "moonlit desktop ${{ github.ref_name }}" \
-            --notes "moonlit-setup installs moonlit like a normal program. moonlit-portable runs without installing."
+            --notes "moonlit-setup installs moonlit like a normal program."

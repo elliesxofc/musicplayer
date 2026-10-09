@@ -1,7 +1,7 @@
 {
   "name": "moonlit",
   "productName": "moonlit",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "a little private music player, just for you",
   "author": "elliesxofc",
   "license": "UNLICENSED",
@@ -40,12 +40,6 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "icon": "icons/icon-512.png"
@@ -56,9 +50,6 @@
       "createDesktopShortcut": true,
       "shortcutName": "moonlit",
       "artifactName": "moonlit-setup-${version}.${ext}"
-    },
-    "portable": {
-      "artifactName": "moonlit-portable-${version}.${ext}"
     },
     "mac": {
       "target": "dmg",

@@ -1082,9 +1082,11 @@ const outSel = $('#outputSelect');
 
 async function applySink(id) {
   try {
-    if (audio.setSinkId) await audio.setSinkId(id);
+    // Once music has played, sound runs through the visualizer's AudioContext and
+    // that decides the output; the <audio> element then refuses setSinkId (AbortError).
     const ctx = viz.getCtx();
     if (ctx) await ctx.setSinkId(id);
+    else if (audio.setSinkId) await audio.setSinkId(id);
     return true;
   } catch { return false; }
 }

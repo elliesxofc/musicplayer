@@ -1,7 +1,7 @@
 {
   "name": "moonlit",
   "productName": "moonlit",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "a little private music player, just for you",
   "author": "elliesxofc",
   "license": "UNLICENSED",
@@ -69,6 +69,64 @@
       "target": "AppImage",
       "category": "Audio",
       "icon": "icons/icon-512.png"
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": "mp3",
+        "name": "MP3 audio",
+        "description": "MP3 audio (moonlit)",
+        "role": "Viewer",
+        "icon": "icons/audio-file.ico"
+      },
+      {
+        "ext": "m4a",
+        "name": "MPEG-4 audio",
+        "description": "MPEG-4 audio (moonlit)",
+        "role": "Viewer",
+        "icon": "icons/audio-file.ico"
+      },
+      {
+        "ext": "aac",
+        "name": "AAC audio",
+        "description": "AAC audio (moonlit)",
+        "role": "Viewer",
+        "icon": "icons/audio-file.ico"
+      },
+      {
+        "ext": "flac",
+        "name": "FLAC audio",
+        "description": "FLAC audio (moonlit)",
+        "role": "Viewer",
+        "icon": "icons/audio-file.ico"
+      },
+      {
+        "ext": "wav",
+        "name": "WAV audio",
+        "description": "WAV audio (moonlit)",
+        "role": "Viewer",
+        "icon": "icons/audio-file.ico"
+      },
+      {
+        "ext": "ogg",
+        "name": "Ogg audio",
+        "description": "Ogg audio (moonlit)",
+        "role": "Viewer",
+        "icon": "icons/audio-file.ico"
+      },
+      {
+        "ext": "opus",
+        "name": "Opus audio",
+        "description": "Opus audio (moonlit)",
+        "role": "Viewer",
+        "icon": "icons/audio-file.ico"
+      },
+      {
+        "ext": "aiff",
+        "name": "AIFF audio",
+        "description": "AIFF audio (moonlit)",
+        "role": "Viewer",
+        "icon": "icons/audio-file.ico"
+      }
+    ]
   }
 }

@@ -11,4 +11,8 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
   getOpenAtLogin: () => ipcRenderer.invoke('startup:get'),
   setOpenAtLogin: on => ipcRenderer.invoke('startup:set', !!on),
   version: () => ipcRenderer.invoke('app:version'),
+  // songs opened from Windows (double-click / Open with)
+  takePendingFiles: () => ipcRenderer.invoke('files:pending'),
+  readFile: file => ipcRenderer.invoke('files:read', String(file)),
+  onOpenFiles: callback => ipcRenderer.on('files:open', (_e, files) => callback(files)),
 });

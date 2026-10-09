@@ -1161,6 +1161,32 @@ async function setupDesktop() {
   v.textContent += ` · desktop ${await desktop.version().catch(() => '')}`.trimEnd();
 }
 
+/* ───────────── songs opened from Windows (desktop app as default player) ───────────── */
+const MIME = { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', webm: 'audio/webm', weba: 'audio/webm', aif: 'audio/aiff', aiff: 'audio/aiff' };
+const sameFile = (t, f) => t.file && t.file.name === f.name && t.file.size === f.size;
+
+// Double-clicking a song plays it. It's added to your library the first time;
+// opening the same song again just plays the copy you already have.
+async function openExternalFiles(paths) {
+  const files = [];
+  for (const p of paths) {
+    const r = await desktop.readFile(p).catch(() => null);
+    if (!r) continue;
+    const ext = r.name.split('.').pop().toLowerCase();
+    files.push(new File([r.data], r.name, { type: MIME[ext] || 'audio/mpeg', lastModified: r.lastModified }));
+  }
+  if (!files.length) { toast("couldn't open that file"); return; }
+  while (importing) await new Promise(r => setTimeout(r, 300));
+  const fresh = files.filter(f => !state.tracks.some(t => sameFile(t, f)));
+  if (fresh.length) await addFiles(fresh);
+  const ids = files.map(f => state.tracks.find(t => sameFile(t, f))?.id).filter(Boolean);
+  if (!ids.length) return;
+  // several songs: play just those; one song: play it, then carry on through your library
+  state.queue = ids.length > 1 ? ids : state.tracks.map(t => t.id);
+  state.history = [];
+  await playTrack(ids[0]);
+}
+
 /* ───────────── install as an app ───────────── */
 let installPrompt = null;
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -1258,6 +1284,12 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   const first = last && byId(last.id) ? loadTrack(last.id, last.time || 0)
     : state.tracks.length ? loadTrack(state.tracks[0].id) : null;
   updateTime();
-  // desktop app on an always-on PC: carry on playing after a restart
-  if (desktop && first && prefs.get('autoResume', false)) first.then(play);
+  if (desktop) {
+    desktop.onOpenFiles(openExternalFiles);
+    const opened = await desktop.takePendingFiles().catch(() => []);
+    // opened by double-clicking a song: play that
+    if (opened.length) openExternalFiles(opened);
+    // desktop app on an always-on PC: carry on playing after a restart
+    else if (first && prefs.get('autoResume', false)) first.then(play);
+  }
 })();

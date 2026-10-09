@@ -20,6 +20,31 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'moonlit', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, codeCache: true } },
 ]);
 
+/* ───────────── songs opened from Windows (double-click / Open with) ───────────── */
+const AUDIO_RE = /\.(mp3|m4a|aac|flac|wav|ogg|oga|opus|webm|weba|aiff?)$/i;
+const opened = new Set(); // only files Windows handed us may be read
+let pendingFiles = [];
+
+function audioFilesIn(argv) {
+  return argv.slice(1)
+    .filter(a => !a.startsWith('-') && AUDIO_RE.test(a))
+    .map(a => path.resolve(a))
+    .filter(a => { try { return fs.statSync(a).isFile(); } catch { return false; } });
+}
+function acceptFiles(files) {
+  files.forEach(f => opened.add(f));
+  return files;
+}
+pendingFiles = acceptFiles(audioFilesIn(process.argv));
+// macOS hands files over with an event instead
+app.on('open-file', (e, file) => {
+  e.preventDefault();
+  if (!AUDIO_RE.test(file)) return;
+  acceptFiles([file]);
+  const w = BrowserWindow.getAllWindows()[0];
+  if (w) w.webContents.send('files:open', [file]); else pendingFiles.push(file);
+});
+
 /* ───────────── small settings file in the app's data folder ───────────── */
 const configPath = () => path.join(app.getPath('userData'), 'desktop.json');
 function readConfig() {
@@ -37,11 +62,14 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   let win = null;
 
-  app.on('second-instance', () => {
+  // opening moonlit (or a song) while it's already running: use this window
+  app.on('second-instance', (_e, argv) => {
     if (!win) return;
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
+    const files = acceptFiles(audioFilesIn(argv));
+    if (files.length) win.webContents.send('files:open', files);
   });
 
   function createWindow() {
@@ -163,3 +191,16 @@ ipcMain.handle('startup:set', (_e, on) => {
 });
 
 ipcMain.handle('app:version', () => app.getVersion());
+
+// Songs opened from Windows: the page asks for the list once it's ready,
+// then reads each one. Only files Windows gave us can be read.
+ipcMain.handle('files:pending', () => { const f = pendingFiles; pendingFiles = []; return f; });
+ipcMain.handle('files:read', async (_e, file) => {
+  if (!opened.has(file)) return null;
+  try {
+    const [data, st] = await Promise.all([fs.promises.readFile(file), fs.promises.stat(file)]);
+    return { name: path.basename(file), data, lastModified: st.mtimeMs };
+  } catch {
+    return null;
+  }
+});

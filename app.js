@@ -1262,7 +1262,7 @@ const sameFile = (t, f) => t.file && t.file.name === f.name && t.file.size === f
 
 // Double-clicking a song plays it. It's added to your library the first time;
 // opening the same song again just plays the copy you already have.
-async function openExternalFiles(paths, { play = true, quiet = false } = {}) {
+async function openExternalFiles(paths, { play = true, quiet = false, replace = false } = {}) {
   const files = [];
   for (const p of paths) {
     const r = await desktop.readFile(p).catch(() => null);
@@ -1272,6 +1272,22 @@ async function openExternalFiles(paths, { play = true, quiet = false } = {}) {
   }
   if (!files.length) { if (!quiet) toast("couldn't open that file"); return 0; }
   while (importing) await new Promise(r => setTimeout(r, 300));
+  // a song downloaded again (e.g. after a wrong match) replaces the old copy instead of doubling up
+  let replaced = 0;
+  if (replace) {
+    for (const f of files) {
+      const t = state.tracks.find(x => x.file && x.file.name === f.name && x.file.size !== f.size);
+      if (!t) continue;
+      const tags = await readTags(f);
+      if (coverUrls.has(t.id)) { URL.revokeObjectURL(coverUrls.get(t.id)); coverUrls.delete(t.id); }
+      Object.assign(t, { file: f, duration: 0, cover: tags.cover || null, title: tags.title || t.title, artist: tags.artist || t.artist, album: tags.album || t.album });
+      durationTried.delete(t.id);
+      if (state.persistent) DB.put(t).catch(() => {});
+      replaced++;
+    }
+    if (replaced) { renderList(); fillDurations(); }
+  }
+  openExternalFiles.replaced = replaced;
   const fresh = files.filter(f => !state.tracks.some(t => sameFile(t, f)));
   if (fresh.length) await addFiles(fresh, { quiet });
   const ids = files.map(f => state.tracks.find(t => sameFile(t, f))?.id).filter(Boolean);
@@ -1358,8 +1374,12 @@ function setupDownloader() {
     clearTimeout(importTimer);
     importTimer = setTimeout(async () => {
       const batch = toImport; toImport = [];
-      const n = await openExternalFiles(batch, { play: false, quiet: true });
-      if (n) toast(`${n} downloaded song${n === 1 ? '' : 's'} added to your library ✦`);
+      const n = await openExternalFiles(batch, { play: false, quiet: true, replace: true });
+      const r = openExternalFiles.replaced || 0;
+      const parts = [];
+      if (n) parts.push(`${n} downloaded song${n === 1 ? '' : 's'} added to your library ✦`);
+      if (r) parts.push(`${r} song${r === 1 ? '' : 's'} replaced with the new download`);
+      if (parts.length) toast(parts.join(' · '), 4000);
     }, 1200);
   }
 
@@ -1370,7 +1390,7 @@ function setupDownloader() {
     finding: 'finding it on YouTube…',
     downloading: [`${Math.round(j.progress || 0)}%`, j.speed, j.eta && `${j.eta} left`].filter(Boolean).join(' · '),
     converting: 'finishing up…',
-    done: addLib.checked ? 'saved ✦ in your library' : 'saved ✦',
+    done: (addLib.checked ? 'saved ✦ in your library' : 'saved ✦') + (j.matched ? ` · from “${j.matched}”` : ''),
     error: j.error || 'something went wrong',
   })[j.status] || j.status;
 

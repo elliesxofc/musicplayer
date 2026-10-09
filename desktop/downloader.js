@@ -32,14 +32,15 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   const ytdlp = process.env.MOONLIT_YTDLP || path.join(binDir, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
   const jobs = new Map();
   const running = new Map(); // job id → child process
-  let nextId = 1;
+  let nextId = 1, nextGroup = 1;
+  const usedVideos = new Map(); // album/playlist → YouTube videos already picked for its songs
   let ready = null;
 
   const outDir = () => readConfig().downloadDir || path.join(app.getPath('music'), 'moonlit');
   const update = job => { if (jobs.has(job.id)) send('dl:update', publicJob(job)); };
   const publicJob = j => ({
     id: j.id, title: j.title, artist: j.artist, source: j.source, status: j.status,
-    progress: j.progress, speed: j.speed, eta: j.eta, error: j.error, file: j.file, format: j.format, note: j.note || '',
+    progress: j.progress, speed: j.speed, eta: j.eta, error: j.error, file: j.file, format: j.format, note: j.note || '', matched: j.matched || '',
   });
   const status = text => send('dl:status', text);
 
@@ -135,7 +136,8 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
       jobs.delete(placeholder.id);
       send('dl:remove', placeholder.id);
       if (!items.length) return { ok: false, error: skipped ? 'every video in that playlist is deleted or private' : 'no songs found in that link' };
-      for (const it of items) newJob({ ...it, format });
+      const group = nextGroup++;
+      for (const it of items) newJob({ ...it, format, group });
       pump();
       return { ok: true, count: items.length, skipped };
     } catch (err) {
@@ -178,10 +180,20 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
 
   /* ───────────── matching a Spotify song on YouTube ───────────── */
   async function findOnYouTube(job) {
-    const q = `${job.artist} - ${job.title}`.replace(/"/g, '');
-    const info = await runJson(['--flat-playlist', '-J', `ytsearch6:${q} audio`]);
-    const pick = pickMatch(info.entries || [], job);
-    if (!pick) throw new Error("couldn't find this song on YouTube");
+    const q = `${job.artist.split(',')[0]} ${job.title}`.replace(/"/g, '').trim();
+    // search YouTube Music's song results (cleanest for this) and normal YouTube, side by side
+    const [music, yt] = await Promise.all([
+      runJson(['--flat-playlist', '-J', '--playlist-end', '8', `https://music.youtube.com/search?q=${encodeURIComponent(q)}#songs`]).catch(() => ({})),
+      runJson(['--flat-playlist', '-J', `ytsearch8:${q}`]).catch(() => ({})),
+    ]);
+    const entries = [...(music.entries || []).map(e => ({ ...e, fromMusic: true })), ...(yt.entries || [])];
+    if (!entries.length) throw new Error("couldn't search YouTube right now");
+    if (!usedVideos.has(job.group)) usedVideos.set(job.group, new Set());
+    const used = usedVideos.get(job.group);
+    const pick = pickMatch(entries, job, used);
+    if (!pick) throw new Error("couldn't find this exact song on YouTube");
+    used.add(pick.id); // no other song in this album / playlist gets the same video
+    job.matched = pick.title || '';
     return `https://www.youtube.com/watch?v=${pick.id}`;
   }
 
@@ -240,7 +252,11 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
       '--no-mtime', '--newline', '--progress',
       '--progress-template', 'download:MOONLIT_PROGRESS %(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s',
       '--print', 'after_move:MOONLIT_FILE %(filepath)s',
-      '-o', path.join(dir, '%(artist,uploader,channel)s - %(title).150B.%(ext)s'),
+      // Spotify songs get renamed after tagging, so their temporary name carries the video id:
+      // two songs downloading at once can then never write to the same file
+      '-o', path.join(dir, job.source === 'spotify'
+        ? '%(title).120B [%(id)s].%(ext)s'
+        : '%(artist,uploader,channel)s - %(title).150B.%(ext)s'),
     ];
     if (job.source !== 'spotify') {
       // "Artist - Song (Official Video)" → artist "Artist", title "Song"
@@ -312,10 +328,9 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     });
     if (coverFile) fs.rm(coverFile, () => {});
     if (!ok) { fs.rm(tmp, () => {}); return file; }
-    if (fs.existsSync(target) && path.resolve(target) !== path.resolve(file)) {
-      target = target.replace(new RegExp(`${ext.replace('.', '\\.')}$`), ` (${job.id})${ext}`);
-    }
+    // the same song downloaded again (say, after a wrong match) replaces the old file
     fs.rmSync(file, { force: true });
+    fs.rmSync(target, { force: true });
     fs.renameSync(tmp, target);
     return target;
   }

@@ -38,8 +38,8 @@ drag audio files onto the page or tap **add songs**.
 - customize panel (sliders icon): theme, your name for the greeting, optional watermark
 - **stream control** (desktop app): go live, record, switch scenes, show/hide sources and mix audio in OBS from moonlit, through OBS's WebSocket server. see [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - **OBS overlay** (desktop app): a live now-playing card with cover, a ticking time and music bars that move with the song (switchable), as an OBS Browser source at `http://localhost:4848/overlay`. see [`OBS-SETUP.txt`](OBS-SETUP.txt)
-- **Spotify** (desktop app): shows what the Spotify app on the same PC is playing, with play / pause / skip, through Windows' media controls (works with Spotify Free, no setup), or through a connected Spotify account (Premium); while Spotify plays, the overlay, `nowplaying.txt` and `!song` show the Spotify song
-- **!song** (desktop app): viewers type `!song` in your YouTube live chat and your bot answers with the current song; give it your channel and it finds each live stream by itself
+- **Spotify** (desktop app): shows what the Spotify app on the same PC is playing, with play / pause / skip, through Windows' media controls (works with Spotify Free, no setup), or through a connected Spotify account (Premium); while Spotify plays, the overlay, `nowplaying.txt` and `!nowplaying` show the Spotify song
+- **!nowplaying** (desktop app): viewers type `!nowplaying` in your YouTube live chat and your bot answers with the current song; give it your channel and it finds each live stream by itself
 - **song requests** (desktop app): `!sr`, `!queue`, `!skip` (mods) and `!wrongsong` in YouTube chat, like the song request app. Requests come from your library or YouTube (copyright-free channels only for viewers, downloaded once) and play next
 - **sound output picker**: send the music to a virtual cable (VB-CABLE) so OBS streams it without it playing on your speakers. setup in [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - **effects** (sliders panel): *full* · *lite* (no blur/glow/visualizer, record still spins) · *super lite* (no animations, record put away) for older or always-on PCs

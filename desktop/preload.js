@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
     // how many overlays are open (in OBS or a browser), so the bars are only sampled when seen
     onWatchers: cb => ipcRenderer.on('overlay:watchers', (_e, n) => cb(n)),
   },
-  // !song in YouTube chat
+  // !nowplaying in YouTube chat
   chat: {
     get: () => ipcRenderer.invoke('chat:get'),
     set: settings => ipcRenderer.invoke('chat:set', settings),

@@ -49,7 +49,7 @@ overlay and to the .txt file below.
 NEW (desktop app): Spotify
 --------------------------
 show what's playing on Spotify in moonlit, with play / pause / skip. while
-Spotify is the one playing, the overlay, nowplaying.txt and !song show the
+Spotify is the one playing, the overlay, nowplaying.txt and !nowplaying show the
 Spotify song.
 
 on Windows: nothing to set up, works with Spotify Free. just open the Spotify
@@ -68,13 +68,13 @@ account has Premium):
      paste the Client ID → connect spotify, then press "Agree" in the browser
 
 
-NEW (desktop app): !song in YouTube chat
-----------------------------------------
-viewers type !song (or !np) and your bot answers, e.g.
+NEW (desktop app): !nowplaying in YouTube chat
+----------------------------------------------
+viewers type !nowplaying and your bot answers, e.g.
   🎵 now playing: Unknown Brain - War Zone (1:23 / 3:45)
 
-  moonlit → sliders → "chat · !song":
-  - tick "answer !song in my YouTube chat"
+  moonlit → sliders → "chat · !nowplaying":
+  - tick "answer !nowplaying in my YouTube chat"
   - your channel, like @yourname: moonlit finds your live stream by itself
     each time you go live (or paste one stream's link)
   - bot login: the same line as YOUTUBE_BOT_CREDENTIALS in the song request
@@ -83,8 +83,8 @@ viewers type !song (or !np) and your bot answers, e.g.
 
 NEW (desktop app): song requests in YouTube chat
 -------------------------------------------------
-like the song request app, inside moonlit. turn on !song first (above), then
-moonlit → sliders → "chat · !song" → "take song requests".
+like the song request app, inside moonlit. turn on !nowplaying first (above), then
+moonlit → sliders → "chat · !nowplaying" → "take song requests".
 
   !sr <song name or YouTube link>   request a song
   !queue                            the next 3 requested songs

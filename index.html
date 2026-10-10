@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=26">
+  <link rel="manifest" href="manifest.webmanifest?v=27">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=26">
+  <link rel="stylesheet" href="style.css?v=27">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -335,7 +335,7 @@
     </section>
     <section id="spotifySection" hidden>
       <p class="eyebrow">spotify</p>
-      <p class="hint">show what's playing on Spotify in moonlit, with play / pause / skip. while Spotify is the one playing, the overlay, nowplaying.txt and <b>!song</b> show the Spotify song.</p>
+      <p class="hint">show what's playing on Spotify in moonlit, with play / pause / skip. while Spotify is the one playing, the overlay, nowplaying.txt and <b>!nowplaying</b> show the Spotify song.</p>
       <div id="spLocalBox" hidden>
         <label class="check"><input type="checkbox" id="spLocalOn"> <span>show the <b>Spotify app</b> on this PC</span></label>
         <p class="obs-status sp-status" id="spLocalStatus"></p>
@@ -359,9 +359,9 @@
       </details>
     </section>
     <section id="chatSection" hidden>
-      <p class="eyebrow">chat · !song</p>
-      <p class="hint">viewers type <b>!song</b> (or <b>!np</b>) in your YouTube live chat, and your bot answers with the song that's playing, Spotify included.</p>
-      <label class="check"><input type="checkbox" id="chatOn"> answer !song in my YouTube chat</label>
+      <p class="eyebrow">chat · !nowplaying</p>
+      <p class="hint">viewers type <b>!nowplaying</b> in your YouTube live chat, and your bot answers with the song that's playing, Spotify included.</p>
+      <label class="check"><input type="checkbox" id="chatOn"> answer !nowplaying in my YouTube chat</label>
       <label class="field"><span>your channel, like <b>@yourname</b> (finds each live stream by itself), or one stream's link</span>
         <input type="text" id="chatStream" spellcheck="false" autocomplete="off" placeholder="@yourname">
       </label>
@@ -410,7 +410,7 @@
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v26</p>
+      <p class="version">moonlit v27</p>
     </section>
   </div>
 
@@ -423,9 +423,9 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=26"></script>
-  <script src="obs.js?v=26"></script>
-  <script src="live.js?v=26"></script>
-  <script src="requests.js?v=26"></script>
+  <script src="app.js?v=27"></script>
+  <script src="obs.js?v=27"></script>
+  <script src="live.js?v=27"></script>
+  <script src="requests.js?v=27"></script>
 </body>
 </html>

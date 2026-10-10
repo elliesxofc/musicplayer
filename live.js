@@ -1,4 +1,4 @@
-/* moonlit · live: Spotify's now playing and !song in YouTube chat (desktop app only).
+/* moonlit · live: Spotify's now playing and !nowplaying in YouTube chat (desktop app only).
    Uses app.js's helpers ($, toast, setSpotifyNow, …), which are loaded before this file. */
 (() => {
   const D = window.moonlitDesktop;
@@ -82,7 +82,7 @@
     setStatus($('#spLocalStatus'), info.status);
   };
 
-  /* ───────────── !song in YouTube chat ───────────── */
+  /* ───────────── !nowplaying in YouTube chat ───────────── */
   const C = D.chat;
   const on = $('#chatOn'), stream = $('#chatStream'), login = $('#chatLogin');
 

@@ -259,7 +259,7 @@ function unseal(box) {
 }
 const sendAll = (channel, payload) => BrowserWindow.getAllWindows().forEach(w => w.webContents.send(channel, payload));
 
-/* ───────────── !song in YouTube chat ───────────── */
+/* ───────────── !nowplaying in YouTube chat ───────────── */
 const chat = require('./chat').createChat({
   nowPlaying: () => overlay.now(),
   onStatus: s => sendAll('chat:status', s),

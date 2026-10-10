@@ -4,7 +4,7 @@
    You connect your own Spotify account once (through your own free Spotify developer app,
    so nothing goes through anyone else's server). moonlit then asks Spotify every few seconds
    what's playing, shows it with play/pause/skip buttons, and the overlay, nowplaying.txt and
-   !song show the Spotify song while it plays. The buttons need Spotify Premium (Spotify's rule). */
+   !nowplaying show the Spotify song while it plays. The buttons need Spotify Premium (Spotify's rule). */
 
 const http = require('node:http');
 const crypto = require('node:crypto');

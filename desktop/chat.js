@@ -1,14 +1,15 @@
 'use strict';
 
-/* !song in YouTube live chat (desktop app only).
+/* !nowplaying in YouTube live chat (desktop app only).
    moonlit reads your stream's chat (no login needed for that) and a bot account answers
-   "!song" with what's playing, the same song the OBS overlay shows. Give it your channel
+   "!nowplaying" with what's playing, the same song the OBS overlay shows. Give it your channel
    (@handle or channel link) and it finds your live stream by itself every time you go live,
    or give it one stream's link. */
 
 const { Masterchat, stringify } = require('masterchat');
 
-const COMMAND = /^!(song|np|nowplaying|currentsong)\b/i;
+// only !nowplaying: shorter names like !song are often taken by other bots (Nightbot, …)
+const COMMAND = /^!nowplaying\b/i;
 // song requests: handled by the player (it knows the library and the queue)
 const REQUEST_COMMAND = /^!(sr|songrequest|queue|q|skip|wrongsong)(?:\s+([\s\S]*))?$/i;
 const REPLY_GAP = 5000; // one answer every 5 seconds at most, however many people ask
@@ -146,7 +147,7 @@ function createChat({ nowPlaying, onStatus, onCommand = () => {} }) {
         else setStatus('that stream has ended. use your channel instead, so moonlit finds the next one', 'warn');
       });
       mc.listen({ ignoreFirstResponse: true });
-      setStatus(`answering !song in “${mc.title || 'your stream'}”`, 'on');
+      setStatus(`answering !nowplaying in “${mc.title || 'your stream'}”`, 'on');
     } catch (err) {
       if (me !== run) return;
       const msg = err && err.message ? err.message : String(err);

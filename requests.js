@@ -186,6 +186,9 @@
   $('#srChannelsField').hidden = srAny.checked;
   srOn.onchange = () => prefs.set('srOn', srOn.checked);
   srAny.onchange = () => { prefs.set('srAny', srAny.checked); $('#srChannelsField').hidden = srAny.checked; };
-  srChannels.onchange = () => prefs.set('srChannels', srChannels.value.trim() || DEFAULT_CHANNELS);
+  // saved as you type (an empty box counts as the original list, so requests never lose their rules)
+  srChannels.oninput = () => prefs.set('srChannels', srChannels.value.trim() || DEFAULT_CHANNELS);
+  srChannels.onchange = () => { if (!srChannels.value.trim()) srChannels.value = DEFAULT_CHANNELS; };
+  srMax.oninput = () => { const n = Math.round(Number(srMax.value)); if (n >= 1 && n <= 60) prefs.set('srMax', n); };
   srMax.onchange = () => { prefs.set('srMax', Math.max(1, Math.min(60, Math.round(Number(srMax.value) || 10)))); srMax.value = maxMinutes(); };
 })();

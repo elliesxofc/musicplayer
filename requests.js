@@ -24,6 +24,13 @@
     'UCAA6pKrh72sARBb7JCfp8AA  # Tobu',
   ].join('\n');
 
+  // never requestable, whoever asks (title, artist, album or channel), one per line
+  const DEFAULT_BLOCKED = ['nazi', 'hitler', 'sieg heil', '1488', 'kkk', 'white power', 'swastika'].join('\n');
+  const blockedWords = () => prefs.get('srBlocked', DEFAULT_BLOCKED).split('\n').map(s => s.split('#')[0].trim()).filter(Boolean);
+  const blockedIn = text => { const t = ` ${norm(text)} `; return blockedWords().map(norm).filter(Boolean).find(w => t.includes(` ${w} `)); };
+  // mods (and you) can skip the content rules only when this is switched on
+  const modsAnySong = () => prefs.get('srModsAny', false);
+
   const on = () => prefs.get('srOn', true);
   const channels = () => prefs.get('srChannels', DEFAULT_CHANNELS).split('\n').map(s => s.trim()).filter(Boolean);
   const maxMinutes = () => Math.max(1, Math.min(60, Number(prefs.get('srMax', 10)) || 10));
@@ -63,6 +70,7 @@
   /* ───────────── commands ───────────── */
   async function request(user, query) {
     if (!query) return say(`${user.name}, type !sr and a song name or a YouTube link.`);
+    if (blockedIn(query)) return say(`${user.name}, that song can't be requested.`);
     const mod = isMod(user);
     const until = cooldowns.get(user.id) || 0;
     if (!mod && Date.now() < until) {
@@ -74,11 +82,13 @@
 
     const link = /https?:\/\/|(^|\s)(www\.)?(youtube\.com|youtu\.be)\//i.test(query);
     let track = link ? null : findInLibrary(query);
+    // library songs follow the blocked words too
+    if (track && blockedIn(`${track.title} ${track.artist} ${track.album}`)) { cooldowns.delete(user.id); return say(`${user.name}, that song can't be requested.`); }
     if (!track) {
       const job = { by: user.name, userId: user.id, query, cancelled: false, at: Date.now() };
       pending.push(job);
       render();
-      const rules = { channels: channels(), anyChannel: mod || prefs.get('srAny', false), maxSeconds: maxMinutes() * 60 };
+      const rules = { channels: channels(), anyChannel: (mod && modsAnySong()) || prefs.get('srAny', false), maxSeconds: maxMinutes() * 60, blocked: blockedWords() };
       const result = await D.download.request(query, rules).catch(err => ({ ok: false, reason: 'error', error: err.message }));
       pending.splice(pending.indexOf(job), 1);
       render();
@@ -88,7 +98,10 @@
       }
       const had = new Set(state.tracks.map(t => t.id));
       await openExternalFiles([result.file], { play: false, quiet: true });
-      track = byId((openExternalFiles.ids || [])[0]);
+      // found by its file: other imports can run at the same time (e.g. a big playlist downloading)
+      const fileName = result.file.split(/[\\/]/).pop();
+      const matches = state.tracks.filter(t => t.file && t.file.name === fileName);
+      track = matches.find(t => !had.has(t.id)) || matches[matches.length - 1];
       if (!track) return say(`${user.name}, something went wrong adding that song.`);
       // downloaded just for this request: deleted again once it has played (your own songs never are)
       if (!had.has(track.id) && cleanupOn()) markTemporary(track.id, result.file);
@@ -106,6 +119,7 @@
     const max = maxMinutes();
     switch (r.reason) {
       case 'not-allowed': return 'you can only request copyright-free songs (like NCS or Monstercat).';
+      case 'blocked': return "that song can't be requested.";
       case 'too-long': return `that song is too long (${max} minutes at most).`;
       case 'live': return "live streams can't be requested.";
       case 'link': return 'only YouTube links work.';
@@ -224,8 +238,35 @@
 
   /* ───────────── settings ───────────── */
   $('#srBox').hidden = false;
+  // songs downloaded for requests by older versions (before 1.6.6 they weren't deleted after playing)
+  async function oldRequestSongs() {
+    const files = await D.download.requestFiles().catch(() => []);
+    const byName = new Map(files.map(f => [f.split(/[\\/]/).pop(), f]));
+    return state.tracks
+      .filter(t => t.file && byName.has(t.file.name) && !temporary.has(t.id) && !inUse(t.id))
+      .map(t => ({ id: t.id, file: byName.get(t.file.name) }));
+  }
+  async function showOldRequests() {
+    const old = await oldRequestSongs();
+    $('#srOldBtn').hidden = !old.length;
+    $('#srOldBtn').textContent = `remove ${old.length} song${old.length === 1 ? '' : 's'} downloaded for past requests`;
+  }
+  $('#srOldBtn').onclick = async () => {
+    const old = await oldRequestSongs();
+    if (!old.length || !confirm(`remove ${old.length} song${old.length === 1 ? '' : 's'} that moonlit downloaded for viewers' requests?\n\nthey're deleted from moonlit and from the download folder. songs you added yourself aren't touched.`)) return;
+    for (const o of old) { state.history = state.history.filter(x => x !== o.id); removeTrack(o.id, { ask: false }); D.download.forgetRequest(o.file).catch(() => {}); }
+    toast(`removed ${old.length} requested song${old.length === 1 ? '' : 's'} ✦`);
+    showOldRequests();
+  };
+  $('#settingsBtn').addEventListener('click', () => setTimeout(showOldRequests, 100));
+
   const srOn = $('#srOn'), srAny = $('#srAny'), srChannels = $('#srChannels'), srMax = $('#srMax'), srCleanup = $('#srCleanup');
   srCleanup.checked = cleanupOn();
+  const srModsAny = $('#srModsAny'), srBlocked = $('#srBlocked');
+  srModsAny.checked = modsAnySong();
+  srModsAny.onchange = () => prefs.set('srModsAny', srModsAny.checked);
+  srBlocked.value = prefs.get('srBlocked', DEFAULT_BLOCKED);
+  srBlocked.oninput = () => prefs.set('srBlocked', srBlocked.value);
   srCleanup.onchange = () => prefs.set('srCleanup', srCleanup.checked);
   srOn.checked = on();
   srAny.checked = prefs.get('srAny', false);

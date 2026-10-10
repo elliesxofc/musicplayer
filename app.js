@@ -638,6 +638,31 @@ const AUDIO_EXT = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|webm|weba|aiff?)$/i;
 // shown as "A, B". A slash only counts between names with spaces around it, so AC/DC stays AC/DC.
 const tidyArtist = s => String(s || '').replace(/\s*;\s*|\s+\/\s+|\0/g, ', ').replace(/(,\s*)+/g, ', ').replace(/^,\s*|,\s*$/g, '').trim();
 
+// Songs downloaded before 1.6.9 from copyright-free channels could be mixed up: title "Copyright
+// Free Music", artist "Priamo - Weakness | Future Bass | NCS". Tidied once when the library loads
+// (downloads are tidied by the downloader now; desktop/downloader.js TITLE_EXTRAS).
+const JUNK_BRACKETS = /\s*[\[(][^\])]*(ncs|no ?copyright|copyright[ -]?free|free download|royalty[ -]?free|release)[^\])]*[\])]/gi;
+const JUNK_TAIL = /\s*[-–]\s*(no ?copyright|copyright[ -]?free|royalty[ -]?free)\b.*$/i;
+const JUNK_TITLE = /^\s*(no )?copyright[ -]?free( music| sounds?)?\s*$|^\s*no copyright (music|sounds?)\s*$/i;
+const unquote = s => s.replace(/^\s*["“”](.+)["“”]\s*$/, '$1');
+function untangleTags(t) {
+  let { title = '', artist = '' } = t;
+  if (JUNK_TITLE.test(title) && artist.includes(' - ')) {
+    const i = artist.indexOf(' - ');
+    title = artist.slice(i + 3);
+    artist = artist.slice(0, i);
+  }
+  const channelJunk = /ncs|copyright|royalty/i.test(title);
+  title = title.replace(JUNK_BRACKETS, '').replace(JUNK_TAIL, '');
+  if (channelJunk) title = title.replace(/\s+\|\s.*$/, ''); // "Weakness | Future Bass | NCS"
+  title = unquote(title).trim();
+  artist = tidyArtist(unquote(artist.replace(JUNK_BRACKETS, '')));
+  if (!title || (title === t.title && artist === (t.artist || ''))) return false;
+  t.title = title;
+  t.artist = artist;
+  return true;
+}
+
 async function makeRecord(f) {
   const tags = await readTags(f);
   const guess = fromFilename(f.name);
@@ -1709,10 +1734,12 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     const pos = new Map(order.map((id, i) => [id, i]));
     recs.sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9) || a.added - b.added);
     state.tracks = recs;
-    // songs added before artists were tidied ("A;B"): fixed once, quietly
+    // songs added before artists and titles were tidied ("A;B", "Copyright Free Music"): fixed once, quietly
     for (const t of recs) {
-      const fixed = tidyArtist(t.artist);
-      if (fixed !== (t.artist || '')) { t.artist = fixed; DB.put(t).catch(() => {}); }
+      const before = `${t.artist}|${t.title}`;
+      t.artist = tidyArtist(t.artist);
+      untangleTags(t);
+      if (`${t.artist}|${t.title}` !== before) DB.put(t).catch(() => {});
     }
     reindex();
     navigator.storage?.persist?.().catch(() => {});

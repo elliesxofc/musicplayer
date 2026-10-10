@@ -230,10 +230,12 @@ ipcMain.handle('dl:folder', () => dl().folder());
 ipcMain.handle('dl:choose-folder', () => dl().chooseFolder());
 ipcMain.handle('dl:open-folder', () => dl().openFolder());
 ipcMain.handle('dl:forget-request', (_e, file) => dl().forgetRequest(String(file || '')));
+ipcMain.handle('dl:request-files', () => dl().requestFiles());
 ipcMain.handle('dl:request', (_e, query, rules) => dl().request(String(query || ''), {
   channels: Array.isArray(rules && rules.channels) ? rules.channels.map(String).slice(0, 200) : [],
   anyChannel: !!(rules && rules.anyChannel),
   maxSeconds: Math.max(60, Math.min(3600, Number(rules && rules.maxSeconds) || 600)),
+  blocked: Array.isArray(rules && rules.blocked) ? rules.blocked.map(String).slice(0, 500) : [],
 }));
 app.on('before-quit', () => { if (downloader) downloader.stopAll(); });
 

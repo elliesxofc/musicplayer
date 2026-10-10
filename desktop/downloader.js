@@ -46,6 +46,14 @@ function requestScore(entry, query) {
 // several artists come as "A;B" (or "A / B"): written into the file as "A, B" (AC/DC stays)
 const tidyArtist = s => String(s || '').replace(/\s*;\s*|\s+\/\s+|\0/g, ', ').replace(/(,\s*)+/g, ', ').replace(/^,\s*|,\s*$/g, '').trim();
 
+// Bits that copyright-free channels add to video titles. Removed from downloaded songs' titles
+// (the same patterns tidy songs already in the library, see app.js).
+const TITLE_EXTRAS = [
+  '\\s+\\|\\s.*$', // "Song | Future Bass | NCS - Copyright Free Music" → "Song"
+  '(?i)\\s*[\\[(][^\\])]*(ncs|no ?copyright|copyright[ -]?free|free download|royalty[ -]?free|release)[^\\])]*[\\])]',
+  '(?i)\\s*[-–]\\s*(no ?copyright|copyright[ -]?free|royalty[ -]?free)\\b.*$',
+];
+
 // "Artist - Title.m4a": the name Spotify songs are saved under (see retag)
 const cleanName = s => String(s).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 const spotifyFileName = (job, ext) => `${cleanName(job.artist) || 'unknown'} - ${cleanName(job.title) || 'untitled'}${ext}`;
@@ -357,8 +365,14 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
         : '%(artist,uploader,channel)s - %(title).150B.%(ext)s'),
     ];
     if (job.source !== 'spotify') {
-      // "Artist - Song (Official Video)" → artist "Artist", title "Song"
-      args.push('--parse-metadata', 'title:%(artist)s - %(title)s');
+      // "Artist - Song (Official Video)" → artist "Artist", title "Song". Split at the FIRST " - ":
+      // "Priamo - Weakness | Future Bass | NCS - Copyright Free Music" is Priamo's "Weakness"
+      args.push('--parse-metadata', 'title:(?P<artist>.+?) - (?P<title>.+)');
+      // channel extras after the song name: "| Future Bass | NCS - Copyright Free Music", "[NCS Release]"
+      for (const pattern of TITLE_EXTRAS) args.push('--replace-in-metadata', 'title', pattern, '');
+      args.push('--replace-in-metadata', 'artist', TITLE_EXTRAS[1], '');
+      // "\"Scarlet Fire\"" → Scarlet Fire
+      args.push('--replace-in-metadata', 'title,artist', '^\\s*["“”](.+)["“”]\\s*$', '\\g<1>');
       // (brackets naming a version, like "(Official Instrumental)", are kept: that's a different song)
       args.push('--replace-in-metadata', 'title', `(?i)\\s*[\\(\\[](?![^\\)\\]]*(?:${VERSION_WORDS}))[^\\)\\]]*(official|lyrics?|audio|video|visuali[sz]er|hd|hq|4k|m/?v)[^\\)\\]]*[\\)\\]]`, '');
     }
@@ -528,7 +542,13 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   const channelKeys = list => (list || []).map(l => norm(String(l).split('#')[0])).filter(Boolean);
   const allowedChannel = (e, keys) => keys.some(k => [e.channel_id, e.uploader_id, e.channel, e.uploader].some(v => norm(v) === k));
 
-  async function request(query, { channels = [], anyChannel = false, maxSeconds = 600 } = {}) {
+  // words that can never be requested, checked against the title and the channel
+  const blockedBy = (text, words) => {
+    const t = ` ${plain(text)} `;
+    return words.map(plain).filter(Boolean).find(w => t.includes(` ${w} `));
+  };
+
+  async function request(query, { channels = [], anyChannel = false, maxSeconds = 600, blocked = [] } = {}) {
     query = String(query || '').trim();
     if (!query) return { ok: false, reason: 'empty' };
     try {
@@ -547,6 +567,9 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
           .sort((a, b) => b.s - a.s || a.i - b.i).map(x => x.e);
       }
       if (!candidates.length) return { ok: false, reason: 'not-found' };
+      const clean = candidates.filter(e => !blockedBy(`${e.title || ''} ${e.channel || ''} ${e.uploader || ''} ${e.artist || ''}`, blocked));
+      if (!clean.length) return { ok: false, reason: 'blocked' };
+      candidates = clean;
       const live = e => e.live_status === 'is_live' || e.is_live === true || e.live_status === 'is_upcoming';
       const allowed = candidates.filter(e => anyChannel || allowedChannel(e, keys));
       if (!allowed.length) return { ok: false, reason: 'not-allowed', title: candidates[0].title || '' };
@@ -580,15 +603,20 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     return true;
   }
 
+  // every file downloaded for a request that's still on the PC (to tidy up after older versions)
+  function requestFiles() {
+    return Object.values(readConfig().requestFiles || {}).filter(f => typeof f === 'string' && fs.existsSync(f));
+  }
+
   function stopAll() {
     for (const p of running.values()) if (p) p.kill();
   }
 
   return {
-    add, addList, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll, request, forgetRequest,
+    add, addList, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll, request, forgetRequest, requestFiles,
     list: () => [...jobs.values()].map(publicJob),
     folder: outDir,
   };
 }
 
-module.exports = { createDownloader, readPlaylistCsv, requestScore, VERSION_WORDS, tidyArtist };
+module.exports = { createDownloader, readPlaylistCsv, requestScore, VERSION_WORDS, tidyArtist, TITLE_EXTRAS };

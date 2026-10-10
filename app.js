@@ -874,7 +874,16 @@ function neighbour(dir, fromEnded = false) {
   return q[n];
 }
 
+// song requests from chat (desktop app, requests.js): they play next, in the order they came in
+const songRequests = [];
+const requestsChanged = () => document.dispatchEvent(new Event('moonlit:requests'));
+
 function next(fromEnded = false) {
+  while (songRequests.length) {
+    const req = songRequests.shift();
+    requestsChanged();
+    if (byId(req.id)) { playTrack(req.id); return; } // (skips songs removed from the library since)
+  }
   const id = neighbour(1, fromEnded);
   if (id) playTrack(id);
   else { pause(); audio.currentTime = 0; }
@@ -1347,6 +1356,7 @@ async function openExternalFiles(paths, { play = true, quiet = false, replace = 
   const fresh = files.filter(f => !state.tracks.some(t => sameFile(t, f)));
   if (fresh.length) await addFiles(fresh, { quiet });
   const ids = files.map(f => state.tracks.find(t => sameFile(t, f))?.id).filter(Boolean);
+  openExternalFiles.ids = ids;
   if (!ids.length || !play) return fresh.length;
   // several songs: play just those; one song: play it, then carry on through your library
   state.queue = ids.length > 1 ? ids : state.tracks.map(t => t.id);

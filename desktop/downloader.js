@@ -232,6 +232,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     } finally {
       running.delete(job.id);
       update(job);
+      settle(job);
       pump();
     }
   }
@@ -344,6 +345,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     const p = running.get(id);
     if (p) p.kill();
     update(job);
+    settle(job);
     jobs.delete(id);
     send('dl:remove', id);
     pump();
@@ -386,12 +388,66 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     return shell.openPath(dir);
   }
 
+  /* ───────────── song requests from chat ─────────────
+     One song: a YouTube link, or the best search result. It has to pass the request rules
+     (from an allowed channel, not too long, not a live stream), is downloaded once, and the
+     file is reused whenever the same video is requested again. */
+  const waiters = new Map(); // job id → resolve, for requests waiting on their download
+  function settle(job) {
+    if (!['done', 'error', 'cancelled'].includes(job.status)) return;
+    const done = waiters.get(job.id);
+    if (done) { waiters.delete(job.id); done(job); }
+  }
+
+  const norm = s => String(s || '').toLowerCase().replace(/^@/, '').trim();
+  // "UC_aEa8K-EOJ3D6gOs7HcyNg  # NoCopyrightSounds" → the part before the #
+  const channelKeys = list => (list || []).map(l => norm(String(l).split('#')[0])).filter(Boolean);
+  const allowedChannel = (e, keys) => keys.some(k => [e.channel_id, e.uploader_id, e.channel, e.uploader].some(v => norm(v) === k));
+
+  async function request(query, { channels = [], anyChannel = false, maxSeconds = 600 } = {}) {
+    query = String(query || '').trim();
+    if (!query) return { ok: false, reason: 'empty' };
+    try {
+      await ensureReady();
+      const keys = channelKeys(channels);
+      let candidates;
+      if (/^https?:\/\//i.test(query) || /^(www\.|m\.)?(youtube\.com|youtu\.be)\//i.test(query)) {
+        const url = /^https?:/i.test(query) ? query : `https://${query}`;
+        if (!/(^|\.)(youtube\.com|youtu\.be)$/i.test(new URL(url).hostname)) return { ok: false, reason: 'link' };
+        candidates = [await runJson(['-J', '--no-playlist', url])];
+      } else {
+        const found = await runJson(['--flat-playlist', '-J', `ytsearch6:${query}`]);
+        candidates = (found.entries || []).filter(e => e && e.id);
+      }
+      if (!candidates.length) return { ok: false, reason: 'not-found' };
+      const live = e => e.live_status === 'is_live' || e.is_live === true || e.live_status === 'is_upcoming';
+      const allowed = candidates.filter(e => anyChannel || allowedChannel(e, keys));
+      if (!allowed.length) return { ok: false, reason: 'not-allowed', title: candidates[0].title || '' };
+      const fits = allowed.filter(e => !live(e) && (!e.duration || e.duration <= maxSeconds));
+      if (!fits.length) return { ok: false, reason: live(allowed[0]) ? 'live' : 'too-long', title: allowed[0].title || '' };
+      const pick = fits[0];
+      const title = pick.title || 'untitled', artist = pick.artist || pick.channel || pick.uploader || '';
+
+      // asked for before: same file again
+      const known = (readConfig().requestFiles || {})[pick.id];
+      if (known && fs.existsSync(known)) { allowRead(known); return { ok: true, file: known, title, artist, videoId: pick.id, reused: true }; }
+
+      const job = newJob({ source: 'youtube', url: `https://www.youtube.com/watch?v=${pick.id}`, title, artist, format: 'm4a', group: nextGroup++, note: 'song request' });
+      const finished = await new Promise(resolve => { waiters.set(job.id, resolve); pump(); });
+      if (finished.status !== 'done' || !finished.file) return { ok: false, reason: 'download', title, error: finished.error || 'cancelled' };
+      writeConfig({ requestFiles: { ...(readConfig().requestFiles || {}), [pick.id]: finished.file } });
+      return { ok: true, file: finished.file, title, artist, videoId: pick.id };
+    } catch (err) {
+      return { ok: false, reason: 'error', error: err.message || String(err) };
+    }
+  }
+
   function stopAll() {
     for (const p of running.values()) if (p) p.kill();
   }
 
   return {
-    add, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll,
+    add, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll, request,
     list: () => [...jobs.values()].map(publicJob),
     folder: outDir,
   };

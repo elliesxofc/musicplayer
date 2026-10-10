@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=23">
+  <link rel="manifest" href="manifest.webmanifest?v=24">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=23">
+  <link rel="stylesheet" href="style.css?v=24">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -163,6 +163,10 @@
           <button role="tab" class="tab" data-view="all" aria-selected="true">all</button>
           <button role="tab" class="tab" data-view="loved" aria-selected="false">loved</button>
         </div>
+      </div>
+      <div class="requests" id="requests" hidden>
+        <p class="req-head"><span>song requests</span><span class="req-count" id="reqCount"></span></p>
+        <ol class="req-list" id="reqList"></ol>
       </div>
       <div class="empty" id="empty">
         <div class="empty-art" aria-hidden="true"><svg><use href="#i-heart"/></svg></div>
@@ -365,6 +369,16 @@
         <span class="obs-status" id="chatStatus">off</span>
       </div>
       <p class="hint small chat-preview" id="chatPreview"></p>
+      <div class="sr-box" id="srBox" hidden>
+        <p class="eyebrow">song requests</p>
+        <label class="check"><input type="checkbox" id="srOn"> <span>take song requests: <b>!sr</b>, <b>!queue</b>, <b>!skip</b> (mods), <b>!wrongsong</b></span></label>
+        <p class="hint small"><b>!sr</b> looks in your library first. if the song isn't there (or it's a YouTube link), moonlit downloads it, adds it to your library and plays it next. 10 seconds between requests and up to 3 waiting per viewer; mods and you skip those limits.</p>
+        <label class="check"><input type="checkbox" id="srAny"> <span>allow <b>any</b> YouTube song (copyrighted music can get your stream muted)</span></label>
+        <label class="field" id="srChannelsField"><span>copyright-free channels viewers can request from (one per line: channel ID, @handle or name). mods can request anything.</span>
+          <textarea id="srChannels" rows="6" spellcheck="false" wrap="off"></textarea>
+        </label>
+        <label class="field sr-max"><span>longest song (minutes)</span><input type="number" id="srMax" min="1" max="60" step="1"></label>
+      </div>
     </section>
     <section id="librarySection">
       <p class="eyebrow">library</p>
@@ -391,7 +405,7 @@
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v23</p>
+      <p class="version">moonlit v24</p>
     </section>
   </div>
 
@@ -404,8 +418,9 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=23"></script>
-  <script src="obs.js?v=23"></script>
-  <script src="live.js?v=23"></script>
+  <script src="app.js?v=24"></script>
+  <script src="obs.js?v=24"></script>
+  <script src="live.js?v=24"></script>
+  <script src="requests.js?v=24"></script>
 </body>
 </html>

@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
     set: settings => ipcRenderer.invoke('chat:set', settings),
     preview: () => ipcRenderer.invoke('chat:preview'),
     onStatus: cb => ipcRenderer.on('chat:status', (_e, s) => cb(s)),
+    // song requests: commands from chat, and the player's answers
+    onCommand: cb => ipcRenderer.on('chat:command', (_e, c) => cb(c)),
+    say: text => ipcRenderer.send('chat:say', String(text)),
   },
   // Spotify's now playing
   spotify: {
@@ -55,6 +58,8 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
     folder: () => ipcRenderer.invoke('dl:folder'),
     chooseFolder: () => ipcRenderer.invoke('dl:choose-folder'),
     openFolder: () => ipcRenderer.invoke('dl:open-folder'),
+    // a song request from chat: find it on YouTube (within the rules), download once, give back the file
+    request: (query, rules) => ipcRenderer.invoke('dl:request', String(query), rules),
     onUpdate: cb => ipcRenderer.on('dl:update', (_e, job) => cb(job)),
     onRemove: cb => ipcRenderer.on('dl:remove', (_e, id) => cb(id)),
     onStatus: cb => ipcRenderer.on('dl:status', (_e, text) => cb(text)),

@@ -81,6 +81,29 @@ viewers type !song (or !np) and your bot answers, e.g.
     app. it's saved encrypted on this PC only.
 
 
+NEW (desktop app): song requests in YouTube chat
+-------------------------------------------------
+like the song request app, inside moonlit. turn on !song first (above), then
+moonlit → sliders → "chat · !song" → "take song requests".
+
+  !sr <song name or YouTube link>   request a song
+  !queue                            the next 3 requested songs
+  !skip                             skip the current song (mods and you)
+  !wrongsong                        take back your last request
+
+- !sr looks in your moonlit library first. if the song isn't there (or it's a
+  YouTube link), moonlit downloads it, adds it to your library and plays it
+  next. a song is only downloaded once.
+- viewers can only request YouTube songs from copyright-free channels (NCS,
+  Monstercat, TheFatRat, Tobu, … the list is editable), up to 10 minutes long
+  (changeable), no live streams. mods and you can request anything.
+- 10 seconds between a viewer's requests, and up to 3 waiting per viewer.
+- requested songs show at the top of your library with "requested by …",
+  a ▶ to play one now and an ✕ to remove it.
+- don't run the song request app's bot on the same stream at the same time,
+  or both would answer !sr and !queue.
+
+
 the .txt file (works in the website version too)
 
 

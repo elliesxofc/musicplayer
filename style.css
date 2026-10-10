@@ -660,6 +660,26 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .sp-web[open] summary { color: var(--ink); }
 #spLocalBox .sp-status { display: block; margin: -2px 0 8px 27px; }
 .chat-preview { overflow-wrap: anywhere; }
+/* song requests: settings and the list in the library */
+.sr-box { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--glass-line); }
+.field textarea {
+  min-height: 110px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--glass-line); resize: vertical;
+  background: var(--faint); color: var(--ink); font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; outline: none;
+}
+.field textarea:focus { border-color: var(--accent); }
+.sr-max input { width: 90px; }
+.requests { margin: 0 14px 8px; padding: 10px 12px; border-radius: 16px; background: var(--faint); border: 1px solid var(--glass-line); }
+.req-head { display: flex; justify-content: space-between; margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+.req-count { color: var(--muted); letter-spacing: .04em; text-transform: none; font-weight: 500; }
+.req-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; scrollbar-width: thin; }
+.req { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px; padding: 5px 0; }
+.req + .req { border-top: 1px solid var(--glass-line); }
+.req-text { min-width: 0; }
+.req-title { display: block; font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.req-by { display: block; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.req.pending .req-title { color: var(--muted); font-style: italic; }
+.req .icon-btn { width: 30px; height: 30px; }
+.req .icon-btn svg { width: 15px; height: 15px; }
 
 @media (max-width: 900px) {
   .sp-mini { flex-basis: 260px; }

@@ -9,6 +9,8 @@
 const { Masterchat, stringify } = require('masterchat');
 
 const COMMAND = /^!(song|np|nowplaying|currentsong)\b/i;
+// song requests: handled by the player (it knows the library and the queue)
+const REQUEST_COMMAND = /^!(sr|songrequest|queue|q|skip|wrongsong)(?:\s+([\s\S]*))?$/i;
 const REPLY_GAP = 5000; // one answer every 5 seconds at most, however many people ask
 const RETRY = 60_000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
@@ -88,7 +90,21 @@ function replyFor(np) {
   return head + (song.length > room ? `${song.slice(0, room - 1)}…` : song) + tail;
 }
 
-function createChat({ nowPlaying, onStatus }) {
+// YouTube allows 200 characters per message: longer answers go out in parts, split between words
+function splitMessage(text, max = 200) {
+  const parts = [];
+  let rest = String(text).trim();
+  while (rest.length > max) {
+    let cut = rest.lastIndexOf(' ', max);
+    if (cut < max * 0.5) cut = max;
+    parts.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) parts.push(rest);
+  return parts;
+}
+
+function createChat({ nowPlaying, onStatus, onCommand = () => {} }) {
   let mc = null, timer = null, run = 0, target = null, login = null, lastReply = 0;
   let status = { text: 'off', kind: 'off' };
   const setStatus = (text, kind) => { status = { text, kind }; onStatus(status); };
@@ -141,6 +157,16 @@ function createChat({ nowPlaying, onStatus }) {
 
   function answer(item) {
     const text = stringify(item.message || []).trim();
+    const request = REQUEST_COMMAND.exec(text);
+    if (request && mc) {
+      const cmd = request[1].toLowerCase();
+      onCommand({
+        cmd: { songrequest: 'sr', q: 'queue' }[cmd] || cmd,
+        args: (request[2] || '').trim().slice(0, 300),
+        user: { id: item.authorChannelId, name: item.authorName || 'someone', mod: !!item.isModerator, owner: !!item.isOwner },
+      });
+      return;
+    }
     if (!COMMAND.test(text) || !mc) return;
     const now = Date.now();
     if (now - lastReply < REPLY_GAP) return;
@@ -150,9 +176,18 @@ function createChat({ nowPlaying, onStatus }) {
     });
   }
 
+  // an answer from the player (song requests), split into 200-character messages
+  function say(text) {
+    if (!mc || !text) return;
+    for (const part of splitMessage(text)) {
+      mc.sendMessage(part).catch(err => setStatus(`couldn't answer in chat (${err.message || err}). check the bot login`, 'warn'));
+    }
+  }
+
   return {
     status: () => status,
     preview: () => replyFor(nowPlaying()),
+    say,
     // settings: { enabled, stream, login } (login already decrypted)
     start(settings) {
       stop();
@@ -167,4 +202,4 @@ function createChat({ nowPlaying, onStatus }) {
   };
 }
 
-module.exports = { createChat, parseTarget, liveIdFromPage, parseLogin, replyFor };
+module.exports = { createChat, parseTarget, liveIdFromPage, parseLogin, replyFor, splitMessage, REQUEST_COMMAND };

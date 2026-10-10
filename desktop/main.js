@@ -13,7 +13,7 @@ const { pathToFileURL } = require('node:url');
 const ROOT = path.join(__dirname, '..');
 const ORIGIN = 'moonlit://app';
 // Only the player's own files are served to the window.
-const SERVED = new Set(['index.html', 'style.css', 'app.js', 'obs.js', 'live.js', 'manifest.webmanifest', 'sw.js']);
+const SERVED = new Set(['index.html', 'style.css', 'app.js', 'obs.js', 'live.js', 'requests.js', 'manifest.webmanifest', 'sw.js']);
 const SERVED_DIRS = ['icons'];
 
 protocol.registerSchemesAsPrivileged([
@@ -228,6 +228,11 @@ ipcMain.handle('dl:clear', () => dl().clearFinished());
 ipcMain.handle('dl:folder', () => dl().folder());
 ipcMain.handle('dl:choose-folder', () => dl().chooseFolder());
 ipcMain.handle('dl:open-folder', () => dl().openFolder());
+ipcMain.handle('dl:request', (_e, query, rules) => dl().request(String(query || ''), {
+  channels: Array.isArray(rules && rules.channels) ? rules.channels.map(String).slice(0, 200) : [],
+  anyChannel: !!(rules && rules.anyChannel),
+  maxSeconds: Math.max(60, Math.min(3600, Number(rules && rules.maxSeconds) || 600)),
+}));
 app.on('before-quit', () => { if (downloader) downloader.stopAll(); });
 
 /* ───────────── now-playing overlay for OBS (http://localhost:4848/overlay) ───────────── */
@@ -257,6 +262,7 @@ const sendAll = (channel, payload) => BrowserWindow.getAllWindows().forEach(w =>
 const chat = require('./chat').createChat({
   nowPlaying: () => overlay.now(),
   onStatus: s => sendAll('chat:status', s),
+  onCommand: c => sendAll('chat:command', c),
 });
 function chatSettings() {
   const c = readConfig().chat || {};
@@ -279,6 +285,7 @@ ipcMain.handle('chat:set', (_e, next) => {
   return chat.status();
 });
 ipcMain.handle('chat:preview', () => chat.preview());
+ipcMain.on('chat:say', (_e, text) => { if (typeof text === 'string') chat.say(text.slice(0, 1000)); });
 app.on('before-quit', () => chat.stop());
 
 /* ───────────── Spotify's now playing ─────────────

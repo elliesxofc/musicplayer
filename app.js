@@ -858,33 +858,44 @@ function currentQueue() {
 }
 
 // Returns the id one step away in the queue (respects shuffle / repeat).
-function neighbour(dir, fromEnded = false) {
+function neighbour(dir, fromEnded = false, from = state.currentId) {
   const q = currentQueue();
   if (!q.length) return null;
   if (state.shuffle && dir > 0 && q.length > 1) {
     const recent = new Set(state.history.slice(-Math.floor(q.length * 0.6)));
-    const pool = q.filter(id => id !== state.currentId && !recent.has(id));
+    const pool = q.filter(id => id !== from && id !== state.currentId && !recent.has(id));
     const pick = pool.length ? pool : q.filter(id => id !== state.currentId);
     return pick[Math.floor(Math.random() * pick.length)];
   }
-  const i = q.indexOf(state.currentId);
+  const i = q.indexOf(from);
   let n = i + dir;
   if (n >= q.length) { if (fromEnded && state.repeat === 'off') return null; n = 0; }
   if (n < 0) n = q.length - 1;
   return q[n];
 }
 
-// song requests from chat (desktop app, requests.js): they play next, in the order they came in
+// song requests from chat (desktop app, requests.js): they play first, in the order they came
+// in; then the playlist carries on right where it was before the first request
 const songRequests = [];
 const requestsChanged = () => document.dispatchEvent(new Event('moonlit:requests'));
+let requestPlaying = null, resumeAfter = null;
+function playRequest(id) {
+  if (state.currentId !== requestPlaying) resumeAfter = state.currentId; // the playlist's place
+  requestPlaying = id;
+  playTrack(id);
+}
 
 function next(fromEnded = false) {
   while (songRequests.length) {
     const req = songRequests.shift();
     requestsChanged();
-    if (byId(req.id)) { playTrack(req.id); return; } // (skips songs removed from the library since)
+    if (byId(req.id)) { playRequest(req.id); return; } // (skips songs removed from the library since)
   }
-  const id = neighbour(1, fromEnded);
+  // requests are done: back to the playlist, from the song before them (unless you've picked
+  // another song yourself in the meantime)
+  const from = state.currentId === requestPlaying && byId(resumeAfter) ? resumeAfter : state.currentId;
+  requestPlaying = null;
+  const id = neighbour(1, fromEnded, from);
   if (id) playTrack(id);
   else { pause(); audio.currentTime = 0; }
 }

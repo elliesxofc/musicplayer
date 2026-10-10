@@ -161,7 +161,7 @@
         <button class="icon-btn" data-act="remove" aria-label="remove request"><svg><use href="#i-x"/></svg></button>`;
       li.querySelector('.req-title').textContent = `${i + 1}. ${songName(t)}`;
       li.querySelector('.req-by').textContent = `requested by ${r.by}`;
-      li.querySelector('[data-act="play"]').onclick = () => { songRequests.splice(songRequests.indexOf(r), 1); requestsChanged(); playTrack(r.id); };
+      li.querySelector('[data-act="play"]').onclick = () => { songRequests.splice(songRequests.indexOf(r), 1); requestsChanged(); playRequest(r.id); };
       li.querySelector('[data-act="remove"]').onclick = () => { songRequests.splice(songRequests.indexOf(r), 1); requestsChanged(); };
       list.append(li);
     });

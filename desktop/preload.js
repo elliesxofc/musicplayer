@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
   // downloader
   download: {
     add: (url, format) => ipcRenderer.invoke('dl:add', String(url), String(format)),
+    // a whole playlist saved as a .csv file (e.g. from exportify.net)
+    addList: (text, format) => ipcRenderer.invoke('dl:add-list', String(text), String(format)),
     list: () => ipcRenderer.invoke('dl:list'),
     cancel: id => ipcRenderer.invoke('dl:cancel', id),
     retry: id => ipcRenderer.invoke('dl:retry', id),

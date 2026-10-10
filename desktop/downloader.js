@@ -26,6 +26,59 @@ function ffmpegPath() {
   } catch { return null; }
 }
 
+// "Artist - Title.m4a": the name Spotify songs are saved under (see retag)
+const cleanName = s => String(s).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
+const spotifyFileName = (job, ext) => `${cleanName(job.artist) || 'unknown'} - ${cleanName(job.title) || 'untitled'}${ext}`;
+
+// A playlist saved as a .csv file, e.g. from exportify.net (Spotify) or TuneMyMusic.
+// Reads quoted fields (commas, quotes and line breaks inside them) and finds the columns by name.
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  text = String(text).replace(/^\uFEFF/, '');
+  // some spreadsheet apps save with semicolons instead of commas
+  const firstLine = text.slice(0, text.search(/\r?\n|$/));
+  const sep = !firstLine.includes(',') && firstLine.includes(';') ? ';' : ',';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; } else if (c === '"') quoted = false; else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === sep) { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); field = '';
+      if (row.some(f => f.trim())) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  row.push(field);
+  if (row.some(f => f.trim())) rows.push(row);
+  return rows;
+}
+
+function readPlaylistCsv(text) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return [];
+  const head = rows[0].map(h => h.trim().toLowerCase());
+  const col = (...names) => head.findIndex(h => names.includes(h));
+  const title = col('track name', 'title', 'name', 'track', 'song', 'song name');
+  const artist = col('artist name(s)', 'artist name', 'artist', 'artists', 'artist(s)');
+  const album = col('album name', 'album', 'album title');
+  const ms = col('duration (ms)', 'track duration (ms)', 'duration_ms');
+  const cover = col('album image url', 'image url', 'album art', 'cover');
+  if (title < 0) return [];
+  return rows.slice(1).map(r => ({
+    source: 'spotify',
+    title: (r[title] || '').replace(/\s+/g, ' ').trim(),
+    // Exportify separates several artists with commas
+    artist: artist >= 0 ? (r[artist] || '').split(/\s*,\s*/).filter(Boolean).join(', ') : '',
+    album: album >= 0 ? (r[album] || '').replace(/\s+/g, ' ').trim() : '',
+    cover: cover >= 0 && /^https:\/\//.test(r[cover] || '') ? r[cover].trim() : '',
+    durationMs: ms >= 0 ? Number(r[ms]) || 0 : 0,
+  })).filter(it => it.title);
+}
+
 function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   const binDir = path.join(app.getPath('userData'), 'bin');
   // MOONLIT_YTDLP lets tests point at a stand-in program
@@ -147,6 +200,18 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     }
   }
 
+  // every song in a playlist file (.csv), with no 100-song limit
+  async function addList(text, format) {
+    format = format === 'mp3' ? 'mp3' : 'm4a';
+    const items = readPlaylistCsv(text);
+    if (!items.length) return { ok: false, error: "that file doesn't look like a playlist (no song names in it)" };
+    try { await ensureReady(); } catch (err) { return { ok: false, error: err.message || String(err) }; }
+    const group = nextGroup++;
+    for (const it of items) newJob({ ...it, format, group, skipExisting: true });
+    pump();
+    return { ok: true, count: items.length };
+  }
+
   async function readLink(url) {
     const info = await runJson(['--flat-playlist', '-J', '--no-playlist', url]);
     const all = info._type === 'playlist' ? (info.entries || []).filter(Boolean) : [info];
@@ -208,6 +273,17 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   async function start(job) {
     running.set(job.id, null);
     try {
+      // a playlist file imported again: songs already in the download folder aren't fetched twice
+      if (job.skipExisting) {
+        const have = path.join(outDir(), spotifyFileName(job, `.${job.format}`));
+        if (fs.existsSync(have)) {
+          job.file = have;
+          job.note = 'already downloaded';
+          allowRead(have);
+          Object.assign(job, { status: 'done', progress: 100 });
+          return;
+        }
+      }
       if (job.source === 'spotify' && !job.url) {
         job.status = 'finding'; update(job);
         job.url = await findOnYouTube(job);
@@ -304,8 +380,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     const ff = ffmpegPath();
     if (!ff) return file;
     const ext = path.extname(file);
-    const clean = s => String(s).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
-    let target = path.join(path.dirname(file), `${clean(job.artist) || 'unknown'} - ${clean(job.title) || 'untitled'}${ext}`);
+    let target = path.join(path.dirname(file), spotifyFileName(job, ext));
     const tmp = `${file}.moonlit${ext}`;
     let coverFile = '';
     if (job.cover) {
@@ -447,10 +522,10 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   }
 
   return {
-    add, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll, request,
+    add, addList, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll, request,
     list: () => [...jobs.values()].map(publicJob),
     folder: outDir,
   };
 }
 
-module.exports = { createDownloader };
+module.exports = { createDownloader, readPlaylistCsv };

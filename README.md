@@ -78,7 +78,7 @@ song then plays it in moonlit (and adds it to your library the first time).
 **download songs (desktop app):** the ⬇ button at the top. paste (or drag in) a link:
 
 - YouTube / YouTube Music songs and playlists, SoundCloud and other sites yt-dlp supports
-- Spotify songs, albums and playlists (first 100 songs). Spotify's own audio is copy-protected
+- Spotify songs, albums and playlists (first 100 songs from a link; for bigger playlists, export a `.csv` at [exportify.net](https://exportify.net) and use **import a playlist file**: every song comes in, and songs already downloaded are skipped). Spotify's own audio is copy-protected
   and never touched: moonlit reads the song names, finds each one on YouTube and tags the
   file with the Spotify title, artist, album and cover
 - m4a (fastest, no re-encoding) or mp3; 3 downloads at once, each in 4 parallel chunks

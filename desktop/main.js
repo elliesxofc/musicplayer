@@ -220,6 +220,7 @@ function dl() {
   return downloader;
 }
 ipcMain.handle('dl:add', (_e, url, format) => dl().add(url, format));
+ipcMain.handle('dl:add-list', (_e, text, format) => dl().addList(String(text || '').slice(0, 20_000_000), format));
 ipcMain.handle('dl:list', () => dl().list());
 ipcMain.handle('dl:cancel', (_e, id) => dl().cancel(Number(id)));
 ipcMain.handle('dl:retry', (_e, id) => dl().retry(Number(id)));

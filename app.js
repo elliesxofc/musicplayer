@@ -1518,6 +1518,17 @@ function setupDownloader() {
     if (parts.length) toast(parts.join(' · '), 5000);
   }
   $('#dlForm').onsubmit = e => { e.preventDefault(); const input = $('#dlUrl'); submit(input.value); input.value = ''; };
+  // a whole playlist saved as a .csv file (exportify.net): every song, no 100-song limit
+  const fileInput = $('#dlFile');
+  $('#dlFileBtn').onclick = () => fileInput.click();
+  fileInput.onchange = async () => {
+    const file = fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    const res = await D.addList(await file.text(), prefs.get('dlFormat', 'm4a'));
+    if (!res.ok) { toast(res.error, 5000); return; }
+    toast(`${res.count} songs from “${file.name.replace(/\.csv$/i, '')}” added to the queue ✦ songs you already have are skipped`, 6000);
+  };
   setDownloads.submit = url => { setDownloads(true); submit(url); };
 
   // finished songs go into the library in small batches, quietly

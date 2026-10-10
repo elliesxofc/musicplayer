@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=25">
+  <link rel="manifest" href="manifest.webmanifest?v=26">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=25">
+  <link rel="stylesheet" href="style.css?v=26">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -239,6 +239,11 @@
       <button type="button" role="radio" data-format="mp3">mp3 · plays anywhere</button>
     </div>
     <p class="hint small">YouTube and YouTube Music songs or playlists, SoundCloud, and Spotify songs, albums and playlists (first 100 songs). Spotify songs are found on YouTube and tagged with their Spotify name, artist and cover.</p>
+    <div class="dl-file">
+      <button class="pill" id="dlFileBtn" type="button"><svg><use href="#i-plus"/></svg>import a playlist file</button>
+      <input type="file" id="dlFile" accept=".csv,text/csv" hidden>
+      <p class="hint small">a <b>big Spotify playlist</b> (more than 100 songs): save it as a <b>.csv</b> file at <a href="https://exportify.net" target="_blank" rel="noopener">exportify.net</a> (sign in with Spotify, then <b>Export</b> next to the playlist) and import that file here. every song comes in. songs you already downloaded are skipped, so importing the same file again only gets the missing ones.</p>
+    </div>
     <label class="check"><input type="checkbox" id="dlAddLib"> add finished songs to my library</label>
     <div class="dl-folder">
       <svg><use href="#i-folder"/></svg>
@@ -405,7 +410,7 @@
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v25</p>
+      <p class="version">moonlit v26</p>
     </section>
   </div>
 
@@ -418,9 +423,9 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=25"></script>
-  <script src="obs.js?v=25"></script>
-  <script src="live.js?v=25"></script>
-  <script src="requests.js?v=25"></script>
+  <script src="app.js?v=26"></script>
+  <script src="obs.js?v=26"></script>
+  <script src="live.js?v=26"></script>
+  <script src="requests.js?v=26"></script>
 </body>
 </html>

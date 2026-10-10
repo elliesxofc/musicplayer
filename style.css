@@ -495,7 +495,10 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .seg button { padding: 8px 4px; border-radius: 10px; font-size: 13px; color: var(--muted); transition: background .2s, color .2s; }
 .seg button[aria-checked="true"] { background: var(--grad); color: var(--accent-ink); font-weight: 600; }
 .field.perf .hint.small { margin: 2px 0 0; }
-.seg.seg4 { grid-template-columns: repeat(4, 1fr); }
+.seg.seg5 { grid-template-columns: repeat(6, 1fr); }
+.seg.seg5 button { grid-column: span 2; }
+.seg.seg5 button:nth-child(n+4) { grid-column: span 3; }
+.viz-note { margin: -6px 0 12px; }
 .viz-range span { display: flex; justify-content: space-between; }
 .viz-range b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .viz-range input[type="range"] { height: 22px; padding: 0; border: 0; background: transparent; }

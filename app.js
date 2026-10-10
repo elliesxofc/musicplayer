@@ -406,6 +406,7 @@ document.querySelectorAll('#perfSeg button').forEach(b => b.onclick = () => {
 function setupVizSettings() {
   const ranges = {
     speed: [$('#vizSpeed'), v => `${(+v).toFixed(2).replace(/\.?0+$/, '')}×`],
+    inertia: [$('#vizInertia'), v => (+v === 0 ? 'off' : `${Math.round(v * 100)}%`)],
     spin: [$('#vizSpin'), v => (+v === 0 ? 'off' : `${+v > 0 ? '↻' : '↺'} ${Math.abs(+v).toFixed(1).replace(/\.0$/, '')}`)],
     size: [$('#vizSize'), v => `${Math.round(v * 100)}%`],
     bars: [$('#vizBars'), v => String(v)],
@@ -469,13 +470,44 @@ function heartBurst(from) {
 }
 
 /* ───────────── visualizer ───────────── */
-const VIZ_DEFAULTS = { style: 'bars', speed: 1, spin: 0, size: 1, bars: 72, color: 'theme', custom: '#ff7eb6', glow: true };
+const VIZ_DEFAULTS = { style: 'bars', speed: 1, inertia: 0, spin: 0, size: 1, bars: 72, color: 'theme', custom: '#ff7eb6', glow: true };
+
+// Monstercat's look: every loud bar lifts its neighbours a little, so the bars flow
+// into smooth hills instead of jumping one by one (the same idea as cava's monstercat filter)
+function monstercat(v) {
+  const n = v.length;
+  for (let z = 0; z < n; z++) {
+    let lift = v[z];
+    for (let m = z - 1; m >= 0 && (lift /= 1.5) > v[m]; m--) v[m] = lift;
+    lift = v[z];
+    for (let m = z + 1; m < n && (lift /= 1.5) > v[m]; m++) v[m] = lift;
+  }
+  return v;
+}
+// Moves the bars toward where the music wants them. Inertia 0: they follow straight away
+// (rise fast, fall back gently). With inertia they get weight: a spring that lags, then
+// swings past and settles, more so the higher it is. f = frames passed × speed.
+function moveLevels(levels, vel, targets, f, inertia, rise, fall) {
+  if (!inertia) {
+    const up = 1 - (1 - rise) ** f, down = 1 - (1 - fall) ** f;
+    for (let i = 0; i < levels.length; i++) { levels[i] += (targets[i] - levels[i]) * (targets[i] > levels[i] ? up : down); vel[i] = 0; }
+    return;
+  }
+  const k = 0.42 - 0.36 * inertia, keep = 0.5 + 0.38 * inertia;
+  const steps = Math.max(1, Math.ceil(f)), h = f / steps;
+  for (let i = 0; i < levels.length; i++) {
+    let l = levels[i], v = vel[i];
+    for (let s = 0; s < steps; s++) { v = (v + (targets[i] - l) * k * h) * keep ** h; l += v * h; }
+    if (l < 0) { l = 0; v = 0; }
+    levels[i] = Math.min(1.25, l); vel[i] = v;
+  }
+}
 const vizOpts = () => ({ ...VIZ_DEFAULTS, ...prefs.get('viz', {}) });
 const viz = (() => {
   const canvas = $('#viz');
   const g = canvas.getContext('2d');
   let opts = vizOpts();
-  let levels = new Float32Array(opts.bars);
+  let levels = new Float32Array(opts.bars), vel = new Float32Array(opts.bars), goal = new Float32Array(opts.bars);
   let ctx = null, analyser = null, freq = null, color = '#fff', color2 = '#fff';
   // speed: how quickly the ring jumps up and falls back (1 = moonlit's usual)
   const smoothing = () => Math.min(0.95, Math.max(0.3, 0.95 - 0.13 * opts.speed));
@@ -513,7 +545,7 @@ const viz = (() => {
 
   function configure(next) {
     opts = { ...VIZ_DEFAULTS, ...next };
-    if (levels.length !== opts.bars) levels = new Float32Array(opts.bars);
+    if (levels.length !== opts.bars) { levels = new Float32Array(opts.bars); vel = new Float32Array(opts.bars); goal = new Float32Array(opts.bars); }
     if (analyser) analyser.smoothingTimeConstant = smoothing();
     lastDraw = 0;
   }
@@ -541,7 +573,6 @@ const viz = (() => {
     const maxLen = Math.min(rec * 0.375 * opts.size, edge - inner);
     // frame-rate independent rise and fall, scaled by the speed setting
     const f = (dt / 16.7) * opts.speed;
-    const rise = 1 - (1 - 0.45) ** f, fall = 1 - (1 - 0.12) ** f;
     for (let i = 0; i < BARS; i++) {
       // mirror the spectrum so the ring is symmetrical
       const k = i < half ? i : BARS - 1 - i;
@@ -550,8 +581,14 @@ const viz = (() => {
         const bin = Math.floor(2 + (k / half) ** 1.6 * (freq.length * 0.62));
         target = Math.max(target, (freq[bin] / 255) ** 1.6);
       }
-      levels[i] += (target - levels[i]) * (target > levels[i] ? rise : fall);
+      goal[i] = target;
     }
+    if (opts.style === 'monstercat') {
+      // smooth each half on its own, so the mirror line stays clean
+      const a = goal.subarray(0, Math.ceil(half)), b = goal.subarray(Math.ceil(half)).reverse();
+      monstercat(a); monstercat(b); b.reverse();
+    }
+    moveLevels(levels, vel, goal, f, opts.inertia, 0.45, 0.12);
     const thin = 72 / BARS; // more bars → thinner lines
     const paint = i => {
       if (opts.color === 'rainbow') return `hsl(${(i / BARS) * 360 + t * 0.02 * opts.speed} 90% 72%)`;
@@ -575,7 +612,7 @@ const viz = (() => {
       // one smooth line around the record, gently filled underneath
       const pts = [];
       for (let i = 0; i < BARS; i++) {
-        const a = angle(i), r = inner + levels[i] * maxLen;
+        const a = angle(i), r = inner + Math.min(levels[i] * maxLen, edge - inner);
         pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
       }
       g.beginPath();
@@ -597,16 +634,25 @@ const viz = (() => {
       g.stroke();
     } else {
       for (let i = 0; i < BARS; i++) {
-        const a = angle(i), len = levels[i] * maxLen;
+        const a = angle(i), len = Math.min(levels[i] * maxLen, edge - inner);
         const cos = Math.cos(a), sin = Math.sin(a);
         const c = paint(i);
         if (c) { g.strokeStyle = g.fillStyle = c; if (opts.glow) g.shadowColor = c; }
-        g.globalAlpha = 0.35 + levels[i] * 0.65;
+        g.globalAlpha = Math.min(1, 0.35 + levels[i] * 0.65);
         if (opts.style === 'dots') {
           const r = Math.max(1.5, rec * 0.013 * Math.min(1.6, thin)) * (0.7 + levels[i] * 0.9);
           g.beginPath();
           g.arc(cx + cos * (inner + len), cy + sin * (inner + len), r, 0, Math.PI * 2);
           g.fill();
+        } else if (opts.style === 'monstercat') {
+          // Monstercat's solid, flat-topped blocks, packed close together
+          g.globalAlpha = 0.92;
+          g.lineCap = 'butt';
+          g.lineWidth = Math.max(2, ((Math.PI * 2 * inner) / BARS) * 0.62);
+          g.beginPath();
+          g.moveTo(cx + cos * inner, cy + sin * inner);
+          g.lineTo(cx + cos * (inner + Math.max(rec * 0.012, len)), cy + sin * (inner + Math.max(rec * 0.012, len)));
+          g.stroke();
         } else if (opts.style === 'rays') {
           // thin tapered wedges that fan out from the record
           const spread = (Math.PI / BARS) * 0.55, out = Math.min(edge, inner + len * 1.25);

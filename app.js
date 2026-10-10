@@ -381,6 +381,7 @@ async function applyPerf(mode, animate = false) {
   $('#perfHint').textContent = PERF[mode].hint;
   document.body.classList.toggle('lite', mode !== 'full');
   viz.setEnabled(mode === 'full');
+  $('#vizOffHint').hidden = mode === 'full';
   if (animate && toSuper && !wasSuper) {
     await animateDeck(true);
     if (prefs.get('perf') !== 'super') return; // switched again mid-animation
@@ -400,6 +401,41 @@ document.querySelectorAll('#perfSeg button').forEach(b => b.onclick = () => {
   applyPerf(b.dataset.perf, true);
   toast(PERF[b.dataset.perf].toast);
 });
+
+/* visualizer settings: style, speed, spin, size, number of bars, colors, glow */
+function setupVizSettings() {
+  const ranges = {
+    speed: [$('#vizSpeed'), v => `${(+v).toFixed(2).replace(/\.?0+$/, '')}×`],
+    spin: [$('#vizSpin'), v => (+v === 0 ? 'off' : `${+v > 0 ? '↻' : '↺'} ${Math.abs(+v).toFixed(1).replace(/\.0$/, '')}`)],
+    size: [$('#vizSize'), v => `${Math.round(v * 100)}%`],
+    bars: [$('#vizBars'), v => String(v)],
+  };
+  const save = patch => {
+    const next = { ...vizOpts(), ...patch };
+    prefs.set('viz', next);
+    viz.configure(next);
+    show(next);
+  };
+  function show(o) {
+    document.querySelectorAll('#vizStyleSeg button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.style === o.style)));
+    for (const [key, [input, label]] of Object.entries(ranges)) {
+      input.value = o[key];
+      setFill(input);
+      $(`#${input.id}Val`).textContent = label(o[key]);
+    }
+    $('#vizColor').value = o.color;
+    $('#vizCustom').value = o.custom;
+    $('#vizCustomField').hidden = o.color !== 'custom';
+    $('#vizGlow').checked = o.glow;
+  }
+  document.querySelectorAll('#vizStyleSeg button').forEach(b => b.onclick = () => save({ style: b.dataset.style }));
+  for (const [key, [input]] of Object.entries(ranges)) input.oninput = () => save({ [key]: +input.value });
+  $('#vizColor').onchange = () => save({ color: $('#vizColor').value });
+  $('#vizCustom').oninput = () => save({ custom: $('#vizCustom').value });
+  $('#vizGlow').onchange = () => save({ glow: $('#vizGlow').checked });
+  $('#vizReset').onclick = () => { prefs.set('viz', {}); viz.configure(VIZ_DEFAULTS); show(VIZ_DEFAULTS); toast('visualizer reset ✦'); };
+  show(vizOpts());
+}
 
 function buildFloaties() {
   const box = $('#floaties');
@@ -432,12 +468,16 @@ function heartBurst(from) {
 }
 
 /* ───────────── visualizer ───────────── */
+const VIZ_DEFAULTS = { style: 'bars', speed: 1, spin: 0, size: 1, bars: 72, color: 'theme', custom: '#ff7eb6', glow: true };
+const vizOpts = () => ({ ...VIZ_DEFAULTS, ...prefs.get('viz', {}) });
 const viz = (() => {
   const canvas = $('#viz');
   const g = canvas.getContext('2d');
-  const BARS = 72;
-  const levels = new Float32Array(BARS);
+  let opts = vizOpts();
+  let levels = new Float32Array(opts.bars);
   let ctx = null, analyser = null, freq = null, color = '#fff', color2 = '#fff';
+  // speed: how quickly the ring jumps up and falls back (1 = moonlit's usual)
+  const smoothing = () => Math.min(0.95, Math.max(0.3, 0.95 - 0.13 * opts.speed));
 
   function ensureAudioGraph() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
@@ -446,7 +486,7 @@ const viz = (() => {
       const src = ctx.createMediaElementSource(audio);
       analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.82;
+      analyser.smoothingTimeConstant = smoothing();
       freq = new Uint8Array(analyser.frequencyBinCount);
       src.connect(analyser);
       analyser.connect(ctx.destination);
@@ -470,47 +510,119 @@ const viz = (() => {
     color2 = cs.getPropertyValue('--accent2').trim() || color;
   }
 
-  let raf = 0, enabled = true, lastDraw = 0;
+  function configure(next) {
+    opts = { ...VIZ_DEFAULTS, ...next };
+    if (levels.length !== opts.bars) levels = new Float32Array(opts.bars);
+    if (analyser) analyser.smoothingTimeConstant = smoothing();
+    lastDraw = 0;
+  }
+
+  let raf = 0, enabled = true, lastDraw = 0, lastT = 0, turn = 0;
   function frame(t) {
     raf = requestAnimationFrame(frame);
+    const dt = Math.min(100, t - (lastT || t));
+    lastT = t;
     if (document.hidden) return;
     const w = canvas.width, h = canvas.height;
     if (!w) return;
     const playing = !audio.paused;
-    // nothing playing and the ring has settled: 12 frames a second is plenty for the gentle idle shimmer
-    if (!playing && t - lastDraw < 83 && levels.every(v => v < 0.07)) return;
+    turn += opts.spin * dt * 0.00035 * (playing ? 1 : 0.3);
+    // nothing playing, no spin and the ring has settled: 12 frames a second is plenty for the gentle idle shimmer
+    if (!playing && !opts.spin && t - lastDraw < 83 && levels.every(v => v < 0.07)) return;
     lastDraw = t;
     if (analyser && playing) analyser.getByteFrequencyData(freq);
     g.clearRect(0, 0, w, h);
+    const BARS = levels.length, half = BARS / 2;
     const cx = w / 2, cy = h / 2;
-    const inner = w / 2 / 1.44 + w * 0.012; // just outside the record
-    const maxLen = w * 0.13;
-    g.lineCap = 'round';
-    g.lineWidth = Math.max(2, w * 0.006);
-    const grad = g.createLinearGradient(0, 0, w, h);
-    grad.addColorStop(0, color);
-    grad.addColorStop(1, color2);
-    g.strokeStyle = grad;
-    g.shadowColor = color;
-    g.shadowBlur = playing ? w * 0.012 : 0;
-    const half = BARS / 2;
+    // the canvas is 1.9× the record, so there's room for big sizes; sizes are measured from the record
+    const rec = w / 2 / 1.9, edge = rec * 1.86;
+    const inner = rec * 1.035; // just outside the record
+    const maxLen = Math.min(rec * 0.375 * opts.size, edge - inner);
+    // frame-rate independent rise and fall, scaled by the speed setting
+    const f = (dt / 16.7) * opts.speed;
+    const rise = 1 - (1 - 0.45) ** f, fall = 1 - (1 - 0.12) ** f;
     for (let i = 0; i < BARS; i++) {
       // mirror the spectrum so the ring is symmetrical
       const k = i < half ? i : BARS - 1 - i;
-      let target = 0.03 + 0.02 * Math.sin(t / 900 + i * 0.5);
+      let target = 0.03 + 0.02 * Math.sin((t * opts.speed) / 900 + i * 0.5 * (72 / BARS));
       if (analyser && playing) {
         const bin = Math.floor(2 + (k / half) ** 1.6 * (freq.length * 0.62));
         target = Math.max(target, (freq[bin] / 255) ** 1.6);
       }
-      levels[i] += (target - levels[i]) * (target > levels[i] ? 0.45 : 0.12);
-      const a = (i / BARS) * Math.PI * 2 - Math.PI / 2;
-      const len = levels[i] * maxLen;
-      const cos = Math.cos(a), sin = Math.sin(a);
-      g.globalAlpha = 0.35 + levels[i] * 0.65;
+      levels[i] += (target - levels[i]) * (target > levels[i] ? rise : fall);
+    }
+    const thin = 72 / BARS; // more bars → thinner lines
+    const paint = i => {
+      if (opts.color === 'rainbow') return `hsl(${(i / BARS) * 360 + t * 0.02 * opts.speed} 90% 72%)`;
+      return null;
+    };
+    let fill;
+    if (opts.color === 'custom') fill = opts.custom;
+    else if (opts.color === 'theme') {
+      fill = g.createLinearGradient(0, 0, w, h);
+      fill.addColorStop(0, color);
+      fill.addColorStop(1, color2);
+    }
+    g.strokeStyle = g.fillStyle = fill || color;
+    g.shadowColor = opts.color === 'custom' ? opts.custom : color;
+    g.shadowBlur = playing && opts.glow ? rec * 0.035 : 0;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    const angle = i => (i / BARS) * Math.PI * 2 - Math.PI / 2 + turn;
+
+    if (opts.style === 'wave') {
+      // one smooth line around the record, gently filled underneath
+      const pts = [];
+      for (let i = 0; i < BARS; i++) {
+        const a = angle(i), r = inner + levels[i] * maxLen;
+        pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+      }
       g.beginPath();
-      g.moveTo(cx + cos * inner, cy + sin * inner);
-      g.lineTo(cx + cos * (inner + len), cy + sin * (inner + len));
+      for (let i = 0; i <= BARS; i++) {
+        const p = pts[i % BARS], q = pts[(i + 1) % BARS];
+        const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+        if (i === 0) g.moveTo(mx, my); else g.quadraticCurveTo(p[0], p[1], mx, my);
+      }
+      g.closePath();
+      if (opts.color === 'rainbow') {
+        const cg = g.createConicGradient ? g.createConicGradient(turn - Math.PI / 2, cx, cy) : null;
+        if (cg) for (let s = 0; s <= 6; s++) cg.addColorStop(s / 6, `hsl(${s * 60 + t * 0.02 * opts.speed} 90% 72%)`);
+        g.strokeStyle = g.fillStyle = cg || color;
+      }
+      g.lineWidth = Math.max(2, rec * 0.017);
+      g.globalAlpha = 0.16;
+      g.fill();
+      g.globalAlpha = 0.9;
       g.stroke();
+    } else {
+      for (let i = 0; i < BARS; i++) {
+        const a = angle(i), len = levels[i] * maxLen;
+        const cos = Math.cos(a), sin = Math.sin(a);
+        const c = paint(i);
+        if (c) { g.strokeStyle = g.fillStyle = c; if (opts.glow) g.shadowColor = c; }
+        g.globalAlpha = 0.35 + levels[i] * 0.65;
+        if (opts.style === 'dots') {
+          const r = Math.max(1.5, rec * 0.013 * Math.min(1.6, thin)) * (0.7 + levels[i] * 0.9);
+          g.beginPath();
+          g.arc(cx + cos * (inner + len), cy + sin * (inner + len), r, 0, Math.PI * 2);
+          g.fill();
+        } else if (opts.style === 'rays') {
+          // thin tapered wedges that fan out from the record
+          const spread = (Math.PI / BARS) * 0.55, out = Math.min(edge, inner + len * 1.25);
+          g.beginPath();
+          g.moveTo(cx + cos * inner, cy + sin * inner);
+          g.lineTo(cx + Math.cos(a - spread) * out, cy + Math.sin(a - spread) * out);
+          g.lineTo(cx + Math.cos(a + spread) * out, cy + Math.sin(a + spread) * out);
+          g.closePath();
+          g.fill();
+        } else {
+          g.lineWidth = Math.max(1.5, rec * 0.017 * Math.min(1.5, thin));
+          g.beginPath();
+          g.moveTo(cx + cos * inner, cy + sin * inner);
+          g.lineTo(cx + cos * (inner + len), cy + sin * (inner + len));
+          g.stroke();
+        }
+      }
     }
     g.globalAlpha = 1;
   }
@@ -538,7 +650,7 @@ const viz = (() => {
     }
     return out;
   }
-  return { ensureAudioGraph, refreshColor, setEnabled, sample, getCtx: () => ctx };
+  return { ensureAudioGraph, refreshColor, setEnabled, sample, configure, getCtx: () => ctx };
 })();
 
 /* ───────────── library rendering ───────────── */
@@ -1700,6 +1812,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 (async function init() {
   buildThemeGrid();
   buildFloaties();
+  setupVizSettings();
   applyPerf(prefs.get('perf', prefs.get('lite', false) ? 'lite' : 'full')); // older versions saved a lite on/off switch
   applyTheme(prefs.get('theme', 'midnight-rose'));
   el.nameInput.value = prefs.get('name', '');

@@ -90,8 +90,7 @@
       if (layout === 'card') {
         $('.title').textContent = s.title;
         $('.artist').textContent = [s.artist, s.album].filter(Boolean).join(' · ');
-        const img = $('.cover');
-        if (img) { img.removeAttribute('src'); img.src = `/cover?id=${encodeURIComponent(s.id)}&t=${Date.now()}`; img.onerror = () => img.removeAttribute('src'); }
+        loadCover(true);
       }
       const box = np.firstElementChild; box.classList.remove('swap'); void box.offsetWidth; box.classList.add('swap');
     }
@@ -144,6 +143,22 @@
   }
   requestAnimationFrame(drawSpectrum);
 
+  // The cover for the current song. If it isn't there yet, try again a few times;
+  // moonlit also says when it arrives (the "cover" event).
+  let coverTries = 0, coverTimer = 0;
+  function loadCover(fresh) {
+    const img = $('.cover');
+    if (!img || !s || !s.id) return;
+    clearTimeout(coverTimer);
+    if (fresh) { coverTries = 0; img.removeAttribute('src'); }
+    const id = s.id;
+    img.onerror = () => {
+      img.removeAttribute('src');
+      if (s.id === id && ++coverTries <= 3) coverTimer = setTimeout(() => loadCover(false), 700 * coverTries);
+    };
+    img.src = `/cover?id=${encodeURIComponent(id)}&t=${Date.now()}`;
+  }
+
   function tick() {
     if (!s || !s.id) return;
     const pos = Math.min(s.duration || Infinity, s.position + (s.playing ? (performance.now() - got) / 1000 : 0));
@@ -160,6 +175,7 @@
   function connect() {
     const es = new EventSource('/events');
     es.onmessage = e => apply(JSON.parse(e.data));
+    es.addEventListener('cover', e => { if (s && s.id === JSON.parse(e.data)) loadCover(true); });
     es.addEventListener('spectrum', e => { target = e.data.split(',').map(Number); lastLevels = performance.now(); });
     es.onerror = () => { es.close(); setTimeout(connect, 2000); };
   }

@@ -82,6 +82,11 @@ function createOverlay() {
       covers.delete(id);
       if (bytes) covers.set(id, { type, bytes: Buffer.from(bytes) });
       while (covers.size > 6) covers.delete(covers.keys().next().value);
+      // the cover can arrive just after the song itself: tell the overlay to fetch it now
+      if (bytes && id === state.id) {
+        const msg = `event: cover\ndata: ${JSON.stringify(id)}\n\n`;
+        for (const c of clients) c.write(msg);
+      }
     },
     // music bar levels (0-255), sent as their own small event about 30 times a second
     spectrum(levels) {

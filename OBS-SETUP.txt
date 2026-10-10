@@ -39,6 +39,9 @@ it updates the moment the song changes, and shows "paused" when you pause.
   "music bars that move with the song" switches the bars on or off straight
   away, no address change needed. (no bars for Spotify songs: Spotify's sound
   plays in the Spotify app, where moonlit can't hear it.)
+  how the bars look comes from "visualizer" in moonlit's settings: style
+  (bars / dots / wave / rays), speed, spin, size, number of bars, colours and
+  glow. changes show on the overlay straight away.
   the overlay only works while the moonlit desktop app is open, and only on
   this PC (nobody on the internet can reach it).
 

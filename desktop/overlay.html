@@ -11,7 +11,8 @@
     nocover=1              card without the cover art
     noprogress=1           no progress bar or time
     accent=ff7eb6          main colour (hex, without #)
-  the music bars are switched on and off in moonlit itself (obs · now playing), no address change needed
+  the music bars are switched on and off in moonlit itself (obs · now playing), and styled under
+  "visualizer" in moonlit's settings (style, speed, spin, size, bars, colours, glow): no address change needed
 -->
 <style>
   :root { --accent: #ff7eb6; --accent2: #c49bff; --ink: #fff3f8; --muted: #e6bfd4; }
@@ -52,7 +53,7 @@
   .line .time { font-size: 16px; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
 
   /* music bars: switched on and off from moonlit (obs · now playing) */
-  .spec { display: block; width: 100%; height: 30px; margin-top: 10px; transition: height .4s ease, margin .4s ease, opacity .4s ease; }
+  .spec { display: block; width: 100%; height: var(--spec-h, 30px); margin-top: 10px; transition: height .4s ease, margin .4s ease, opacity .4s ease; }
   .spec.off { height: 0; margin-top: 0; opacity: 0; }
   .line .spec { width: 84px; height: 26px; margin: 0; flex: none; }
   .line .spec.off { width: 0; height: 26px; margin-right: -12px; }
@@ -105,39 +106,100 @@
   }
 
   /* music bars: levels arrive about 30 times a second while music plays; drawing eases
-     between them at the screen's frame rate, and the bars settle down when it stops */
+     between them at the screen's frame rate, and the bars settle down when it stops.
+     Their look (style, speed, spin, size, colours, glow) comes from moonlit's visualizer settings. */
   const spec = $('.spec'), sg = spec.getContext('2d');
-  let target = [], levels = [], lastLevels = 0;
+  const LOOK = { style: 'bars', speed: 1, spin: 0, size: 1, color: 'theme', custom: '#ff7eb6', glow: true };
+  let target = [], levels = [], lastLevels = 0, lastT = 0, shift = 0;
   function drawSpectrum(now) {
     requestAnimationFrame(drawSpectrum);
+    const dt = Math.min(100, now - (lastT || now));
+    lastT = now;
     if (spec.classList.contains('off')) return;
+    const look = { ...LOOK, ...(s && s.viz) };
+    // size: taller bars on the card; the one-line style keeps its height and just reaches higher
+    const cssH = layout === 'card' ? `${Math.round(30 * Math.min(2, Math.max(0.4, look.size)))}px` : '';
+    if (spec.style.getPropertyValue('--spec-h') !== cssH) spec.style.setProperty('--spec-h', cssH);
     const dpr = window.devicePixelRatio || 1, w = Math.round(spec.clientWidth * dpr), h = Math.round(spec.clientHeight * dpr);
     if (!w || !h) return;
     if (spec.width !== w || spec.height !== h) { spec.width = w; spec.height = h; }
     const fresh = now - lastLevels < 400 && s && s.playing;
     // the one-line style is small: half as many, wider bars (each the louder of two)
     const pair = layout === 'line' ? 2 : 1;
-    const n = Math.ceil((target.length || 28) / pair);
+    const n = Math.max(1, Math.ceil((target.length || 28) / pair));
     if (levels.length !== n) levels = new Array(n).fill(0);
+    const f = (dt / 16.7) * look.speed, rise = 1 - 0.5 ** f, fall = 1 - 0.85 ** f;
+    const reach = layout === 'line' ? Math.min(1.3, look.size) : 1;
     for (let i = 0; i < n; i++) {
       const raw = pair === 1 ? target[i] : Math.max(target[i * 2] || 0, target[i * 2 + 1] || 0);
-      const goal = fresh ? (raw || 0) / 255 : 0;
-      levels[i] += (goal - levels[i]) * (goal > levels[i] ? 0.5 : 0.15);
+      const goal = fresh ? Math.min(1, ((raw || 0) / 255) * reach) : 0;
+      levels[i] += (goal - levels[i]) * (goal > levels[i] ? rise : fall);
     }
+    // spin: the bars slide along the row, round and round
+    shift = (shift + look.spin * dt * 0.004 * (fresh ? 1 : 0.3)) % n;
+    const level = x => { // level at a fractional position, wrapping round the row
+      const p = ((x - shift) % n + n) % n, a = Math.floor(p), b = (a + 1) % n, k = p - a;
+      return levels[a] * (1 - k) + levels[b] * k;
+    };
+
     sg.clearRect(0, 0, w, h);
     const cs = getComputedStyle(document.documentElement);
-    const grad = sg.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, cs.getPropertyValue('--accent').trim());
-    grad.addColorStop(1, cs.getPropertyValue('--accent2').trim());
-    sg.fillStyle = grad;
+    const accent = cs.getPropertyValue('--accent').trim(), accent2 = cs.getPropertyValue('--accent2').trim();
+    let paint;
+    if (look.color === 'custom') paint = look.custom;
+    else if (look.color === 'rainbow') {
+      paint = sg.createLinearGradient(0, 0, w, 0);
+      for (let k = 0; k <= 6; k++) paint.addColorStop(k / 6, `hsl(${k * 60 + now * 0.02 * look.speed} 90% 72%)`);
+    } else {
+      paint = sg.createLinearGradient(0, 0, w, 0);
+      paint.addColorStop(0, accent);
+      paint.addColorStop(1, accent2);
+    }
+    sg.fillStyle = sg.strokeStyle = paint;
+    sg.shadowColor = look.color === 'custom' ? look.custom : accent;
+    sg.shadowBlur = look.glow && fresh ? 6 * dpr : 0;
+    sg.lineJoin = sg.lineCap = 'round';
+    const pad = sg.shadowBlur ? 3 * dpr : 0, top = pad, H = h - pad * 2;
     const gap = Math.max(2, w / n * 0.35), bw = (w - gap * (n - 1)) / n;
-    for (let i = 0; i < n; i++) {
-      const bh = Math.max(bw * 0.8, levels[i] ** 1.3 * h);
-      const x = i * (bw + gap), y = h - bh, r = Math.min(bw / 2, bh / 2);
-      sg.globalAlpha = 0.45 + levels[i] * 0.55;
+
+    if (look.style === 'wave') {
+      // one smooth line across, softly filled underneath
+      const pts = [];
+      for (let i = 0; i < n; i++) pts.push([i * (bw + gap) + bw / 2, top + H - Math.max(0.04, level(i) ** 1.3) * H]);
       sg.beginPath();
-      if (sg.roundRect) sg.roundRect(x, y, bw, bh, r); else sg.rect(x, y, bw, bh);
+      sg.moveTo(0, pts[0][1]);
+      for (let i = 0; i < n - 1; i++) sg.quadraticCurveTo(pts[i][0], pts[i][1], (pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2);
+      sg.lineTo(w, pts[n - 1][1]);
+      sg.lineWidth = Math.max(2, 2 * dpr);
+      sg.globalAlpha = 0.95;
+      sg.stroke();
+      sg.lineTo(w, h); sg.lineTo(0, h); sg.closePath();
+      sg.globalAlpha = 0.18;
+      sg.shadowBlur = 0;
       sg.fill();
+    } else {
+      for (let i = 0; i < n; i++) {
+        const v = level(i), x = i * (bw + gap);
+        sg.globalAlpha = 0.45 + v * 0.55;
+        sg.beginPath();
+        if (look.style === 'dots') {
+          // a dot that rides up and down with the music
+          const r = Math.min(bw / 2, H / 4);
+          sg.arc(x + bw / 2, top + H - r - v ** 1.3 * (H - r * 2), r, 0, Math.PI * 2);
+        } else if (look.style === 'rays') {
+          // spikes that grow up and down from the middle
+          const bh = Math.max(bw * 0.4, v ** 1.3 * H), mid = top + H / 2;
+          sg.moveTo(x + bw / 2, mid - bh / 2);
+          sg.lineTo(x + bw, mid);
+          sg.lineTo(x + bw / 2, mid + bh / 2);
+          sg.lineTo(x, mid);
+          sg.closePath();
+        } else {
+          const bh = Math.max(bw * 0.8, v ** 1.3 * H), y = top + H - bh, r = Math.min(bw / 2, bh / 2);
+          if (sg.roundRect) sg.roundRect(x, y, bw, bh, r); else sg.rect(x, y, bw, bh);
+        }
+        sg.fill();
+      }
     }
     sg.globalAlpha = 1;
   }
@@ -145,15 +207,16 @@
 
   // The cover for the current song. If it isn't there yet, try again a few times;
   // moonlit also says when it arrives (the "cover" event).
+  const NO_COVER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   let coverTries = 0, coverTimer = 0;
   function loadCover(fresh) {
     const img = $('.cover');
     if (!img || !s || !s.id) return;
     clearTimeout(coverTimer);
-    if (fresh) { coverTries = 0; img.removeAttribute('src'); }
+    if (fresh) { coverTries = 0; img.src = NO_COVER; }
     const id = s.id;
     img.onerror = () => {
-      img.removeAttribute('src');
+      img.src = NO_COVER; // just the pink gradient, never a broken-picture icon
       if (s.id === id && ++coverTries <= 3) coverTimer = setTimeout(() => loadCover(false), 700 * coverTries);
     };
     img.src = `/cover?id=${encodeURIComponent(id)}&t=${Date.now()}`;

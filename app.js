@@ -415,6 +415,7 @@ function setupVizSettings() {
     prefs.set('viz', next);
     viz.configure(next);
     show(next);
+    pushOverlay(); // the OBS overlay's music bars follow these settings too
   };
   function show(o) {
     document.querySelectorAll('#vizStyleSeg button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.style === o.style)));
@@ -433,7 +434,7 @@ function setupVizSettings() {
   $('#vizColor').onchange = () => save({ color: $('#vizColor').value });
   $('#vizCustom').oninput = () => save({ custom: $('#vizCustom').value });
   $('#vizGlow').onchange = () => save({ glow: $('#vizGlow').checked });
-  $('#vizReset').onclick = () => { prefs.set('viz', {}); viz.configure(VIZ_DEFAULTS); show(VIZ_DEFAULTS); toast('visualizer reset ✦'); };
+  $('#vizReset').onclick = () => { prefs.set('viz', {}); viz.configure(VIZ_DEFAULTS); show(VIZ_DEFAULTS); pushOverlay(); toast('visualizer reset ✦'); };
   show(vizOpts());
 }
 
@@ -1521,21 +1522,21 @@ async function openExternalFiles(paths, { play = true, quiet = false, replace = 
 let overlayCoverFor = null;
 function pushOverlay() {
   if (!desktop || !desktop.overlay) return;
-  const now = onAir(), spectrum = prefs.get('overlaySpectrum', true);
-  if (!now) desktop.overlay.state({ spectrum });
+  const now = onAir(), spectrum = prefs.get('overlaySpectrum', true), look = vizOpts();
+  if (!now) desktop.overlay.state({ spectrum, viz: look });
   else if (now.source === 'spotify') {
     const sp = now.song;
     desktop.overlay.state({
       id: sp.id, title: sp.title, artist: sp.artist, album: sp.album, line: formatSong(sp),
       duration: sp.duration, position: sp.position + (sp.playing ? (Date.now() - sp.at) / 1000 : 0),
-      playing: sp.playing, spectrum, source: 'spotify',
+      playing: sp.playing, spectrum, viz: look, source: 'spotify',
     });
   } else {
     const t = now.song;
     desktop.overlay.state({
       id: t.id, title: t.title, artist: t.artist || '', album: t.album || '', line: formatSong(t),
       duration: Number.isFinite(audio.duration) ? audio.duration : (t.duration || 0),
-      position: audio.currentTime || 0, playing: !audio.paused, spectrum, source: 'moonlit',
+      position: audio.currentTime || 0, playing: !audio.paused, spectrum, viz: look, source: 'moonlit',
     });
   }
   feedSpectrum();
@@ -1543,14 +1544,15 @@ function pushOverlay() {
 
 // The overlay's music bars: sampled ~30 times a second, but only while an overlay is open
 // in OBS (or a browser), the bars are switched on, and music is playing.
-const SPECTRUM_BARS = 28;
+// as many overlay bars as the visualizer's "bars" setting asks for, scaled down to fit a row
+const spectrumBars = () => Math.max(8, Math.min(64, Math.round(vizOpts().bars * 28 / 72)));
 let overlayWatchers = 0, spectrumTimer = 0;
 function feedSpectrum() {
   if (!desktop || !desktop.overlay) return;
   const want = overlayWatchers > 0 && prefs.get('overlaySpectrum', true) && !audio.paused && onAir()?.source === 'moonlit';
   if (want && !spectrumTimer) {
     spectrumTimer = setInterval(() => {
-      const levels = viz.sample(SPECTRUM_BARS);
+      const levels = viz.sample(spectrumBars());
       if (levels) desktop.overlay.spectrum(levels);
     }, 33);
   } else if (!want && spectrumTimer) {

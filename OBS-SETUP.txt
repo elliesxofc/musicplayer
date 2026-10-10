@@ -42,6 +42,11 @@ it updates the moment the song changes, and shows "paused" when you pause.
   how the bars look comes from "visualizer" in moonlit's settings: style
   (bars / dots / wave / rays), speed, spin, size, number of bars, colours and
   glow. changes show on the overlay straight away.
+  "show “up next” before a song ends": in the last 5-30 seconds of a song a
+  small strip slides out under the overlay with the next song (cover, artist -
+  title and its length, plus "requested by ..." for chat requests). give the
+  Browser source some extra height for it: 520 × 260 for the card, 900 × 130
+  for one line.
   the overlay only works while the moonlit desktop app is open, and only on
   this PC (nobody on the internet can reach it).
 

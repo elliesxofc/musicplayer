@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PORTS = [4848, 4849, 4850, 4851, 4852];
-const EMPTY = { id: null, title: '', artist: '', album: '', line: '', duration: 0, position: 0, playing: false, spectrum: true };
+const EMPTY = { id: null, title: '', artist: '', album: '', line: '', duration: 0, position: 0, playing: false, spectrum: true, next: null };
 
 function createOverlay() {
   let state = { ...EMPTY };
@@ -40,7 +40,9 @@ function createOverlay() {
       return res.end(snapshot());
     }
     if (url.pathname === '/cover') {
-      const cover = covers.get(state.id);
+      // the current song's cover, or the next song's (for "up next") when asked by id
+      const want = url.searchParams.get('id');
+      const cover = covers.get(want || state.id);
       if (!cover) { res.writeHead(404, cors); return res.end(); }
       res.writeHead(200, { ...cors, 'Content-Type': cover.type || 'image/jpeg' });
       return res.end(cover.bytes);

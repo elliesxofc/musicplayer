@@ -1027,6 +1027,25 @@ function playRequest(id) {
   playTrack(id);
 }
 
+// What plays after this song, so the overlay can show "up next" before it starts.
+// With shuffle on, the random pick is made ahead of time (and then really used by next()).
+let plannedNext = null; // { from, id }
+function playlistFrom() {
+  return state.currentId === requestPlaying && byId(resumeAfter) ? resumeAfter : state.currentId;
+}
+function upNext() {
+  if (state.repeat === 'one') return null;
+  const req = songRequests.find(r => byId(r.id));
+  if (req) return { id: req.id, by: req.by };
+  const from = playlistFrom();
+  if (!state.shuffle) { plannedNext = null; return { id: neighbour(1, true, from) }; }
+  const q = currentQueue();
+  if (!plannedNext || plannedNext.from !== from || !q.includes(plannedNext.id) || plannedNext.id === state.currentId) {
+    plannedNext = { from, id: neighbour(1, true, from) };
+  }
+  return { id: plannedNext.id };
+}
+
 function next(fromEnded = false) {
   while (songRequests.length) {
     const req = songRequests.shift();
@@ -1035,9 +1054,11 @@ function next(fromEnded = false) {
   }
   // requests are done: back to the playlist, from the song before them (unless you've picked
   // another song yourself in the meantime)
-  const from = state.currentId === requestPlaying && byId(resumeAfter) ? resumeAfter : state.currentId;
+  const from = playlistFrom();
   requestPlaying = null;
-  const id = neighbour(1, fromEnded, from);
+  const planned = state.shuffle && plannedNext && plannedNext.from === from && byId(plannedNext.id) && plannedNext.id !== state.currentId ? plannedNext.id : null;
+  plannedNext = null;
+  const id = planned || neighbour(1, fromEnded, from);
   if (id) playTrack(id);
   else { pause(); audio.currentTime = 0; }
 }
@@ -1147,6 +1168,7 @@ el.repeat.onclick = () => {
   toast({ off: 'repeat off', all: 'repeating your queue', one: 'repeating this song' }[state.repeat]);
 };
 function syncModes() {
+  if (typeof pushOverlay === 'function') setTimeout(pushOverlay);
   el.shuffle.setAttribute('aria-pressed', String(state.shuffle));
   el.repeat.setAttribute('aria-pressed', String(state.repeat !== 'off'));
   el.repeat.setAttribute('aria-label', 'repeat: ' + state.repeat);
@@ -1520,6 +1542,7 @@ async function openExternalFiles(paths, { play = true, quiet = false, replace = 
 
 /* ───────────── now-playing overlay for OBS (desktop app) ───────────── */
 let overlayCoverFor = null;
+let overlayNextCoverFor = null;
 function pushOverlay() {
   if (!desktop || !desktop.overlay) return;
   const now = onAir(), spectrum = prefs.get('overlaySpectrum', true), look = vizOpts();
@@ -1533,7 +1556,20 @@ function pushOverlay() {
     });
   } else {
     const t = now.song;
+    const up = upNext(), nt = up && up.id !== t.id ? byId(up.id) : null;
+    // "up next" for the overlay: shown during the last few seconds of the song
+    const coming = nt && prefs.get('overlayUpNext', true) ? {
+      id: nt.id, title: nt.title, artist: nt.artist || '', line: formatSong(nt), duration: nt.duration || 0, by: up.by || '',
+      seconds: prefs.get('overlayUpNextSecs', 10),
+    } : null;
+    // its cover goes over early, ready for when "up next" shows
+    if (coming && overlayNextCoverFor !== nt.id) {
+      overlayNextCoverFor = nt.id;
+      (nt.cover ? nt.cover.arrayBuffer().catch(() => null) : Promise.resolve(null))
+        .then(bytes => { if (bytes) desktop.overlay.cover(nt.id, nt.cover.type, bytes); });
+    }
     desktop.overlay.state({
+      next: coming,
       id: t.id, title: t.title, artist: t.artist || '', album: t.album || '', line: formatSong(t),
       duration: Number.isFinite(audio.duration) ? audio.duration : (t.duration || 0),
       position: audio.currentTime || 0, playing: !audio.paused, spectrum, viz: look, source: 'moonlit',
@@ -1586,6 +1622,14 @@ async function setupOverlay() {
   // the bars switch on and off live, without changing the address in OBS
   bars.checked = prefs.get('overlaySpectrum', true);
   bars.onchange = () => { prefs.set('overlaySpectrum', bars.checked); pushOverlay(); };
+  // "up next" in the last seconds of a song (live, no address change)
+  const upOn = $('#overlayUpNext'), upSecs = $('#overlayUpNextSecs');
+  upOn.checked = prefs.get('overlayUpNext', true);
+  upSecs.value = String(prefs.get('overlayUpNextSecs', 10));
+  upSecs.disabled = !upOn.checked;
+  upOn.onchange = () => { prefs.set('overlayUpNext', upOn.checked); upSecs.disabled = !upOn.checked; pushOverlay(); };
+  upSecs.onchange = () => { prefs.set('overlayUpNextSecs', +upSecs.value); pushOverlay(); };
+  document.addEventListener('moonlit:requests', () => pushOverlay());
   desktop.overlay.onWatchers(n => { overlayWatchers = n; feedSpectrum(); });
   const url = () => {
     const p = new URLSearchParams();

@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=36">
+  <link rel="manifest" href="manifest.webmanifest?v=37">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=36">
+  <link rel="stylesheet" href="style.css?v=37">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -336,10 +336,20 @@
             </select>
           </label>
           <label class="check"><input type="checkbox" id="overlayHide"> hide while paused</label>
+          <div class="upnext-row">
+            <label class="check"><input type="checkbox" id="overlayUpNext"> show “up next” before a song ends</label>
+            <select id="overlayUpNextSecs" aria-label="how long before the end">
+              <option value="5">last 5 s</option>
+              <option value="10">last 10 s</option>
+              <option value="15">last 15 s</option>
+              <option value="20">last 20 s</option>
+              <option value="30">last 30 s</option>
+            </select>
+          </div>
           <label class="check"><input type="checkbox" id="overlaySpectrum"> music bars that move with the song (style them under <b>visualizer</b>)</label>
         </div>
         <button class="link-btn" id="overlayPreview" type="button">preview in browser</button>
-        <p class="hint small">size in OBS: 520 × 180 for the card, 900 × 70 for one line.</p>
+        <p class="hint small">size in OBS: 520 × 260 for the card, 900 × 130 for one line (the extra room is for “up next”).</p>
       </div>
       <p class="hint" id="obsTxtHint">keeps a <b>.txt</b> file updated with the current song, so an OBS text source can show it on stream. needs chrome or edge on a computer.</p>
       <div class="obs-row">
@@ -450,7 +460,7 @@
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v36</p>
+      <p class="version">moonlit v37</p>
     </section>
   </div>
 
@@ -463,9 +473,9 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=36"></script>
-  <script src="obs.js?v=36"></script>
-  <script src="live.js?v=36"></script>
-  <script src="requests.js?v=36"></script>
+  <script src="app.js?v=37"></script>
+  <script src="obs.js?v=37"></script>
+  <script src="live.js?v=37"></script>
+  <script src="requests.js?v=37"></script>
 </body>
 </html>

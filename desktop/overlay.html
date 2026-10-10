@@ -58,6 +58,27 @@
   .line .spec { width: 84px; height: 26px; margin: 0; flex: none; }
   .line .spec.off { width: 0; height: 26px; margin-right: -12px; }
 
+  /* up next: slides out from under the card / line in the last seconds of a song */
+  .np { display: flex; flex-direction: column; align-items: flex-start; }
+  .upnext {
+    display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 48px); margin: 8px 0 0 14px;
+    padding: 8px 16px 8px 8px; border-radius: 16px; white-space: nowrap;
+    background: linear-gradient(135deg, rgba(40, 12, 34, .9), rgba(26, 10, 24, .9));
+    border: 1px solid rgba(255, 150, 200, .28); box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .6);
+    opacity: 0; transform: translateY(-14px) scale(.96); transform-origin: top left;
+    transition: opacity .45s ease, transform .55s cubic-bezier(.2, .8, .2, 1); pointer-events: none;
+  }
+  .upnext.show { opacity: 1; transform: none; }
+  .upnext img { width: 40px; height: 40px; border-radius: 10px; object-fit: cover; flex: none; background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+  .upnext .un-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .upnext .un-label { font-size: 10.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+  .upnext .un-label em { font-style: normal; color: var(--muted); letter-spacing: .06em; text-transform: none; margin-left: 4px; }
+  .upnext .un-song { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+  .upnext .un-time { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; margin-left: auto; padding-left: 4px; }
+  .line-mode .upnext { margin-left: 18px; padding: 6px 14px; border-radius: 999px; }
+  .line-mode .upnext img { width: 26px; height: 26px; border-radius: 50%; }
+  .line-mode .upnext .un-text { flex-direction: row; align-items: baseline; gap: 10px; }
+
   .swap { animation: swap .6s ease; }
   @keyframes swap { from { opacity: 0; transform: translateX(-10px); } }
 </style>
@@ -76,8 +97,13 @@
          <div class="progress"><span class="cur">0:00</span><div class="bar"><b></b></div><span class="dur">0:00</span></div>
          <canvas class="spec off"></canvas></div></div>`
     : `<div class="line"><canvas class="spec off"></canvas><span class="song"></span><span class="time"></span></div>`;
+  np.insertAdjacentHTML('beforeend', `<div class="upnext"><img alt=""><div class="un-text">
+    <span class="un-label">up next<em></em></span><span class="un-song"></span></div><span class="un-time"></span></div>`);
+  np.classList.toggle('line-mode', layout === 'line');
   const $ = s => np.querySelector(s);
-  if (q.get('nocover')) $('.cover')?.remove();
+  const up = np.querySelector('.upnext');
+  const NO_COVER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  if (q.get('nocover')) { $('.cover')?.remove(); up.querySelector('img').remove(); }
   if (q.get('noprogress')) { $('.progress')?.remove(); $('.time')?.remove(); }
 
   const fmt = s => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
@@ -100,6 +126,7 @@
     np.classList.toggle('paused', !s.playing);
     if (layout === 'card') $('.state').textContent = s.playing ? 'now playing' : 'paused';
     np.classList.toggle('hidden', !!q.get('hidepaused') && !s.playing);
+    if (changed) { up.classList.remove('show'); upFor = ''; }
     // no bars for Spotify: its sound plays in the Spotify app, so moonlit can't hear it
     spec.classList.toggle('off', !s.spectrum || s.source === 'spotify');
     tick();
@@ -207,7 +234,6 @@
 
   // The cover for the current song. If it isn't there yet, try again a few times;
   // moonlit also says when it arrives (the "cover" event).
-  const NO_COVER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   let coverTries = 0, coverTimer = 0;
   function loadCover(fresh) {
     const img = $('.cover');
@@ -222,10 +248,32 @@
     img.src = `/cover?id=${encodeURIComponent(id)}&t=${Date.now()}`;
   }
 
+  // the next song: who/what/how long, shown in the last few seconds of this one
+  let upFor = '';
+  function upNext(pos, dur) {
+    const n = s && s.next;
+    const left = dur - pos;
+    const show = !!(n && s.playing && dur && pos > 3 && left <= (n.seconds || 10) && left > 0.25);
+    if (show) {
+      const key = `${s.id}>${n.title}|${n.artist}`;
+      if (upFor !== key) {
+        upFor = key;
+        up.querySelector('.un-song').textContent = layout === 'line' ? (n.line || [n.artist, n.title].filter(Boolean).join(' - ')) : [n.artist, n.title].filter(Boolean).join(' - ');
+        up.querySelector('.un-time').textContent = n.duration ? fmt(n.duration) : '';
+        const img = up.querySelector('img');
+        if (img) { img.onerror = () => { img.src = NO_COVER; }; img.src = n.id ? `/cover?id=${encodeURIComponent(n.id)}&t=${Date.now()}` : NO_COVER; }
+      }
+      const by = n.by ? ` · requested by ${n.by}` : '';
+      up.querySelector('em').textContent = ` in ${Math.ceil(left)}s${by}`;
+    }
+    up.classList.toggle('show', show);
+  }
+
   function tick() {
-    if (!s || !s.id) return;
+    if (!s || !s.id) { up.classList.remove('show'); return; }
     const pos = Math.min(s.duration || Infinity, s.position + (s.playing ? (performance.now() - got) / 1000 : 0));
     const dur = s.duration || 0;
+    upNext(pos, dur);
     if (layout === 'card') {
       // no length known (can happen with the Spotify app): just the time played
       const cur = $('.cur'); if (cur) { cur.textContent = fmt(pos); $('.dur').textContent = dur ? fmt(dur) : ''; $('.bar').style.visibility = dur ? '' : 'hidden'; $('.bar b').style.width = dur ? `${Math.min(100, pos / dur * 100)}%` : '0%'; }
@@ -233,7 +281,7 @@
       const t = $('.time'); if (t) t.textContent = dur ? `${fmt(pos)} / ${fmt(dur)}` : fmt(pos);
     }
   }
-  setInterval(tick, 250);
+  setInterval(tick, 200);
 
   function connect() {
     const es = new EventSource('/events');

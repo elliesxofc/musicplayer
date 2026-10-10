@@ -523,7 +523,22 @@ const viz = (() => {
     if (on) raf = requestAnimationFrame(frame);
     else g.clearRect(0, 0, canvas.width, canvas.height);
   }
-  return { ensureAudioGraph, refreshColor, setEnabled, getCtx: () => ctx };
+  // a few levels for the OBS overlay's music bars: bass on the left, treble on the right.
+  // Works in every effects mode (lite only stops drawing the ring, not the analyser).
+  function sample(n) {
+    if (!analyser || audio.paused) return null;
+    analyser.getByteFrequencyData(freq);
+    const out = new Array(n);
+    const top = freq.length * 0.62;
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor(2 + (i / n) ** 1.6 * top), b = Math.max(a + 1, Math.floor(2 + ((i + 1) / n) ** 1.6 * top));
+      let peak = 0;
+      for (let j = a; j < b; j++) peak = Math.max(peak, freq[j]);
+      out[i] = peak;
+    }
+    return out;
+  }
+  return { ensureAudioGraph, refreshColor, setEnabled, sample, getCtx: () => ctx };
 })();
 
 /* ───────────── library rendering ───────────── */
@@ -1060,10 +1075,32 @@ function formatSong(t) {
   return s.replace(/\{title\}/g, () => t.title).replace(/\{artist\}/g, () => t.artist || '').replace(/\{album\}/g, () => t.album || '').trim();
 }
 
+/* What's "on air" for the overlay, nowplaying.txt and !song: moonlit's song, or Spotify's
+   (desktop app, Spotify connected) while Spotify is the one playing. If both play, or
+   neither, the one started most recently wins. */
+let spotifyNow = null;
+const lastStart = { moonlit: 0, spotify: 0 };
+audio.addEventListener('play', () => { lastStart.moonlit = Date.now(); });
+function onAir() {
+  const m = byId(state.currentId), sp = spotifyNow;
+  if (!sp) return m ? { source: 'moonlit', song: m, playing: !audio.paused } : null;
+  const spotifyWins = !m || (sp.playing !== !audio.paused ? sp.playing : lastStart.spotify > lastStart.moonlit);
+  return spotifyWins ? { source: 'spotify', song: sp, playing: sp.playing } : { source: 'moonlit', song: m, playing: !audio.paused };
+}
+// called with each update from Spotify (null: nothing there, or not connected)
+function setSpotifyNow(sp) {
+  const was = spotifyNow;
+  if (sp && sp.playing && (!was || !was.playing || was.id !== sp.id)) lastStart.spotify = Date.now();
+  spotifyNow = sp;
+  const changed = !was !== !sp || (was && sp && (was.id !== sp.id || was.playing !== sp.playing));
+  if (changed) queueObsWrite();
+  pushOverlay();
+}
+
 function obsText() {
-  const t = byId(state.currentId);
-  if (!t || (prefs.get('obsPause', false) && audio.paused)) return '';
-  return formatSong(t) + (prefs.get('obsPad', false) ? '        ' : '');
+  const now = onAir();
+  if (!now || (prefs.get('obsPause', false) && !now.playing)) return '';
+  return formatSong(now.song) + (prefs.get('obsPad', false) ? '        ' : '');
 }
 
 function queueObsWrite() {
@@ -1322,12 +1359,42 @@ async function openExternalFiles(paths, { play = true, quiet = false, replace = 
 let overlayCoverFor = null;
 function pushOverlay() {
   if (!desktop || !desktop.overlay) return;
-  const t = byId(state.currentId);
-  desktop.overlay.state(t ? {
-    id: t.id, title: t.title, artist: t.artist || '', album: t.album || '', line: formatSong(t),
-    duration: Number.isFinite(audio.duration) ? audio.duration : (t.duration || 0),
-    position: audio.currentTime || 0, playing: !audio.paused,
-  } : {});
+  const now = onAir(), spectrum = prefs.get('overlaySpectrum', true);
+  if (!now) desktop.overlay.state({ spectrum });
+  else if (now.source === 'spotify') {
+    const sp = now.song;
+    desktop.overlay.state({
+      id: sp.id, title: sp.title, artist: sp.artist, album: sp.album, line: formatSong(sp),
+      duration: sp.duration, position: sp.position + (sp.playing ? (Date.now() - sp.at) / 1000 : 0),
+      playing: sp.playing, spectrum, source: 'spotify',
+    });
+  } else {
+    const t = now.song;
+    desktop.overlay.state({
+      id: t.id, title: t.title, artist: t.artist || '', album: t.album || '', line: formatSong(t),
+      duration: Number.isFinite(audio.duration) ? audio.duration : (t.duration || 0),
+      position: audio.currentTime || 0, playing: !audio.paused, spectrum, source: 'moonlit',
+    });
+  }
+  feedSpectrum();
+}
+
+// The overlay's music bars: sampled ~30 times a second, but only while an overlay is open
+// in OBS (or a browser), the bars are switched on, and music is playing.
+const SPECTRUM_BARS = 28;
+let overlayWatchers = 0, spectrumTimer = 0;
+function feedSpectrum() {
+  if (!desktop || !desktop.overlay) return;
+  const want = overlayWatchers > 0 && prefs.get('overlaySpectrum', true) && !audio.paused && onAir()?.source === 'moonlit';
+  if (want && !spectrumTimer) {
+    spectrumTimer = setInterval(() => {
+      const levels = viz.sample(SPECTRUM_BARS);
+      if (levels) desktop.overlay.spectrum(levels);
+    }, 33);
+  } else if (!want && spectrumTimer) {
+    clearInterval(spectrumTimer);
+    spectrumTimer = 0;
+  }
 }
 // the cover goes over first, so it's ready when the overlay asks for it
 async function overlayTrack() {
@@ -1349,9 +1416,13 @@ async function setupOverlay() {
   if (!base) return;
   $('#overlayBox').hidden = false;
   $('#obsTxtHint').innerHTML = 'or keep a <b>.txt</b> file updated with the song name, for an OBS <b>Text</b> source:';
-  const layout = $('#overlayLayout'), hide = $('#overlayHide'), input = $('#overlayUrl');
+  const layout = $('#overlayLayout'), hide = $('#overlayHide'), input = $('#overlayUrl'), bars = $('#overlaySpectrum');
   layout.value = prefs.get('overlayLayout', 'card');
   hide.checked = prefs.get('overlayHide', false);
+  // the bars switch on and off live, without changing the address in OBS
+  bars.checked = prefs.get('overlaySpectrum', true);
+  bars.onchange = () => { prefs.set('overlaySpectrum', bars.checked); pushOverlay(); };
+  desktop.overlay.onWatchers(n => { overlayWatchers = n; feedSpectrum(); });
   const url = () => {
     const p = new URLSearchParams();
     if (layout.value === 'line') p.set('layout', 'line');

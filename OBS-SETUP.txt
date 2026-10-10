@@ -30,17 +30,47 @@ it updates the moment the song changes, and shows "paused" when you pause.
   1. moonlit → sliders button → "obs · now playing" → copy the overlay address
      (usually  http://localhost:4848/overlay )
   2. in OBS: Sources → +  → "Browser" → name it "moonlit overlay" → OK
-  3. URL: paste the address. Width 520, Height 140 (card)
+  3. URL: paste the address. Width 520, Height 180 (card)
      or pick "one line + time" in moonlit first and use Width 900, Height 70
   4. leave "Shutdown source when not visible" OFF → OK
 
   options in moonlit: style (card with cover / one line + time) and
   "hide while paused". the address changes to match; paste it again in OBS.
+  "music bars that move with the song" switches the bars on or off straight
+  away, no address change needed. (no bars for Spotify songs: Spotify's sound
+  plays in the Spotify app, where moonlit can't hear it.)
   the overlay only works while the moonlit desktop app is open, and only on
   this PC (nobody on the internet can reach it).
 
 the song name format (🎵 Artist - Title, custom, …) applies to the one-line
 overlay and to the .txt file below.
+
+
+NEW (desktop app): Spotify
+--------------------------
+show what's playing on Spotify in moonlit, with play / pause / skip (those
+buttons need Spotify Premium). while Spotify is the one playing, the overlay,
+nowplaying.txt and !song show the Spotify song.
+
+  1. go to https://developer.spotify.com/dashboard, sign in, "Create app"
+     (any name and description)
+  2. Redirect URIs: add  http://127.0.0.1:4860/callback  and tick "Web API"
+  3. save, copy the app's Client ID
+  4. moonlit → sliders → "spotify" → paste the Client ID → connect spotify,
+     then press "Agree" in the browser tab that opens
+
+
+NEW (desktop app): !song in YouTube chat
+----------------------------------------
+viewers type !song (or !np) and your bot answers, e.g.
+  🎵 now playing: Unknown Brain - War Zone (1:23 / 3:45)
+
+  moonlit → sliders → "chat · !song":
+  - tick "answer !song in my YouTube chat"
+  - your channel, like @yourname: moonlit finds your live stream by itself
+    each time you go live (or paste one stream's link)
+  - bot login: the same line as YOUTUBE_BOT_CREDENTIALS in the song request
+    app. it's saved encrypted on this PC only.
 
 
 the .txt file (works in the website version too)

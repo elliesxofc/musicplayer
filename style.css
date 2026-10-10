@@ -619,7 +619,46 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .scrim { display: none; }
 
 /* ───────────── small screens ───────────── */
+/* ───────────── Spotify mini player (desktop app): a slim pill in the top bar ───────────── */
+.sp-mini {
+  --sp: #1ed760; --sp-ink: #0b1a10;
+  position: relative; flex: 0 1 380px; min-width: 0; margin: 0 auto;
+  display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 10px;
+  padding: 5px 6px 5px 5px; border-radius: 16px; overflow: hidden;
+  background: var(--glass); border: 1px solid var(--glass-line);
+  backdrop-filter: blur(24px) saturate(1.3); -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  animation: pop .3s var(--ease);
+}
+.sp-mini[hidden] { display: none; }
+/* the greeting steps aside while Spotify has a song */
+.sp-mini:not([hidden]) ~ .greeting { display: none; }
+.sp-mini:not([hidden]) ~ .top-actions { margin-left: 0; }
+.sp-cover { width: 36px; height: 36px; border-radius: 10px; object-fit: cover; background: var(--faint); }
+.sp-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sp-label { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; }
+.sp-logo { width: 13px; height: 13px; flex: none; color: var(--muted); }
+.sp-mini.playing .sp-logo { color: var(--sp); }
+.sp-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.sp-artist { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-device { display: none; }
+.sp-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: transparent; }
+.sp-bar b { display: block; height: 100%; width: 0; background: var(--sp); transition: width 1s linear; }
+.sp-buttons { display: flex; align-items: center; gap: 0; }
+.sp-buttons .icon-btn { width: 30px; height: 30px; }
+.sp-buttons svg { width: 15px; height: 15px; }
+.sp-play { color: var(--sp-ink); background: var(--sp) !important; border-radius: 50%; }
+.sp-play svg { width: 14px; height: 14px; }
+/* settings: Spotify steps and !song */
+.steps { margin: 0 0 12px; padding-left: 20px; font-size: 13px; line-height: 1.55; color: var(--muted); }
+.steps li { margin-bottom: 8px; }
+.steps a { color: var(--accent); }
+.sp-redirect { margin: 6px 0 0; }
+.obs-status.warn { color: #ffb37a; }
+.chat-preview { overflow-wrap: anywhere; }
+
 @media (max-width: 900px) {
+  .sp-mini { flex-basis: 260px; }
+  .sp-buttons #spPrev { display: none; }
   .app {
     grid-template-columns: 1fr; grid-template-areas: "top" "stage";
     padding: calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
@@ -655,7 +694,7 @@ body.lite .sky {
     radial-gradient(70vmax 70vmax at 0% 0%, rgb(var(--blob1) / .22), transparent 70%),
     radial-gradient(70vmax 70vmax at 100% 100%, rgb(var(--blob2) / .18), transparent 70%);
 }
-body.lite .library, body.lite .console, body.lite .panel, body.lite .drop, body.lite .drop-inner {
+body.lite .library, body.lite .console, body.lite .panel, body.lite .drop, body.lite .drop-inner, body.lite .sp-mini {
   backdrop-filter: none; -webkit-backdrop-filter: none;
 }
 body.lite .library, body.lite .console, body.lite .panel { background: color-mix(in srgb, var(--bg2) 85%, var(--bg)); }

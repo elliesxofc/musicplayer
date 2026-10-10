@@ -12,13 +12,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PORTS = [4848, 4849, 4850, 4851, 4852];
-const EMPTY = { id: null, title: '', artist: '', album: '', line: '', duration: 0, position: 0, playing: false };
+const EMPTY = { id: null, title: '', artist: '', album: '', line: '', duration: 0, position: 0, playing: false, spectrum: true };
 
 function createOverlay() {
   let state = { ...EMPTY };
-  let cover = null; // { id, type, bytes }
+  let updatedAt = Date.now();
+  const covers = new Map(); // song id → { type, bytes }: the last few, from moonlit and Spotify
   const clients = new Set();
   let port = null;
+  let watchersChanged = () => {};
+  const watchers = () => watchersChanged(clients.size);
 
   const page = () => fs.readFileSync(path.join(__dirname, 'overlay.html'));
   // position is sent as "seconds at the moment of sending"; the page keeps time from there
@@ -37,7 +40,8 @@ function createOverlay() {
       return res.end(snapshot());
     }
     if (url.pathname === '/cover') {
-      if (!cover || cover.id !== state.id) { res.writeHead(404, cors); return res.end(); }
+      const cover = covers.get(state.id);
+      if (!cover) { res.writeHead(404, cors); return res.end(); }
       res.writeHead(200, { ...cors, 'Content-Type': cover.type || 'image/jpeg' });
       return res.end(cover.bytes);
     }
@@ -45,7 +49,8 @@ function createOverlay() {
       res.writeHead(200, { ...cors, 'Content-Type': 'text/event-stream; charset=utf-8', Connection: 'keep-alive' });
       res.write(`retry: 2000\ndata: ${snapshot()}\n\n`);
       clients.add(res);
-      req.on('close', () => clients.delete(res));
+      watchers();
+      req.on('close', () => { clients.delete(res); watchers(); });
       return;
     }
     res.writeHead(404, cors);
@@ -69,10 +74,27 @@ function createOverlay() {
     url: () => (port ? `http://localhost:${port}/overlay` : null),
     update(next) {
       state = { ...EMPTY, ...next };
+      updatedAt = Date.now();
       const msg = `data: ${snapshot()}\n\n`;
       for (const c of clients) c.write(msg);
     },
-    setCover(id, type, bytes) { cover = bytes ? { id, type, bytes: Buffer.from(bytes) } : null; },
+    setCover(id, type, bytes) {
+      covers.delete(id);
+      if (bytes) covers.set(id, { type, bytes: Buffer.from(bytes) });
+      while (covers.size > 6) covers.delete(covers.keys().next().value);
+    },
+    // music bar levels (0-255), sent as their own small event about 30 times a second
+    spectrum(levels) {
+      if (!clients.size || !Array.isArray(levels)) return;
+      const msg = `event: spectrum\ndata: ${levels.slice(0, 64).map(v => Math.max(0, Math.min(255, v | 0))).join(',')}\n\n`;
+      for (const c of clients) c.write(msg);
+    },
+    onWatchers(cb) { watchersChanged = cb; },
+    // what's on the overlay right now, with the song's clock moved on to this moment
+    now() {
+      const position = state.position + (state.playing ? (Date.now() - updatedAt) / 1000 : 0);
+      return { ...state, position: state.duration ? Math.min(state.duration, position) : position };
+    },
     stop: () => { for (const c of clients) c.end(); server.close(); },
   };
 }

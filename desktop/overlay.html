@@ -11,6 +11,7 @@
     nocover=1              card without the cover art
     noprogress=1           no progress bar or time
     accent=ff7eb6          main colour (hex, without #)
+  the music bars are switched on and off in moonlit itself (obs · now playing), no address change needed
 -->
 <style>
   :root { --accent: #ff7eb6; --accent2: #c49bff; --ink: #fff3f8; --muted: #e6bfd4; }
@@ -50,6 +51,12 @@
   .line .song { overflow: hidden; text-overflow: ellipsis; }
   .line .time { font-size: 16px; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
 
+  /* music bars: switched on and off from moonlit (obs · now playing) */
+  .spec { display: block; width: 100%; height: 30px; margin-top: 10px; transition: height .4s ease, margin .4s ease, opacity .4s ease; }
+  .spec.off { height: 0; margin-top: 0; opacity: 0; }
+  .line .spec { width: 84px; height: 26px; margin: 0; flex: none; }
+  .line .spec.off { width: 0; height: 26px; margin-right: -12px; }
+
   .swap { animation: swap .6s ease; }
   @keyframes swap { from { opacity: 0; transform: translateX(-10px); } }
 </style>
@@ -65,8 +72,9 @@
     ? `<div class="card"><img class="cover" alt="">
          <div class="text"><div class="label"><i></i><span class="state">now playing</span></div>
          <div class="title"></div><div class="artist"></div>
-         <div class="progress"><span class="cur">0:00</span><div class="bar"><b></b></div><span class="dur">0:00</span></div></div></div>`
-    : `<div class="line"><span class="song"></span><span class="time"></span></div>`;
+         <div class="progress"><span class="cur">0:00</span><div class="bar"><b></b></div><span class="dur">0:00</span></div>
+         <canvas class="spec off"></canvas></div></div>`
+    : `<div class="line"><canvas class="spec off"></canvas><span class="song"></span><span class="time"></span></div>`;
   const $ = s => np.querySelector(s);
   if (q.get('nocover')) $('.cover')?.remove();
   if (q.get('noprogress')) { $('.progress')?.remove(); $('.time')?.remove(); }
@@ -92,8 +100,49 @@
     np.classList.toggle('paused', !s.playing);
     if (layout === 'card') $('.state').textContent = s.playing ? 'now playing' : 'paused';
     np.classList.toggle('hidden', !!q.get('hidepaused') && !s.playing);
+    // no bars for Spotify: its sound plays in the Spotify app, so moonlit can't hear it
+    spec.classList.toggle('off', !s.spectrum || s.source === 'spotify');
     tick();
   }
+
+  /* music bars: levels arrive about 30 times a second while music plays; drawing eases
+     between them at the screen's frame rate, and the bars settle down when it stops */
+  const spec = $('.spec'), sg = spec.getContext('2d');
+  let target = [], levels = [], lastLevels = 0;
+  function drawSpectrum(now) {
+    requestAnimationFrame(drawSpectrum);
+    if (spec.classList.contains('off')) return;
+    const dpr = window.devicePixelRatio || 1, w = Math.round(spec.clientWidth * dpr), h = Math.round(spec.clientHeight * dpr);
+    if (!w || !h) return;
+    if (spec.width !== w || spec.height !== h) { spec.width = w; spec.height = h; }
+    const fresh = now - lastLevels < 400 && s && s.playing;
+    // the one-line style is small: half as many, wider bars (each the louder of two)
+    const pair = layout === 'line' ? 2 : 1;
+    const n = Math.ceil((target.length || 28) / pair);
+    if (levels.length !== n) levels = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      const raw = pair === 1 ? target[i] : Math.max(target[i * 2] || 0, target[i * 2 + 1] || 0);
+      const goal = fresh ? (raw || 0) / 255 : 0;
+      levels[i] += (goal - levels[i]) * (goal > levels[i] ? 0.5 : 0.15);
+    }
+    sg.clearRect(0, 0, w, h);
+    const cs = getComputedStyle(document.documentElement);
+    const grad = sg.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, cs.getPropertyValue('--accent').trim());
+    grad.addColorStop(1, cs.getPropertyValue('--accent2').trim());
+    sg.fillStyle = grad;
+    const gap = Math.max(2, w / n * 0.35), bw = (w - gap * (n - 1)) / n;
+    for (let i = 0; i < n; i++) {
+      const bh = Math.max(bw * 0.8, levels[i] ** 1.3 * h);
+      const x = i * (bw + gap), y = h - bh, r = Math.min(bw / 2, bh / 2);
+      sg.globalAlpha = 0.45 + levels[i] * 0.55;
+      sg.beginPath();
+      if (sg.roundRect) sg.roundRect(x, y, bw, bh, r); else sg.rect(x, y, bw, bh);
+      sg.fill();
+    }
+    sg.globalAlpha = 1;
+  }
+  requestAnimationFrame(drawSpectrum);
 
   function tick() {
     if (!s || !s.id) return;
@@ -110,6 +159,7 @@
   function connect() {
     const es = new EventSource('/events');
     es.onmessage = e => apply(JSON.parse(e.data));
+    es.addEventListener('spectrum', e => { target = e.data.split(',').map(Number); lastLevels = performance.now(); });
     es.onerror = () => { es.close(); setTimeout(connect, 2000); };
   }
   connect();

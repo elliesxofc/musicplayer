@@ -5,7 +5,7 @@
    few things a browser can't do: write the OBS now-playing file without asking
    for permission every time, never get put to sleep, and start with the PC. */
 
-const { app, BrowserWindow, protocol, net, session, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, protocol, net, session, ipcMain, dialog, shell, Menu, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -13,7 +13,7 @@ const { pathToFileURL } = require('node:url');
 const ROOT = path.join(__dirname, '..');
 const ORIGIN = 'moonlit://app';
 // Only the player's own files are served to the window.
-const SERVED = new Set(['index.html', 'style.css', 'app.js', 'obs.js', 'manifest.webmanifest', 'sw.js']);
+const SERVED = new Set(['index.html', 'style.css', 'app.js', 'obs.js', 'live.js', 'manifest.webmanifest', 'sw.js']);
 const SERVED_DIRS = ['icons'];
 
 protocol.registerSchemesAsPrivileged([
@@ -235,6 +235,70 @@ const overlay = require('./overlay').createOverlay();
 const overlayReady = app.whenReady().then(() => overlay.start());
 ipcMain.on('overlay:state', (_e, s) => { if (s && typeof s === 'object') overlay.update(s); });
 ipcMain.on('overlay:cover', (_e, id, type, bytes) => overlay.setCover(id, type, bytes));
+ipcMain.on('overlay:spectrum', (_e, levels) => overlay.spectrum(levels));
+overlay.onWatchers(n => BrowserWindow.getAllWindows().forEach(w => w.webContents.send('overlay:watchers', n)));
 ipcMain.handle('overlay:url', async () => { await overlayReady; return overlay.url(); });
 ipcMain.handle('overlay:open', async (_e, url) => { if (/^http:\/\/localhost:\d+\/overlay/.test(url)) shell.openExternal(url); });
 app.on('before-quit', () => overlay.stop());
+
+/* ───────────── secrets kept in desktop.json, encrypted with Windows' own protection ───────────── */
+function seal(text) {
+  if (!text) return null;
+  if (safeStorage.isEncryptionAvailable()) return { enc: safeStorage.encryptString(text).toString('base64') };
+  return { plain: text };
+}
+function unseal(box) {
+  if (!box) return '';
+  try { return box.enc ? safeStorage.decryptString(Buffer.from(box.enc, 'base64')) : box.plain || ''; } catch { return ''; }
+}
+const sendAll = (channel, payload) => BrowserWindow.getAllWindows().forEach(w => w.webContents.send(channel, payload));
+
+/* ───────────── !song in YouTube chat ───────────── */
+const chat = require('./chat').createChat({
+  nowPlaying: () => overlay.now(),
+  onStatus: s => sendAll('chat:status', s),
+});
+function chatSettings() {
+  const c = readConfig().chat || {};
+  return { enabled: !!c.enabled, stream: c.stream || '', login: unseal(c.login) };
+}
+app.whenReady().then(() => chat.start(chatSettings()));
+ipcMain.handle('chat:get', () => {
+  const s = chatSettings();
+  return { enabled: s.enabled, stream: s.stream, hasLogin: !!s.login, status: chat.status() };
+});
+// login: a new value to save, '' to forget it, or left out to keep the saved one
+ipcMain.handle('chat:set', (_e, next) => {
+  if (!next || typeof next !== 'object') return null;
+  const c = { ...(readConfig().chat || {}) };
+  if (typeof next.enabled === 'boolean') c.enabled = next.enabled;
+  if (typeof next.stream === 'string') c.stream = next.stream.trim().slice(0, 300);
+  if (typeof next.login === 'string') c.login = seal(next.login.trim());
+  writeConfig({ chat: c });
+  chat.start(chatSettings());
+  return chat.status();
+});
+ipcMain.handle('chat:preview', () => chat.preview());
+app.on('before-quit', () => chat.stop());
+
+/* ───────────── Spotify's now playing ───────────── */
+let spotify = null;
+app.whenReady().then(() => {
+  // created once the app is ready: reading the saved (encrypted) login needs that
+  spotify = require('./spotify').createSpotify({
+    load: () => { const s = readConfig().spotify || {}; return { clientId: s.clientId || '', refresh: unseal(s.refresh) }; },
+    save: a => writeConfig({ spotify: { clientId: a.clientId || '', refresh: seal(a.refresh || '') } }),
+    openBrowser: url => shell.openExternal(url),
+    onState: s => sendAll('spotify:state', s),
+    onStatus: s => sendAll('spotify:status', s),
+    onCover: (id, type, bytes) => overlay.setCover(id, type, bytes),
+  });
+});
+ipcMain.handle('spotify:get', () => (spotify ? spotify.info() : null));
+ipcMain.handle('spotify:connect', async (_e, clientId) => {
+  try { await spotify.connect(clientId); return { ok: true }; } catch (err) { return { ok: false, message: err.message }; }
+});
+ipcMain.handle('spotify:control', (_e, action) => spotify.control(String(action)));
+ipcMain.handle('spotify:disconnect', () => spotify.disconnect());
+ipcMain.handle('spotify:open', (_e, url) => { if (/^https:\/\/(open|developer)\.spotify\.com\//.test(url)) shell.openExternal(url); });
+app.on('before-quit', () => spotify && spotify.stop());

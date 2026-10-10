@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=21">
+  <link rel="manifest" href="manifest.webmanifest?v=22">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=21">
+  <link rel="stylesheet" href="style.css?v=22">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -62,6 +62,19 @@
       <div class="brand">
         <span class="moon" aria-hidden="true"></span>
         <span>moonlit</span>
+      </div>
+      <div class="sp-mini" id="spMini" hidden>
+        <img class="sp-cover" id="spCover" alt="">
+        <div class="sp-text">
+          <span class="sp-label" title="playing on Spotify"><svg class="sp-logo" viewBox="0 0 24 24" aria-label="Spotify"><circle cx="12" cy="12" r="11" fill="currentColor"/><path d="M6.5 9.3c3.8-1.1 8-.8 11.2 1M7.2 12.4c3.1-.9 6.6-.6 9.3.9M7.9 15.3c2.5-.7 5.1-.5 7.3.7" stroke="var(--sp-ink)" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg><span class="sp-title" id="spTitle"></span><span class="sp-device" id="spDevice"></span></span>
+          <span class="sp-artist" id="spArtist"></span>
+          <span class="sp-bar"><b id="spFill"></b></span>
+        </div>
+        <div class="sp-buttons">
+          <button class="icon-btn" id="spPrev" aria-label="previous on Spotify"><svg><use href="#i-prev"/></svg></button>
+          <button class="icon-btn sp-play" id="spPlay" aria-label="play on Spotify"><svg><use href="#i-play" id="spPlayIcon"/></svg></button>
+          <button class="icon-btn" id="spNext" aria-label="next on Spotify"><svg><use href="#i-next"/></svg></button>
+        </div>
       </div>
       <button class="greeting" id="greeting" title="tell me your name">good evening</button>
       <div class="top-actions">
@@ -280,9 +293,10 @@
             </select>
           </label>
           <label class="check"><input type="checkbox" id="overlayHide"> hide while paused</label>
+          <label class="check"><input type="checkbox" id="overlaySpectrum"> music bars that move with the song</label>
         </div>
         <button class="link-btn" id="overlayPreview" type="button">preview in browser</button>
-        <p class="hint small">size in OBS: 520 × 140 for the card, 900 × 70 for one line.</p>
+        <p class="hint small">size in OBS: 520 × 180 for the card, 900 × 70 for one line.</p>
       </div>
       <p class="hint" id="obsTxtHint">keeps a <b>.txt</b> file updated with the current song, so an OBS text source can show it on stream. needs chrome or edge on a computer.</p>
       <div class="obs-row">
@@ -310,6 +324,41 @@
       <label class="check"><input type="checkbox" id="obsPad"> add spacing at the end (for the OBS scroll filter)</label>
       <button class="link-btn" id="obsUnlink" hidden>unlink file</button>
     </section>
+    <section id="spotifySection" hidden>
+      <p class="eyebrow">spotify</p>
+      <p class="hint">show what's playing on Spotify in moonlit, with play / pause / skip. while Spotify is the one playing, the overlay, nowplaying.txt and <b>!song</b> show the Spotify song.</p>
+      <div id="spSetup">
+        <ol class="steps">
+          <li>open <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener" id="spDashLink">developer.spotify.com/dashboard</a>, sign in with your Spotify account and click <b>Create app</b>. any name and description work.</li>
+          <li>under <b>Redirect URIs</b> add this address, and tick <b>Web API</b>:
+            <span class="overlay-url sp-redirect"><input type="text" id="spRedirect" readonly aria-label="redirect address"><button class="pill" id="spRedirectCopy" type="button">copy</button></span>
+          </li>
+          <li>save, then copy the app's <b>Client ID</b> here:</li>
+        </ol>
+        <label class="field"><span>client ID</span><input type="text" id="spClientId" spellcheck="false" autocomplete="off" placeholder="32 letters and numbers"></label>
+        <button class="pill" id="spConnect" type="button">connect spotify</button>
+      </div>
+      <p class="obs-status sp-status" id="spStatus"></p>
+      <button class="link-btn" id="spDisconnect" type="button" hidden>disconnect spotify</button>
+      <p class="hint small">the play / pause / skip buttons need Spotify Premium (Spotify's rule). showing the song works with any account.</p>
+    </section>
+    <section id="chatSection" hidden>
+      <p class="eyebrow">chat · !song</p>
+      <p class="hint">viewers type <b>!song</b> (or <b>!np</b>) in your YouTube live chat, and your bot answers with the song that's playing, Spotify included.</p>
+      <label class="check"><input type="checkbox" id="chatOn"> answer !song in my YouTube chat</label>
+      <label class="field"><span>your channel, like <b>@yourname</b> (finds each live stream by itself), or one stream's link</span>
+        <input type="text" id="chatStream" spellcheck="false" autocomplete="off" placeholder="@yourname">
+      </label>
+      <label class="field"><span id="chatLoginLabel">bot login</span>
+        <input type="password" id="chatLogin" spellcheck="false" autocomplete="off" placeholder="paste the line PowerShell printed">
+      </label>
+      <p class="hint small">the same bot login as the song request app (<b>YOUTUBE_BOT_CREDENTIALS</b>). it's saved encrypted, only on this PC.</p>
+      <div class="obs-row">
+        <button class="pill" id="chatSave" type="button">save</button>
+        <span class="obs-status" id="chatStatus">off</span>
+      </div>
+      <p class="hint small chat-preview" id="chatPreview"></p>
+    </section>
     <section id="librarySection">
       <p class="eyebrow">library</p>
       <p class="hint small" id="libInfo"></p>
@@ -335,7 +384,7 @@
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v21</p>
+      <p class="version">moonlit v22</p>
     </section>
   </div>
 
@@ -348,7 +397,8 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=21"></script>
-  <script src="obs.js?v=21"></script>
+  <script src="app.js?v=22"></script>
+  <script src="obs.js?v=22"></script>
+  <script src="live.js?v=22"></script>
 </body>
 </html>

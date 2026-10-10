@@ -21,6 +21,26 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
     cover: (id, type, bytes) => ipcRenderer.send('overlay:cover', id, type, bytes),
     url: () => ipcRenderer.invoke('overlay:url'),
     open: url => ipcRenderer.invoke('overlay:open', String(url)),
+    spectrum: levels => ipcRenderer.send('overlay:spectrum', levels),
+    // how many overlays are open (in OBS or a browser), so the bars are only sampled when seen
+    onWatchers: cb => ipcRenderer.on('overlay:watchers', (_e, n) => cb(n)),
+  },
+  // !song in YouTube chat
+  chat: {
+    get: () => ipcRenderer.invoke('chat:get'),
+    set: settings => ipcRenderer.invoke('chat:set', settings),
+    preview: () => ipcRenderer.invoke('chat:preview'),
+    onStatus: cb => ipcRenderer.on('chat:status', (_e, s) => cb(s)),
+  },
+  // Spotify's now playing
+  spotify: {
+    get: () => ipcRenderer.invoke('spotify:get'),
+    connect: clientId => ipcRenderer.invoke('spotify:connect', String(clientId)),
+    control: action => ipcRenderer.invoke('spotify:control', String(action)),
+    disconnect: () => ipcRenderer.invoke('spotify:disconnect'),
+    open: url => ipcRenderer.invoke('spotify:open', String(url)),
+    onState: cb => ipcRenderer.on('spotify:state', (_e, s) => cb(s)),
+    onStatus: cb => ipcRenderer.on('spotify:status', (_e, s) => cb(s)),
   },
   // downloader
   download: {

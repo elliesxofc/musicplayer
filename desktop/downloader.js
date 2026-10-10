@@ -118,6 +118,9 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   let ready = null;
 
   const outDir = () => readConfig().downloadDir || path.join(app.getPath('music'), 'moonlit');
+  // songs downloaded for viewers' requests live apart, in their own folder: they're temporary
+  // (deleted after they play) and never mix with the songs you download yourself
+  const requestDir = () => path.join(outDir(), 'requests');
   const update = job => { if (jobs.has(job.id)) send('dl:update', publicJob(job)); };
   const publicJob = j => ({
     id: j.id, title: j.title, artist: j.artist, source: j.source, status: j.status,
@@ -344,7 +347,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   const RETRYABLE = /403|forbidden|timed out|connection (reset|aborted)|temporar|incomplete|429/i;
 
   function download(job) {
-    const dir = outDir();
+    const dir = job.dir || outDir();
     fs.mkdirSync(dir, { recursive: true });
     const args = [
       ...baseArgs(),
@@ -582,7 +585,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
       const known = (readConfig().requestFiles || {})[pick.id];
       if (known && fs.existsSync(known)) { allowRead(known); return { ok: true, file: known, title, artist, videoId: pick.id, reused: true }; }
 
-      const job = newJob({ source: 'youtube', url: `https://www.youtube.com/watch?v=${pick.id}`, title, artist, format: 'm4a', group: nextGroup++, note: 'song request' });
+      const job = newJob({ source: 'youtube', url: `https://www.youtube.com/watch?v=${pick.id}`, title, artist, format: 'm4a', group: nextGroup++, note: 'song request', dir: requestDir() });
       const finished = await new Promise(resolve => { waiters.set(job.id, resolve); pump(); });
       if (finished.status !== 'done' || !finished.file) return { ok: false, reason: 'download', title, error: finished.error || 'cancelled' };
       writeConfig({ requestFiles: { ...(readConfig().requestFiles || {}), [pick.id]: finished.file } });

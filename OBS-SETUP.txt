@@ -108,8 +108,10 @@ moonlit → sliders → "chat · !nowplaying" → "take song requests".
 - versions count: "!sr Song (Instrumental)" gets the instrumental (also remix,
   slowed, sped up, nightcore, acoustic, live, cover, karaoke, …), and a plain
   "!sr Song" gets the normal song, not a remix.
-- songs downloaded for a request are deleted again (from moonlit and the PC)
-  once they've played, or when the request is taken back. songs that were
+- songs downloaded for a request go into their own "requests" folder inside
+  your download folder (Music\moonlit\requests), never mixed with your own
+  downloads, and are deleted again (from moonlit and the PC) once they've
+  played, or when the request is taken back. songs that were
   already in your library stay. switch: "delete downloaded requests after
   they play".
 - requested songs show at the top of your library with "requested by …",

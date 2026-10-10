@@ -281,24 +281,44 @@ ipcMain.handle('chat:set', (_e, next) => {
 ipcMain.handle('chat:preview', () => chat.preview());
 app.on('before-quit', () => chat.stop());
 
-/* ───────────── Spotify's now playing ───────────── */
+/* ───────────── Spotify's now playing ─────────────
+   Two ways: the Spotify app on this PC through Windows' media controls (free, no setup,
+   the default on Windows), or a connected Spotify account through Spotify's Web API
+   (Spotify only allows that with Premium). A connected account wins when there is one. */
 let spotify = null;
+const winmedia = require('./winmedia').createWinMedia({
+  onState: s => { spotifyStates.local = s; publishSpotify(); },
+  onStatus: s => sendAll('spotify:local-status', s),
+  onCover: (id, type, bytes) => overlay.setCover(id, type, bytes),
+});
+const spotifyStates = { web: null, local: null };
+const useWeb = () => !!(spotify && spotify.info().connected);
+const currentSpotify = () => (useWeb() ? spotifyStates.web : spotifyStates.local);
+function publishSpotify() { sendAll('spotify:state', currentSpotify()); }
+const localOn = () => winmedia.available() && readConfig().spotifyLocal !== false;
+
 app.whenReady().then(() => {
   // created once the app is ready: reading the saved (encrypted) login needs that
   spotify = require('./spotify').createSpotify({
     load: () => { const s = readConfig().spotify || {}; return { clientId: s.clientId || '', refresh: unseal(s.refresh) }; },
     save: a => writeConfig({ spotify: { clientId: a.clientId || '', refresh: seal(a.refresh || '') } }),
     openBrowser: url => shell.openExternal(url),
-    onState: s => sendAll('spotify:state', s),
+    onState: s => { spotifyStates.web = s; publishSpotify(); },
     onStatus: s => sendAll('spotify:status', s),
     onCover: (id, type, bytes) => overlay.setCover(id, type, bytes),
   });
+  if (localOn()) winmedia.start();
 });
-ipcMain.handle('spotify:get', () => (spotify ? spotify.info() : null));
+ipcMain.handle('spotify:get', () => (spotify ? { ...spotify.info(), state: currentSpotify(), local: { ...winmedia.info(), on: localOn() } } : null));
 ipcMain.handle('spotify:connect', async (_e, clientId) => {
   try { await spotify.connect(clientId); return { ok: true }; } catch (err) { return { ok: false, message: err.message }; }
 });
-ipcMain.handle('spotify:control', (_e, action) => spotify.control(String(action)));
-ipcMain.handle('spotify:disconnect', () => spotify.disconnect());
+ipcMain.handle('spotify:control', (_e, action) => (useWeb() ? spotify.control(String(action)) : winmedia.control(String(action))));
+ipcMain.handle('spotify:disconnect', () => { spotify.disconnect(); publishSpotify(); });
+ipcMain.handle('spotify:local', (_e, on) => {
+  writeConfig({ spotifyLocal: !!on });
+  if (localOn()) winmedia.start(); else winmedia.stop();
+  return { ...winmedia.info(), on: localOn() };
+});
 ipcMain.handle('spotify:open', (_e, url) => { if (/^https:\/\/(open|developer)\.spotify\.com\//.test(url)) shell.openExternal(url); });
-app.on('before-quit', () => spotify && spotify.stop());
+app.on('before-quit', () => { if (spotify) spotify.stop(); winmedia.stop(); });

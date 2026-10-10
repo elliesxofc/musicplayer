@@ -654,6 +654,11 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .steps a { color: var(--accent); }
 .sp-redirect { margin: 6px 0 0; }
 .obs-status.warn { color: #ffb37a; }
+.sp-web { margin-top: 6px; }
+.sp-web summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.sp-web summary:hover { color: var(--ink); }
+.sp-web[open] summary { color: var(--ink); }
+#spLocalBox .sp-status { display: block; margin: -2px 0 8px 27px; }
 .chat-preview { overflow-wrap: anywhere; }
 
 @media (max-width: 900px) {

@@ -35,6 +35,7 @@
     const tick = () => {
       const pos = Math.min(sp.duration, sp.position + (sp.playing ? (Date.now() - sp.at) / 1000 : 0));
       $('#spFill').style.width = sp.duration ? `${(pos / sp.duration) * 100}%` : '0%';
+      $('#spFill').parentElement.style.visibility = sp.duration ? '' : 'hidden';
     };
     tick();
     if (sp.playing) tickTimer = setInterval(tick, 1000);
@@ -74,6 +75,12 @@
     setStatus($('#spStatus'), s);
     if (s.kind === 'on') showConnected(true);
   });
+  // the Spotify app on this PC (Windows): on by default, nothing to set up
+  S.onLocalStatus(s => setStatus($('#spLocalStatus'), s));
+  $('#spLocalOn').onchange = async () => {
+    const info = await S.setLocal($('#spLocalOn').checked);
+    setStatus($('#spLocalStatus'), info.status);
+  };
 
   /* ───────────── !song in YouTube chat ───────────── */
   const C = D.chat;
@@ -109,6 +116,13 @@
       showConnected(info.connected);
       setStatus($('#spStatus'), info.status);
       if (info.state) update(info.state);
+      // Windows: the Spotify app first; elsewhere only the account way exists, so show it open
+      const local = info.local || {};
+      $('#spLocalBox').hidden = !local.available;
+      $('#spLocalOn').checked = !!local.on;
+      setStatus($('#spLocalStatus'), local.status || { text: '', kind: 'off' });
+      if (!local.available) { $('#spWeb').open = true; $('#spWebSummary').textContent = 'connect your Spotify account (Spotify only allows this with Premium)'; }
+      if (info.connected) $('#spWeb').open = true;
     }
     const c = await C.get();
     on.checked = c.enabled;

@@ -79,7 +79,7 @@ function replyFor(np) {
   if (!np || !np.id) return 'nothing is playing right now';
   // plain "Artist - Title": the OBS format may already have its own emoji or words around it
   const song = [np.artist, np.title].filter(Boolean).join(' - ') || np.line || 'a song';
-  const time = np.duration ? ` (${clock(np.position)} / ${clock(np.duration)})` : '';
+  const time = np.duration ? ` (${clock(np.position)} / ${clock(np.duration)})` : np.position >= 1 ? ` (${clock(np.position)})` : '';
   const where = np.source === 'spotify' ? ' on Spotify' : '';
   const state = np.playing ? '' : ' (paused)';
   const tail = `${time}${where}${state}`;

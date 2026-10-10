@@ -149,7 +149,8 @@
     const pos = Math.min(s.duration || Infinity, s.position + (s.playing ? (performance.now() - got) / 1000 : 0));
     const dur = s.duration || 0;
     if (layout === 'card') {
-      const cur = $('.cur'); if (cur) { cur.textContent = fmt(pos); $('.dur').textContent = fmt(dur); $('.bar b').style.width = dur ? `${Math.min(100, pos / dur * 100)}%` : '0%'; }
+      // no length known (can happen with the Spotify app): just the time played
+      const cur = $('.cur'); if (cur) { cur.textContent = fmt(pos); $('.dur').textContent = dur ? fmt(dur) : ''; $('.bar').style.visibility = dur ? '' : 'hidden'; $('.bar b').style.width = dur ? `${Math.min(100, pos / dur * 100)}%` : '0%'; }
     } else {
       const t = $('.time'); if (t) t.textContent = dur ? `${fmt(pos)} / ${fmt(dur)}` : fmt(pos);
     }

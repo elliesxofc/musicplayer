@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=22">
+  <link rel="manifest" href="manifest.webmanifest?v=23">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="style.css?v=23">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -327,6 +327,13 @@
     <section id="spotifySection" hidden>
       <p class="eyebrow">spotify</p>
       <p class="hint">show what's playing on Spotify in moonlit, with play / pause / skip. while Spotify is the one playing, the overlay, nowplaying.txt and <b>!song</b> show the Spotify song.</p>
+      <div id="spLocalBox" hidden>
+        <label class="check"><input type="checkbox" id="spLocalOn"> <span>show the <b>Spotify app</b> on this PC</span></label>
+        <p class="obs-status sp-status" id="spLocalStatus"></p>
+        <p class="hint small">works with Spotify Free, nothing to set up: moonlit reads the song from Windows' media controls, the same info Windows shows when you press a media key.</p>
+      </div>
+      <details class="sp-web" id="spWeb">
+      <summary id="spWebSummary">or connect your Spotify account instead (Spotify only allows this with Premium)</summary>
       <div id="spSetup">
         <ol class="steps">
           <li>open <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener" id="spDashLink">developer.spotify.com/dashboard</a>, sign in with your Spotify account and click <b>Create app</b>. any name and description work.</li>
@@ -340,7 +347,7 @@
       </div>
       <p class="obs-status sp-status" id="spStatus"></p>
       <button class="link-btn" id="spDisconnect" type="button" hidden>disconnect spotify</button>
-      <p class="hint small">the play / pause / skip buttons need Spotify Premium (Spotify's rule). showing the song works with any account.</p>
+      </details>
     </section>
     <section id="chatSection" hidden>
       <p class="eyebrow">chat · !song</p>
@@ -384,7 +391,7 @@
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v22</p>
+      <p class="version">moonlit v23</p>
     </section>
   </div>
 
@@ -397,8 +404,8 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=22"></script>
-  <script src="obs.js?v=22"></script>
-  <script src="live.js?v=22"></script>
+  <script src="app.js?v=23"></script>
+  <script src="obs.js?v=23"></script>
+  <script src="live.js?v=23"></script>
 </body>
 </html>

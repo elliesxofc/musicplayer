@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
     connect: clientId => ipcRenderer.invoke('spotify:connect', String(clientId)),
     control: action => ipcRenderer.invoke('spotify:control', String(action)),
     disconnect: () => ipcRenderer.invoke('spotify:disconnect'),
+    setLocal: on => ipcRenderer.invoke('spotify:local', !!on),
+    onLocalStatus: cb => ipcRenderer.on('spotify:local-status', (_e, s) => cb(s)),
     open: url => ipcRenderer.invoke('spotify:open', String(url)),
     onState: cb => ipcRenderer.on('spotify:state', (_e, s) => cb(s)),
     onStatus: cb => ipcRenderer.on('spotify:status', (_e, s) => cb(s)),

@@ -48,16 +48,24 @@ overlay and to the .txt file below.
 
 NEW (desktop app): Spotify
 --------------------------
-show what's playing on Spotify in moonlit, with play / pause / skip (those
-buttons need Spotify Premium). while Spotify is the one playing, the overlay,
-nowplaying.txt and !song show the Spotify song.
+show what's playing on Spotify in moonlit, with play / pause / skip. while
+Spotify is the one playing, the overlay, nowplaying.txt and !song show the
+Spotify song.
 
+on Windows: nothing to set up, works with Spotify Free. just open the Spotify
+desktop app on the same PC. moonlit reads the song from Windows' media
+controls (the same info Windows shows when you press a media key), and its
+buttons press Spotify's own play / pause / skip. on/off: moonlit → sliders →
+"spotify" → "show the Spotify app on this PC".
+
+or connect your Spotify account instead (Spotify only allows this when the
+account has Premium):
   1. go to https://developer.spotify.com/dashboard, sign in, "Create app"
      (any name and description)
   2. Redirect URIs: add  http://127.0.0.1:4860/callback  and tick "Web API"
   3. save, copy the app's Client ID
-  4. moonlit → sliders → "spotify" → paste the Client ID → connect spotify,
-     then press "Agree" in the browser tab that opens
+  4. moonlit → sliders → "spotify" → "or connect your Spotify account" →
+     paste the Client ID → connect spotify, then press "Agree" in the browser
 
 
 NEW (desktop app): !song in YouTube chat

@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
     openFolder: () => ipcRenderer.invoke('dl:open-folder'),
     // a song request from chat: find it on YouTube (within the rules), download once, give back the file
     request: (query, rules) => ipcRenderer.invoke('dl:request', String(query), rules),
+    forgetRequest: file => ipcRenderer.invoke('dl:forget-request', String(file)),
     onUpdate: cb => ipcRenderer.on('dl:update', (_e, job) => cb(job)),
     onRemove: cb => ipcRenderer.on('dl:remove', (_e, id) => cb(id)),
     onStatus: cb => ipcRenderer.on('dl:status', (_e, text) => cb(text)),

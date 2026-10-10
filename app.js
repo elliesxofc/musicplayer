@@ -712,9 +712,9 @@ function setDuration(t, d) {
   if (cell) cell.textContent = fmt(d);
 }
 
-async function removeTrack(id) {
+async function removeTrack(id, { ask = true } = {}) {
   const t = byId(id);
-  if (!t || !confirm(`remove “${t.title}” from your library?`)) return;
+  if (!t || (ask && !confirm(`remove “${t.title}” from your library?`))) return;
   if (id === state.currentId) {
     const next = neighbour(1);
     audio.pause();

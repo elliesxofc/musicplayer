@@ -37,15 +37,22 @@
   /* ───────────── finding a song in the library ───────────── */
   const norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  // versions of a song (instrumental, remix, slowed, …): the same rule as for YouTube searches,
+  // asked for means that version, not asked for means the normal song
+  const VERSIONS = /\b(instrumental|karaoke|acapella|a cappella|acoustic|remix|live|cover|slowed|reverb|sped up|speed up|nightcore|8d|extended|piano|orchestral|lofi|lo fi|bass boosted|radio edit|cut|demo)\b/g;
+  const versionsIn = s => [...new Set((norm(s).match(VERSIONS) || []).map(v => v.replace('speed up', 'sped up')))].sort().join('|');
+
   function findInLibrary(query) {
     const q = norm(query);
     const words = q.split(' ').filter(Boolean);
     if (q.length < 3 || !words.length) return null;
+    const asked = versionsIn(query);
     let best = null, bestScore = Infinity;
     for (const t of state.tracks) {
       const title = norm(t.title);
       const hay = `${norm(t.artist)} ${title} ${norm(t.album)}`;
       if (!words.every(w => hay.includes(w))) continue;
+      if (versionsIn(t.title) !== asked) continue; // "Song" isn't "Song (Instrumental)", and the other way round
       // closest match wins: an exact title first, then the one with the least extra text
       const score = title === q || `${norm(t.artist)} ${title}` === q ? -1 : hay.length - q.length;
       if (score < bestScore) { best = t; bestScore = score; }
@@ -79,10 +86,13 @@
         cooldowns.delete(user.id); // a request that didn't work doesn't count
         return say(`${user.name}, ${why(result)}`);
       }
+      const had = new Set(state.tracks.map(t => t.id));
       await openExternalFiles([result.file], { play: false, quiet: true });
       track = byId((openExternalFiles.ids || [])[0]);
       if (!track) return say(`${user.name}, something went wrong adding that song.`);
-      if (job.cancelled) return; // they took it back (!wrongsong) while it downloaded: it stays in the library only
+      // downloaded just for this request: deleted again once it has played (your own songs never are)
+      if (!had.has(track.id) && cleanupOn()) markTemporary(track.id, result.file);
+      if (job.cancelled) { dropIfTemporary(track.id); return; } // taken back (!wrongsong) while it downloaded
     }
     // not added: no cooldown for that
     if (track.id === state.currentId && !audio.paused) { cooldowns.delete(user.id); return say(`${user.name}, ${songName(track)} is playing right now.`); }
@@ -130,10 +140,12 @@
       return say(`${user.name}, your request for "${p.query}" was removed.`);
     }
     if (!q) return say(`${user.name}, you don't have a song in the queue.`);
+    const name = songName(byId(q.id) || { title: 'your song' });
     songRequests.splice(songRequests.indexOf(q), 1);
+    dropIfTemporary(q.id);
     requestsChanged();
     cooldowns.delete(user.id);
-    say(`${user.name}, ${songName(byId(q.id) || { title: 'your song' })} was removed from the queue.`);
+    say(`${user.name}, ${name} was removed from the queue.`);
   }
 
   C.onCommand(({ cmd, args, user }) => {
@@ -143,6 +155,40 @@
     else if (cmd === 'skip') skip(user);
     else if (cmd === 'wrongsong') wrongSong(user);
   });
+
+  /* ───────────── requested downloads are temporary ─────────────
+     A song downloaded for a request is deleted (from the library and the PC) once it has
+     played and moonlit has moved on, or when the request is taken back before it plays.
+     Remembered across restarts, so leftovers are cleaned up next time. */
+  const cleanupOn = () => prefs.get('srCleanup', true);
+  const temporary = new Map(prefs.get('srTemp', []).map(x => [x.id, x.file])); // song id → file
+  const played = new Set();
+  const saveTemporary = () => prefs.set('srTemp', [...temporary].map(([id, file]) => ({ id, file })));
+  function markTemporary(id, file) { temporary.set(id, file); saveTemporary(); }
+  function forget(id) {
+    const file = temporary.get(id);
+    temporary.delete(id);
+    played.delete(id);
+    saveTemporary();
+    state.history = state.history.filter(x => x !== id); // ⏮ won't try to go back to it
+    if (byId(id)) removeTrack(id, { ask: false });
+    if (file) D.download.forgetRequest(file).catch(() => {});
+  }
+  // gone unless it's playing now or still waiting in the request list
+  const inUse = id => id === state.currentId || songRequests.some(r => r.id === id);
+  function dropIfTemporary(id) { if (temporary.has(id) && !inUse(id)) forget(id); }
+  audio.addEventListener('playing', () => { if (temporary.has(state.currentId)) played.add(state.currentId); });
+  // a new song is loading: requested downloads that have had their turn can go
+  audio.addEventListener('loadstart', () => {
+    for (const id of [...played]) if (!inUse(id)) forget(id);
+  });
+  // leftovers from last time (moonlit closed before they played), once the library has loaded
+  setTimeout(() => {
+    for (const id of [...temporary.keys()]) {
+      if (id === state.currentId) played.add(id); // it goes after this play
+      else if (!songRequests.some(r => r.id === id)) forget(id);
+    }
+  }, 5000);
 
   /* ───────────── the list in the library ───────────── */
   const box = $('#requests'), list = $('#reqList');
@@ -162,7 +208,7 @@
       li.querySelector('.req-title').textContent = `${i + 1}. ${songName(t)}`;
       li.querySelector('.req-by').textContent = `requested by ${r.by}`;
       li.querySelector('[data-act="play"]').onclick = () => { songRequests.splice(songRequests.indexOf(r), 1); requestsChanged(); playRequest(r.id); };
-      li.querySelector('[data-act="remove"]').onclick = () => { songRequests.splice(songRequests.indexOf(r), 1); requestsChanged(); };
+      li.querySelector('[data-act="remove"]').onclick = () => { songRequests.splice(songRequests.indexOf(r), 1); requestsChanged(); dropIfTemporary(r.id); };
       list.append(li);
     });
     for (const p of items) {
@@ -178,7 +224,9 @@
 
   /* ───────────── settings ───────────── */
   $('#srBox').hidden = false;
-  const srOn = $('#srOn'), srAny = $('#srAny'), srChannels = $('#srChannels'), srMax = $('#srMax');
+  const srOn = $('#srOn'), srAny = $('#srAny'), srChannels = $('#srChannels'), srMax = $('#srMax'), srCleanup = $('#srCleanup');
+  srCleanup.checked = cleanupOn();
+  srCleanup.onchange = () => prefs.set('srCleanup', srCleanup.checked);
   srOn.checked = on();
   srAny.checked = prefs.get('srAny', false);
   srChannels.value = prefs.get('srChannels', DEFAULT_CHANNELS);

@@ -26,6 +26,23 @@ function ffmpegPath() {
   } catch { return null; }
 }
 
+// words that make a different version of a song: asked for, it has to be that version;
+// not asked for, the normal song wins
+const VERSION_WORDS = 'instrumental|karaoke|acapella|a cappella|acoustic|remix|live|cover|slowed|reverb|sped up|speed up|nightcore|8d|extended|piano|orchestral|lofi|lo-fi|bass boosted|radio edit|cut|demo';
+const versionRe = () => new RegExp(`\\b(${VERSION_WORDS})\\b`, 'gi');
+const plain = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const versionsIn = s => new Set((plain(s).match(versionRe()) || []).map(v => v.replace(/^speed up$/, 'sped up')));
+// how well a search result fits what was asked: the asked-for words in its title, the right version
+function requestScore(entry, query) {
+  const title = plain(`${entry.title || ''} ${entry.channel || entry.uploader || ''}`);
+  const words = plain(query).split(' ').filter(w => w.length > 1);
+  let score = words.filter(w => title.includes(w)).length * 2;
+  const asked = versionsIn(query), got = versionsIn(entry.title);
+  for (const v of asked) score += got.has(v) ? 8 : -8;
+  for (const v of got) if (!asked.has(v)) score -= 5;
+  return score;
+}
+
 // "Artist - Title.m4a": the name Spotify songs are saved under (see retag)
 const cleanName = s => String(s).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 const spotifyFileName = (job, ext) => `${cleanName(job.artist) || 'unknown'} - ${cleanName(job.title) || 'untitled'}${ext}`;
@@ -338,7 +355,8 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     if (job.source !== 'spotify') {
       // "Artist - Song (Official Video)" → artist "Artist", title "Song"
       args.push('--parse-metadata', 'title:%(artist)s - %(title)s');
-      args.push('--replace-in-metadata', 'title', '(?i)\\s*[\\(\\[][^\\)\\]]*(official|lyrics?|audio|video|visuali[sz]er|hd|hq|4k|m/?v)[^\\)\\]]*[\\)\\]]', '');
+      // (brackets naming a version, like "(Official Instrumental)", are kept: that's a different song)
+      args.push('--replace-in-metadata', 'title', `(?i)\\s*[\\(\\[](?![^\\)\\]]*(?:${VERSION_WORDS}))[^\\)\\]]*(official|lyrics?|audio|video|visuali[sz]er|hd|hq|4k|m/?v)[^\\)\\]]*[\\)\\]]`, '');
     }
     args.push(job.url);
 
@@ -491,8 +509,11 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
         if (!/(^|\.)(youtube\.com|youtu\.be)$/i.test(new URL(url).hostname)) return { ok: false, reason: 'link' };
         candidates = [await runJson(['-J', '--no-playlist', url])];
       } else {
-        const found = await runJson(['--flat-playlist', '-J', `ytsearch6:${query}`]);
-        candidates = (found.entries || []).filter(e => e && e.id);
+        const found = await runJson(['--flat-playlist', '-J', `ytsearch10:${query}`]);
+        // best fit first (YouTube's own order breaks ties): "Song (Instrumental)" finds the instrumental
+        candidates = (found.entries || []).filter(e => e && e.id)
+          .map((e, i) => ({ e, i, s: requestScore(e, query) }))
+          .sort((a, b) => b.s - a.s || a.i - b.i).map(x => x.e);
       }
       if (!candidates.length) return { ok: false, reason: 'not-found' };
       const live = e => e.live_status === 'is_live' || e.is_live === true || e.live_status === 'is_upcoming';
@@ -517,15 +538,26 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     }
   }
 
+  // a request's download that has played: delete the file (only files moonlit downloaded for requests)
+  function forgetRequest(file) {
+    const map = { ...(readConfig().requestFiles || {}) };
+    const ids = Object.keys(map).filter(k => map[k] === file);
+    if (!ids.length) return false;
+    for (const k of ids) delete map[k];
+    writeConfig({ requestFiles: map });
+    fs.rm(file, { force: true }, () => {});
+    return true;
+  }
+
   function stopAll() {
     for (const p of running.values()) if (p) p.kill();
   }
 
   return {
-    add, addList, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll, request,
+    add, addList, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll, request, forgetRequest,
     list: () => [...jobs.values()].map(publicJob),
     folder: outDir,
   };
 }
 
-module.exports = { createDownloader, readPlaylistCsv };
+module.exports = { createDownloader, readPlaylistCsv, requestScore, VERSION_WORDS };

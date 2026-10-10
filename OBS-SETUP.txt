@@ -98,6 +98,13 @@ moonlit → sliders → "chat · !nowplaying" → "take song requests".
   Monstercat, TheFatRat, Tobu, … the list is editable), up to 10 minutes long
   (changeable), no live streams. mods and you can request anything.
 - 10 seconds between a viewer's requests, and up to 3 waiting per viewer.
+- versions count: "!sr Song (Instrumental)" gets the instrumental (also remix,
+  slowed, sped up, nightcore, acoustic, live, cover, karaoke, …), and a plain
+  "!sr Song" gets the normal song, not a remix.
+- songs downloaded for a request are deleted again (from moonlit and the PC)
+  once they've played, or when the request is taken back. songs that were
+  already in your library stay. switch: "delete downloaded requests after
+  they play".
 - requested songs show at the top of your library with "requested by …",
   a ▶ to play one now and an ✕ to remove it.
 - don't run the song request app's bot on the same stream at the same time,

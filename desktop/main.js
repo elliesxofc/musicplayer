@@ -229,6 +229,7 @@ ipcMain.handle('dl:clear', () => dl().clearFinished());
 ipcMain.handle('dl:folder', () => dl().folder());
 ipcMain.handle('dl:choose-folder', () => dl().chooseFolder());
 ipcMain.handle('dl:open-folder', () => dl().openFolder());
+ipcMain.handle('dl:forget-request', (_e, file) => dl().forgetRequest(String(file || '')));
 ipcMain.handle('dl:request', (_e, query, rules) => dl().request(String(query || ''), {
   channels: Array.isArray(rules && rules.channels) ? rules.channels.map(String).slice(0, 200) : [],
   anyChannel: !!(rules && rules.anyChannel),

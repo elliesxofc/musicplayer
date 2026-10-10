@@ -43,6 +43,9 @@ function requestScore(entry, query) {
   return score;
 }
 
+// several artists come as "A;B" (or "A / B"): written into the file as "A, B" (AC/DC stays)
+const tidyArtist = s => String(s || '').replace(/\s*;\s*|\s+\/\s+|\0/g, ', ').replace(/(,\s*)+/g, ', ').replace(/^,\s*|,\s*$/g, '').trim();
+
 // "Artist - Title.m4a": the name Spotify songs are saved under (see retag)
 const cleanName = s => String(s).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 const spotifyFileName = (job, ext) => `${cleanName(job.artist) || 'unknown'} - ${cleanName(job.title) || 'untitled'}${ext}`;
@@ -308,7 +311,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
       if (job.status === 'cancelled') return;
       job.status = 'downloading'; job.note = ''; update(job);
       const file = await download(job);
-      job.file = job.source === 'spotify' ? await retag(file, job) : file;
+      job.file = job.source === 'spotify' ? await retag(file, job) : await tidyArtistTag(file, job.tagArtist);
       allowRead(job.file);
       Object.assign(job, { status: 'done', progress: 100, speed: '', eta: '' });
     } catch (err) {
@@ -346,6 +349,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
       '--no-mtime', '--newline', '--progress',
       '--progress-template', 'download:MOONLIT_PROGRESS %(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s',
       '--print', 'after_move:MOONLIT_FILE %(filepath)s',
+      '--print', 'after_move:MOONLIT_ARTIST %(artist|)s',
       // Spotify songs get renamed after tagging, so their temporary name carries the video id:
       // two songs downloading at once can then never write to the same file
       '-o', path.join(dir, job.source === 'spotify'
@@ -378,6 +382,8 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
             if (Date.now() - lastSent > 250) { lastSent = Date.now(); update(job); }
           } else if (line.startsWith('MOONLIT_FILE ')) {
             file = line.slice(13).trim();
+          } else if (line.startsWith('MOONLIT_ARTIST ')) {
+            job.tagArtist = line.slice(15).trim();
           } else if (/^\[(ExtractAudio|EmbedThumbnail|Metadata)\]/.test(line) && job.status !== 'converting') {
             job.status = 'converting'; job.speed = ''; job.eta = ''; update(job);
           }
@@ -391,6 +397,31 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
         else reject(new Error(friendlyError(err || 'the download stopped')));
       });
     });
+  }
+
+  // "A;B" in a downloaded file's artist tag → "A, B" (only the tag is rewritten, the sound is copied as is)
+  async function tidyArtistTag(file, artist) {
+    const fixed = tidyArtist(artist);
+    const ff = ffmpegPath();
+    if (!ff || !artist || fixed === artist) return file;
+    const ext = path.extname(file);
+    const tmp = `${file}.moonlit${ext}`;
+    const args = ['-y', '-loglevel', 'error', '-i', file, '-map', '0', '-c', 'copy', '-metadata', `artist=${fixed}`];
+    if (ext === '.mp3') args.push('-id3v2_version', '3');
+    args.push(tmp);
+    const ok = await new Promise(resolve => {
+      const p = spawn(ff, args, { windowsHide: true });
+      p.on('error', () => resolve(false));
+      p.on('close', code => resolve(code === 0));
+    });
+    if (!ok) { fs.rm(tmp, () => {}); return file; } // the old tag is still fine to play
+    // the file name too: "A;B - Song.m4a" → "A, B - Song.m4a"
+    const base = path.basename(file);
+    const named = base.startsWith(`${artist} - `) ? path.join(path.dirname(file), `${cleanName(fixed)} - ${base.slice(artist.length + 3)}`) : file;
+    fs.rmSync(file, { force: true });
+    if (named !== file) fs.rmSync(named, { force: true });
+    fs.renameSync(tmp, named);
+    return named;
   }
 
   // Give Spotify songs their Spotify name, artist, album (and cover) and a tidy filename.
@@ -560,4 +591,4 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   };
 }
 
-module.exports = { createDownloader, readPlaylistCsv, requestScore, VERSION_WORDS };
+module.exports = { createDownloader, readPlaylistCsv, requestScore, VERSION_WORDS, tidyArtist };

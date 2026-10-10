@@ -634,13 +634,17 @@ el.search.addEventListener('input', () => {
 /* ───────────── adding / removing ───────────── */
 const AUDIO_EXT = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|webm|weba|aiff?)$/i;
 
+// Several artists are often stored as "A;B" or "A/B" (YouTube downloads, some taggers):
+// shown as "A, B". A slash only counts between names with spaces around it, so AC/DC stays AC/DC.
+const tidyArtist = s => String(s || '').replace(/\s*;\s*|\s+\/\s+|\0/g, ', ').replace(/(,\s*)+/g, ', ').replace(/^,\s*|,\s*$/g, '').trim();
+
 async function makeRecord(f) {
   const tags = await readTags(f);
   const guess = fromFilename(f.name);
   return {
     id: uid(),
     title: tags.title || guess.title || f.name,
-    artist: tags.artist || guess.artist || '',
+    artist: tidyArtist(tags.artist || guess.artist || ''),
     album: tags.album || '',
     cover: tags.cover || null,
     duration: 0, // measured in the background afterwards, see fillDurations()
@@ -1356,7 +1360,7 @@ async function openExternalFiles(paths, { play = true, quiet = false, replace = 
       if (!t) continue;
       const tags = await readTags(f);
       if (coverUrls.has(t.id)) { URL.revokeObjectURL(coverUrls.get(t.id)); coverUrls.delete(t.id); }
-      Object.assign(t, { file: f, duration: 0, cover: tags.cover || null, title: tags.title || t.title, artist: tags.artist || t.artist, album: tags.album || t.album });
+      Object.assign(t, { file: f, duration: 0, cover: tags.cover || null, title: tags.title || t.title, artist: tidyArtist(tags.artist || t.artist), album: tags.album || t.album });
       durationTried.delete(t.id);
       if (state.persistent) DB.put(t).catch(() => {});
       replaced++;
@@ -1705,6 +1709,11 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     const pos = new Map(order.map((id, i) => [id, i]));
     recs.sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9) || a.added - b.added);
     state.tracks = recs;
+    // songs added before artists were tidied ("A;B"): fixed once, quietly
+    for (const t of recs) {
+      const fixed = tidyArtist(t.artist);
+      if (fixed !== (t.artist || '')) { t.artist = fixed; DB.put(t).catch(() => {}); }
+    }
     reindex();
     navigator.storage?.persist?.().catch(() => {});
   } catch {

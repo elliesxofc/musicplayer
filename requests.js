@@ -266,7 +266,16 @@
   srModsAny.checked = modsAnySong();
   srModsAny.onchange = () => prefs.set('srModsAny', srModsAny.checked);
   srBlocked.value = prefs.get('srBlocked', DEFAULT_BLOCKED);
-  srBlocked.oninput = () => prefs.set('srBlocked', srBlocked.value);
+  // both lists save as you type; the button is there to save on purpose (and see it worked)
+  const lines = box => box.value.split('\n').map(l => l.split('#')[0].trim()).filter(Boolean).length;
+  const savedNote = (box, note, word) => {
+    const n = lines(box);
+    note.textContent = `saved ✓ · ${n} ${word}${n === 1 ? '' : 's'}`;
+    note.classList.add('ok');
+  };
+  const saveBlocked = () => { prefs.set('srBlocked', srBlocked.value); savedNote(srBlocked, $('#srBlockedSaved'), 'word'); };
+  srBlocked.oninput = saveBlocked;
+  $('#srBlockedSave').onclick = () => { saveBlocked(); toast('blocked words saved ✓'); };
   srCleanup.onchange = () => prefs.set('srCleanup', srCleanup.checked);
   srOn.checked = on();
   srAny.checked = prefs.get('srAny', false);
@@ -276,8 +285,16 @@
   srOn.onchange = () => prefs.set('srOn', srOn.checked);
   srAny.onchange = () => { prefs.set('srAny', srAny.checked); $('#srChannelsField').hidden = srAny.checked; };
   // saved as you type (an empty box counts as the original list, so requests never lose their rules)
-  srChannels.oninput = () => prefs.set('srChannels', srChannels.value.trim() || DEFAULT_CHANNELS);
-  srChannels.onchange = () => { if (!srChannels.value.trim()) srChannels.value = DEFAULT_CHANNELS; };
+  const saveChannels = () => { prefs.set('srChannels', srChannels.value.trim() || DEFAULT_CHANNELS); savedNote(srChannels, $('#srChannelsSaved'), 'channel'); };
+  srChannels.oninput = saveChannels;
+  srChannels.onchange = () => { if (!srChannels.value.trim()) { srChannels.value = DEFAULT_CHANNELS; saveChannels(); } };
+  $('#srChannelsSave').onclick = () => {
+    if (!srChannels.value.trim()) srChannels.value = DEFAULT_CHANNELS;
+    saveChannels();
+    toast(`channel list saved ✓ (${lines(srChannels)} channels)`);
+  };
+  savedNote(srChannels, $('#srChannelsSaved'), 'channel');
+  savedNote(srBlocked, $('#srBlockedSaved'), 'word');
   srMax.oninput = () => { const n = Math.round(Number(srMax.value)); if (n >= 1 && n <= 60) prefs.set('srMax', n); };
   srMax.onchange = () => { prefs.set('srMax', Math.max(1, Math.min(60, Math.round(Number(srMax.value) || 10)))); srMax.value = maxMinutes(); };
 })();

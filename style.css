@@ -763,3 +763,6 @@ body.super .deck { display: none; }  /* the record is put away in super lite */
   .floaties { display: none; }
   .vinyl { animation-duration: 20s; }
 }
+.sr-save-row { display: flex; align-items: center; gap: 12px; margin: -4px 0 14px; flex-wrap: wrap; }
+.sr-saved { font-size: 12.5px; color: var(--muted); }
+.sr-saved.ok { color: var(--accent); }

@@ -48,6 +48,14 @@ body[data-theme="sakura-dusk"] {
   --blob1: 255 140 180; --blob2: 255 190 140; --blob3: 190 120 220;
   --vinyl: 255 163 196; --vinyl-a: .3; --stars: .8; --scheme: dark; --shadow: 0 0 0;
 }
+body[data-theme="pure-black"] {
+  --bg: #000000; --bg2: #000000;
+  --ink: #ffffff; --muted: #9a9a9a; --faint: rgba(255, 255, 255, .07);
+  --accent: #ffffff; --accent2: #b8b8b8; --accent-ink: #000000;
+  --glass: rgba(10, 10, 10, .72); --glass-line: rgba(255, 255, 255, .14);
+  --blob1: 40 40 40; --blob2: 25 25 25; --blob3: 55 55 55;
+  --vinyl: 70 70 70; --vinyl-a: .5; --stars: .5; --scheme: dark; --shadow: 0 0 0;
+}
 body[data-theme="rose-gold"] {
   --bg: #f8ebe6; --bg2: #efd3cb;
   --ink: #4b2a2a; --muted: #9b7370; --faint: rgba(100, 50, 45, .07);
@@ -255,6 +263,11 @@ body.playing .tonearm { transform: rotate(0deg); }
   position: absolute; left: 30%; bottom: 7%; width: 20%; height: 16%; border-radius: 5px;
   background: linear-gradient(#f7d8d1, #c48c83); transform: rotate(14deg);
 }
+
+/* pure black: a silver tonearm instead of rose gold */
+body[data-theme="pure-black"] .arm-base { background: radial-gradient(circle at 35% 30%, #ffffff, #b4b4b4 55%, #6e6e6e); }
+body[data-theme="pure-black"] .arm { background: linear-gradient(90deg, #a8a8a8, #f2f2f2, #7c7c7c); }
+body[data-theme="pure-black"] .arm-head { background: linear-gradient(#e2e2e2, #888); }
 
 /* now playing */
 .now { text-align: center; max-width: min(580px, 92%); display: flex; flex-direction: column; align-items: center; }

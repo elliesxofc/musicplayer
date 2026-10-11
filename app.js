@@ -15,7 +15,10 @@ const THEMES = [
   { id: 'bubblegum', name: 'bubblegum', swatch: 'linear-gradient(135deg,#ff5fa8,#8f7bff)', color: '#fde9ff' },
   { id: 'sakura-dusk', name: 'sakura dusk', swatch: 'linear-gradient(135deg,#4a2440,#ffa3c4 60%,#ffd29a)', color: '#24142b' },
   { id: 'rose-gold', name: 'rosé gold', swatch: 'linear-gradient(135deg,#f8ebe6,#d97a8a 55%,#c9a27a)', color: '#f8ebe6' },
+  { id: 'pure-black', name: 'pure black', swatch: 'linear-gradient(135deg,#000 55%,#fff)', color: '#000000' },
 ];
+
+let overlayPalette = null; // the current theme's colours for the OBS overlay (worked out when needed)
 
 /* ───────────── tiny storage helpers ───────────── */
 const prefs = {
@@ -294,6 +297,8 @@ function applyTheme(id) {
   prefs.set('theme', t.id);
   el.themeGrid.querySelectorAll('.theme-opt').forEach(b => b.setAttribute('aria-checked', String(b.dataset.theme === t.id)));
   viz.refreshColor();
+  overlayPalette = null;
+  setTimeout(pushOverlay); // the OBS overlay can follow the theme
 }
 
 function buildThemeGrid() {
@@ -1592,16 +1597,31 @@ async function openExternalFiles(paths, { play = true, quiet = false, replace = 
 /* ───────────── now-playing overlay for OBS (desktop app) ───────────── */
 let overlayCoverFor = null;
 let overlayNextCoverFor = null;
+// The theme's colours for the OBS overlay card (when "match moonlit's theme" is on)
+function themePalette() {
+  if (overlayPalette) return overlayPalette;
+  const cs = getComputedStyle(document.body), v = n => cs.getPropertyValue(`--${n}`).trim();
+  const rgb = hex => { const m = /^#?([0-9a-f]{6})$/i.exec(hex); if (!m) return null; const n = parseInt(m[1], 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+  const a = (hex, alpha) => { const c = rgb(hex); return c ? `rgba(${c.join(', ')}, ${alpha})` : hex; };
+  const light = v('scheme') === 'light';
+  overlayPalette = {
+    accent: v('accent'), accent2: v('accent2'), ink: v('ink'), muted: v('muted'),
+    card1: a(v('bg2'), light ? 0.92 : 0.88), card2: a(v('bg'), light ? 0.92 : 0.88), pill: a(v('bg'), 0.85),
+    edge: v('glass-line'), divider: v('glass-line'), track: light ? 'rgba(0, 0, 0, .1)' : 'rgba(255, 255, 255, .14)',
+  };
+  return overlayPalette;
+}
 function pushOverlay() {
   if (!desktop || !desktop.overlay) return;
   const now = onAir(), spectrum = prefs.get('overlaySpectrum', true), look = vizOpts();
-  if (!now) desktop.overlay.state({ spectrum, viz: look });
+  const theme = prefs.get('overlayTheme', false) ? themePalette() : null;
+  if (!now) desktop.overlay.state({ spectrum, viz: look, theme });
   else if (now.source === 'spotify') {
     const sp = now.song;
     desktop.overlay.state({
       id: sp.id, title: sp.title, artist: sp.artist, album: sp.album, line: formatSong(sp),
       duration: sp.duration, position: sp.position + (sp.playing ? (Date.now() - sp.at) / 1000 : 0),
-      playing: sp.playing, spectrum, viz: look, source: 'spotify',
+      playing: sp.playing, spectrum, viz: look, theme, source: 'spotify',
     });
   } else {
     const t = now.song;
@@ -1621,7 +1641,7 @@ function pushOverlay() {
       next: coming,
       id: t.id, title: t.title, artist: t.artist || '', album: t.album || '', line: formatSong(t),
       duration: Number.isFinite(audio.duration) ? audio.duration : (t.duration || 0),
-      position: audio.currentTime || 0, playing: !audio.paused, spectrum, viz: look, source: 'moonlit',
+      position: audio.currentTime || 0, playing: !audio.paused, spectrum, viz: look, theme, source: 'moonlit',
     });
   }
   feedSpectrum();
@@ -1680,6 +1700,10 @@ async function setupOverlay() {
     toast(on ? 'visualizer on the overlay ✦' : 'visualizer hidden on the overlay');
   };
   bars.onchange = () => setBars(bars.checked);
+  // the overlay card in moonlit's own theme colours, changing with it
+  const themed = $('#overlayTheme');
+  themed.checked = prefs.get('overlayTheme', false);
+  themed.onchange = () => { prefs.set('overlayTheme', themed.checked); pushOverlay(); toast(themed.checked ? 'the overlay follows your theme ✦' : 'the overlay is back to its own pink'); };
   vizOn.onchange = () => setBars(vizOn.checked);
   // "up next" in the last seconds of a song (live, no address change)
   const upOn = $('#overlayUpNext'), upSecs = $('#overlayUpNextSecs');

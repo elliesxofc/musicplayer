@@ -9,6 +9,7 @@
 
 const http = require('node:http');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 
 const PORTS = [4848, 4849, 4850, 4851, 4852];
@@ -23,9 +24,13 @@ function createOverlay() {
   let watchersChanged = () => {};
   const watchers = () => watchersChanged(clients.size);
 
-  const page = () => fs.readFileSync(path.join(__dirname, 'overlay.html'));
+  const read = file => fs.readFileSync(path.join(__dirname, file));
+  // A fingerprint of the overlay's own files. OBS keeps a Browser source's page open across
+  // moonlit updates, so the page reloads itself when this changes (after an update).
+  const build = crypto.createHash('sha1').update(read('overlay.html')).update(read('../vizcore.js')).digest('hex').slice(0, 12);
+  const page = () => read('overlay.html').toString().replace('__BUILD__', build);
   // position is sent as "seconds at the moment of sending"; the page keeps time from there
-  const snapshot = () => JSON.stringify({ ...state, sentAt: Date.now() });
+  const snapshot = () => JSON.stringify({ ...state, build, sentAt: Date.now() });
 
   function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
@@ -37,7 +42,7 @@ function createOverlay() {
     }
     if (url.pathname === '/vizcore.js') { // the visualizer engine, shared with the app
       res.writeHead(200, { ...cors, 'Content-Type': 'text/javascript; charset=utf-8' });
-      return res.end(fs.readFileSync(path.join(__dirname, '..', 'vizcore.js')));
+      return res.end(read('../vizcore.js'));
     }
     if (url.pathname === '/now') {
       res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });

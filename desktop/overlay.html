@@ -145,7 +145,10 @@
     if (!t && q.get('accent')) root.setProperty('--accent', '#' + q.get('accent').replace(/[^0-9a-f]/gi, ''));
   }
 
+  // this page's version; after a moonlit update OBS still shows the old page, so reload it
+  const BUILD = '__BUILD__';
   function apply(next) {
+    if (next.build && BUILD !== '_' + '_BUILD__' && next.build !== BUILD) { location.reload(); return; }
     applyTheme(next.theme);
     const changed = !s || s.id !== next.id;
     s = next; got = performance.now();
@@ -242,7 +245,8 @@
     sg.lineJoin = sg.lineCap = 'round';
     const pad = sg.shadowBlur ? 3 * dpr : 0;
     // bar width and spacing: exact pixels for the visualizer source, the same proportions elsewhere
-    const unit = w / n, gap = solo ? o.barSpacing * dpr : Math.min(unit * 0.6, Math.max(1, unit * Math.min(0.6, o.barSpacing / (o.barWidth + o.barSpacing))));
+    // (the card and the line use the "bar spacing" slider: a share of each bar's room, 0 = touching)
+    const unit = w / n, gap = solo ? o.barSpacing * dpr : unit * o.gap;
     const bw = solo ? o.barWidth * dpr : Math.max(0.5, unit - gap);
     const xAt = i => (solo ? i * (bw + gap) : i * unit + gap / 2);
 

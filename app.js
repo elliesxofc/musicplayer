@@ -414,6 +414,7 @@ function setupVizSettings() {
   const ranges = {
     strength: [$('#vizStrength'), v => num(v, 2)],
     bars: [$('#vizBars'), v => `${v} bars`],
+    gap: [$('#vizGap'), v => (+v === 0 ? 'touching' : `${Math.round(v * 100)}%`)],
     speed: [$('#vizSpeed'), v => `${num(v, 2)}×`],
     gravity: [$('#vizGravity'), v => (+v === 0 ? 'off' : (+v).toFixed(2))],
     inertia: [$('#vizInertia'), v => (+v === 0 ? 'off' : `${Math.round(v * 100)}%`)],

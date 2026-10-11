@@ -9,6 +9,7 @@
     round: true, autoscale: false, log: false, stereo: false,
     color: 'theme', custom: '#ff7eb6', glow: true,
     barWidth: 6, barHeight: 100, barSpacing: 2,
+    gap: 0.25, // space between the overlay card's bars, as a share of each bar's room (0 = touching)
   };
 
   // saved settings → full settings (older versions had the monstercat look as a style only)
@@ -16,6 +17,7 @@
     const o = { ...DEFAULTS, ...(saved || {}) };
     if (saved && saved.style === 'monstercat' && saved.filter === undefined) o.filter = 'monstercat';
     o.bars = Math.max(8, Math.min(160, Math.round(o.bars)));
+    o.gap = Math.max(0, Math.min(0.8, +o.gap || 0));
     return o;
   }
 

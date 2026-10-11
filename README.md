@@ -43,7 +43,7 @@ drag audio files onto the page or tap **add songs**.
 - **song requests** (desktop app): `!sr`, `!queue`, `!skip` (mods) and `!wrongsong` in YouTube chat, like the song request app. Requests come from your library or YouTube (copyright-free channels only for viewers, downloaded once) and play next
 - **sound output picker**: send the music to a virtual cable (VB-CABLE) so OBS streams it without it playing on your speakers. setup in [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - **effects** (sliders panel): *full* · *lite* (no blur/glow/visualizer, record still spins) · *super lite* (no animations, record put away) for older or always-on PCs
-- **visualizer** (sliders panel): style (*bars* · *dots* · *wave* · *rays* · *monstercat*), speed, inertia, spin, size, number of bars, colors (theme · rainbow · your own) and glow. saved automatically; the OBS overlay's music bars follow the same settings; "reset the visualizer" brings back the default
+- **visualizer** (sliders panel), with options like OBS's Spectralizer: mode (*bars* · *dots* · *wave* · *rays* · *monstercat*), filter (*monstercat* + strength), detail (number of bars), speed, gravity, inertia, round corners, automatic scaling, logarithmic frequency scale, stereo, colors and glow, plus spin and size for the ring around the record. the OBS overlay's music bars follow the same settings, and the desktop app adds an **OBS visualizer source** (`http://localhost:4848/overlay?layout=bars`: just the bars, see-through, with bar width / height / spacing in pixels)
 - skips songs that won't play, so a 24/7 stream never goes silent
 - **OBS now playing**: keeps a `nowplaying.txt` updated with the current song for an OBS text source. see [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - works with media keys and the lock screen

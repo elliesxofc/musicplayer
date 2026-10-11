@@ -35,6 +35,10 @@ function createOverlay() {
       res.writeHead(200, { ...cors, 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(page());
     }
+    if (url.pathname === '/vizcore.js') { // the visualizer engine, shared with the app
+      res.writeHead(200, { ...cors, 'Content-Type': 'text/javascript; charset=utf-8' });
+      return res.end(fs.readFileSync(path.join(__dirname, '..', 'vizcore.js')));
+    }
     if (url.pathname === '/now') {
       res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(snapshot());
@@ -93,7 +97,7 @@ function createOverlay() {
     // music bar levels (0-255), sent as their own small event about 30 times a second
     spectrum(levels) {
       if (!clients.size || !Array.isArray(levels)) return;
-      const msg = `event: spectrum\ndata: ${levels.slice(0, 64).map(v => Math.max(0, Math.min(255, v | 0))).join(',')}\n\n`;
+      const msg = `event: spectrum\ndata: ${levels.slice(0, 400).map(v => Math.max(0, Math.min(255, v | 0))).join(',')}\n\n`;
       for (const c of clients) c.write(msg);
     },
     onWatchers(cb) { watchersChanged = cb; },

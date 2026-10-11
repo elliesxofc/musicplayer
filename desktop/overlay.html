@@ -7,12 +7,14 @@
   moonlit "now playing" overlay. In OBS: Sources → + → Browser → URL http://localhost:4848/overlay
   options (add to the URL, e.g. /overlay?layout=line&hidepaused=1):
     layout=card | line     card with cover art (default), or a single line of text
+    layout=bars            only the visualizer (like Spectralizer): see-through, sized from moonlit's
+                           settings (bars × (bar width + spacing), bar height)
     hidepaused=1           fade out while the music is paused
     nocover=1              card without the cover art
     noprogress=1           no progress bar or time
     accent=ff7eb6          main colour (hex, without #)
   the music bars are switched on and off in moonlit itself (obs · now playing), and styled under
-  "visualizer" in moonlit's settings (style, speed, spin, size, bars, colours, glow): no address change needed
+  "visualizer" in moonlit's settings (mode, filter, detail, gravity, colours, …): no address change needed
 -->
 <style>
   :root { --accent: #ff7eb6; --accent2: #c49bff; --ink: #fff3f8; --muted: #e6bfd4; }
@@ -83,18 +85,26 @@
   .line .upnext .un-text { flex-direction: row; align-items: baseline; gap: 8px; }
   .line .upnext .un-song { font-size: 17px; }
 
+  /* only the visualizer (layout=bars): no card, no padding, the page is the bars */
+  body.solo { padding: 0; }
+  .spec.solo { margin: 0; transition: opacity .4s ease; }
+  .spec.solo.off { opacity: 0; }
+
   .swap { animation: swap .6s ease; }
   @keyframes swap { from { opacity: 0; transform: translateX(-10px); } }
 </style>
 </head>
 <body>
 <div class="np hidden" id="np"></div>
+<script src="/vizcore.js"></script>
 <script>
   const q = new URLSearchParams(location.search);
   if (q.get('accent')) document.documentElement.style.setProperty('--accent', '#' + q.get('accent').replace(/[^0-9a-f]/gi, ''));
-  const layout = q.get('layout') === 'line' ? 'line' : 'card';
+  const layout = ['line', 'bars'].includes(q.get('layout')) ? q.get('layout') : 'card';
+  const solo = layout === 'bars';
+  document.body.classList.toggle('solo', solo);
   const np = document.getElementById('np');
-  np.innerHTML = layout === 'card'
+  np.innerHTML = solo ? '<canvas class="spec solo off"></canvas>' : layout === 'card'
     ? `<div class="card"><img class="cover" alt="">
          <div class="text"><div class="label"><i></i><span class="state">now playing</span></div>
          <div class="title"></div><div class="artist"></div>
@@ -102,13 +112,13 @@
          <canvas class="spec off"></canvas></div></div>`
     : `<div class="line"><canvas class="spec off"></canvas><span class="song"></span><span class="time"></span></div>`;
   // "up next" lives inside the card (under the bars) or at the end of the line
-  (layout === 'card' ? np.querySelector('.text') : np.querySelector('.line')).insertAdjacentHTML('beforeend',
+  if (!solo) (layout === 'card' ? np.querySelector('.text') : np.querySelector('.line')).insertAdjacentHTML('beforeend',
     `<div class="upnext"><div><div class="un-row"><img alt=""><div class="un-text">
     <span class="un-label">up next<em></em></span><span class="un-song"></span></div><span class="un-time"></span></div></div></div>`);
   const $ = s => np.querySelector(s);
   const up = np.querySelector('.upnext');
   const NO_COVER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-  if (q.get('nocover')) { $('.cover')?.remove(); up.querySelector('img').remove(); }
+  if (q.get('nocover')) { $('.cover')?.remove(); up?.querySelector('img').remove(); }
   if (q.get('noprogress')) { $('.progress')?.remove(); $('.time')?.remove(); }
 
   const fmt = s => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
@@ -124,144 +134,136 @@
         $('.artist').textContent = [s.artist, s.album].filter(Boolean).join(' · ');
         loadCover(true);
       }
-      const box = np.firstElementChild; box.classList.remove('swap'); void box.offsetWidth; box.classList.add('swap');
+      const box = np.firstElementChild; if (!solo) { box.classList.remove('swap'); void box.offsetWidth; box.classList.add('swap'); }
     }
     // the one-line text follows format changes straight away, not only on the next song
     if (layout === 'line') $('.song').textContent = s.line || [s.artist, s.title].filter(Boolean).join(' - ');
     np.classList.toggle('paused', !s.playing);
     if (layout === 'card') $('.state').textContent = s.playing ? 'now playing' : 'paused';
     np.classList.toggle('hidden', !!q.get('hidepaused') && !s.playing);
-    if (changed) { up.classList.remove('show'); upFor = ''; }
+    if (changed && up) { up.classList.remove('show'); upFor = ''; }
     // no bars for Spotify: its sound plays in the Spotify app, so moonlit can't hear it
-    spec.classList.toggle('off', !s.spectrum || s.source === 'spotify');
+    // (the visualizer source ignores the card's bars switch: adding it in OBS is the switch)
+    spec.classList.toggle('off', (!solo && !s.spectrum) || s.source === 'spotify');
     tick();
   }
 
   /* music bars: levels arrive about 30 times a second while music plays; drawing eases
      between them at the screen's frame rate, and the bars settle down when it stops.
-     Their look (style, speed, spin, size, colours, glow) comes from moonlit's visualizer settings. */
+     How they look and move comes from moonlit's visualizer settings, through the same
+     engine the app uses (vizcore.js). */
   const spec = $('.spec'), sg = spec.getContext('2d');
-  const LOOK = { style: 'bars', speed: 1, inertia: 0, spin: 0, size: 1, color: 'theme', custom: '#ff7eb6', glow: true };
-  // the same two helpers as moonlit's own visualizer (app.js)
-  function monstercat(v) {
-    const n = v.length;
-    for (let z = 0; z < n; z++) {
-      let lift = v[z];
-      for (let m = z - 1; m >= 0 && (lift /= 1.5) > v[m]; m--) v[m] = lift;
-      lift = v[z];
-      for (let m = z + 1; m < n && (lift /= 1.5) > v[m]; m++) v[m] = lift;
-    }
-    return v;
-  }
-  function moveLevels(levels, vel, targets, f, inertia, rise, fall) {
-    if (!inertia) {
-      const up = 1 - (1 - rise) ** f, down = 1 - (1 - fall) ** f;
-      for (let i = 0; i < levels.length; i++) { levels[i] += (targets[i] - levels[i]) * (targets[i] > levels[i] ? up : down); vel[i] = 0; }
-      return;
-    }
-    const k = 0.42 - 0.36 * inertia, keep = 0.5 + 0.38 * inertia;
-    const steps = Math.max(1, Math.ceil(f)), h = f / steps;
-    for (let i = 0; i < levels.length; i++) {
-      let l = levels[i], v = vel[i];
-      for (let s = 0; s < steps; s++) { v = (v + (targets[i] - l) * k * h) * keep ** h; l += v * h; }
-      if (l < 0) { l = 0; v = 0; }
-      levels[i] = Math.min(1.25, l); vel[i] = v;
-    }
-  }
-  let target = [], levels = [], vel = [], goals = [], lastLevels = 0, lastT = 0, shift = 0;
+  const shape = VizCore.shaper();
+  let target = [], lastLevels = 0, lastT = 0, shift = 0;
   function drawSpectrum(now) {
     requestAnimationFrame(drawSpectrum);
     const dt = Math.min(100, now - (lastT || now));
     lastT = now;
-    if (spec.classList.contains('off')) return;
-    const look = { ...LOOK, ...(s && s.viz) };
-    // size: taller bars on the card; the one-line style keeps its height and just reaches higher
-    const cssH = layout === 'card' ? `${Math.round(30 * Math.min(2, Math.max(0.4, look.size)))}px` : '';
-    if (spec.style.getPropertyValue('--spec-h') !== cssH) spec.style.setProperty('--spec-h', cssH);
-    const dpr = window.devicePixelRatio || 1, w = Math.round(spec.clientWidth * dpr), h = Math.round(spec.clientHeight * dpr);
+    if (spec.classList.contains('off') && !solo) return;
+    const o = VizCore.options(s && s.viz);
+    const dpr = window.devicePixelRatio || 1;
+    if (solo) {
+      // the source's size: every bar plus the gaps between them, and the bar height
+      const cw = `${o.bars * (o.barWidth + o.barSpacing) - o.barSpacing}px`, ch = `${o.barHeight}px`;
+      if (spec.style.width !== cw) spec.style.width = cw;
+      if (spec.style.height !== ch) spec.style.height = ch;
+    } else {
+      // size: taller bars on the card; the one-line style keeps its height and just reaches higher
+      const cssH = layout === 'card' ? `${Math.round(30 * Math.min(2, Math.max(0.4, o.size)))}px` : '';
+      if (spec.style.getPropertyValue('--spec-h') !== cssH) spec.style.setProperty('--spec-h', cssH);
+    }
+    const w = Math.round(spec.clientWidth * dpr), h = Math.round(spec.clientHeight * dpr);
     if (!w || !h) return;
     if (spec.width !== w || spec.height !== h) { spec.width = w; spec.height = h; }
     const fresh = now - lastLevels < 400 && s && s.playing;
+    const stereo = o.stereo && target.length >= 2 * o.bars;
+    const per = stereo ? target.length / 2 : (target.length || o.bars);
     // the one-line style is small: half as many, wider bars (each the louder of two)
     const pair = layout === 'line' ? 2 : 1;
-    const n = Math.max(1, Math.ceil((target.length || 28) / pair));
-    if (levels.length !== n) { levels = new Array(n).fill(0); vel = new Array(n).fill(0); goals = new Array(n).fill(0); }
-    const f = (dt / 16.7) * look.speed;
-    const reach = layout === 'line' ? Math.min(1.3, look.size) : 1;
-    for (let i = 0; i < n; i++) {
-      const raw = pair === 1 ? target[i] : Math.max(target[i * 2] || 0, target[i * 2 + 1] || 0);
-      goals[i] = fresh ? Math.min(1, ((raw || 0) / 255) * reach) : 0;
+    const n = Math.max(1, Math.ceil(per / pair));
+    const f = (dt / 16.7) * o.speed;
+    const reach = layout === 'line' ? Math.min(1.3, o.size) : 1;
+    const goals = new Array(stereo ? n * 2 : n);
+    for (let c = 0; c < (stereo ? 2 : 1); c++) {
+      for (let i = 0; i < n; i++) {
+        const at = c * per + i * pair;
+        const raw = pair === 1 ? target[at] : Math.max(target[at] || 0, target[at + 1] || 0);
+        goals[c * n + i] = fresh ? Math.min(1, ((raw || 0) / 255) * reach) : 0;
+      }
     }
-    if (look.style === 'monstercat') monstercat(goals);
-    moveLevels(levels, vel, goals, f, look.inertia || 0, 0.5, 0.15);
+    if (fresh && o.autoscale) shape.scale(goals, f);
+    if (o.filter === 'monstercat') for (let c = 0; c < (stereo ? 2 : 1); c++) VizCore.monstercat(goals, o.strength, c * n, (c + 1) * n);
+    const levels = shape.move(goals, f, o);
     // spin: the bars slide along the row, round and round
-    shift = (shift + look.spin * dt * 0.004 * (fresh ? 1 : 0.3)) % n;
-    const level = x => { // level at a fractional position, wrapping round the row
+    shift = (shift + o.spin * dt * 0.004 * (fresh ? 1 : 0.3)) % n;
+    const level = (c, x) => { // a channel's level at a fractional position, wrapping round the row
       const p = ((x - shift) % n + n) % n, a = Math.floor(p), b = (a + 1) % n, k = p - a;
-      return levels[a] * (1 - k) + levels[b] * k;
+      return Math.min(1, levels[c * n + a] * (1 - k) + levels[c * n + b] * k);
     };
 
     sg.clearRect(0, 0, w, h);
     const cs = getComputedStyle(document.documentElement);
     const accent = cs.getPropertyValue('--accent').trim(), accent2 = cs.getPropertyValue('--accent2').trim();
     let paint;
-    if (look.color === 'custom') paint = look.custom;
-    else if (look.color === 'rainbow') {
+    if (o.color === 'custom') paint = o.custom;
+    else if (o.color === 'rainbow') {
       paint = sg.createLinearGradient(0, 0, w, 0);
-      for (let k = 0; k <= 6; k++) paint.addColorStop(k / 6, `hsl(${k * 60 + now * 0.02 * look.speed} 90% 72%)`);
+      for (let k = 0; k <= 6; k++) paint.addColorStop(k / 6, `hsl(${k * 60 + now * 0.02 * o.speed} 90% 72%)`);
     } else {
       paint = sg.createLinearGradient(0, 0, w, 0);
       paint.addColorStop(0, accent);
       paint.addColorStop(1, accent2);
     }
     sg.fillStyle = sg.strokeStyle = paint;
-    sg.shadowColor = look.color === 'custom' ? look.custom : accent;
-    sg.shadowBlur = look.glow && fresh ? 6 * dpr : 0;
+    sg.shadowColor = o.color === 'custom' ? o.custom : accent;
+    sg.shadowBlur = o.glow && fresh ? 6 * dpr : 0;
     sg.lineJoin = sg.lineCap = 'round';
-    const pad = sg.shadowBlur ? 3 * dpr : 0, top = pad, H = h - pad * 2;
-    const gap = Math.max(2, w / n * 0.35), bw = (w - gap * (n - 1)) / n;
+    const pad = sg.shadowBlur ? 3 * dpr : 0;
+    // bar width and spacing: exact pixels for the visualizer source, the same proportions elsewhere
+    const unit = w / n, gap = solo ? o.barSpacing * dpr : Math.min(unit * 0.6, Math.max(1, unit * Math.min(0.6, o.barSpacing / (o.barWidth + o.barSpacing))));
+    const bw = solo ? o.barWidth * dpr : Math.max(0.5, unit - gap);
+    const xAt = i => (solo ? i * (bw + gap) : i * unit + gap / 2);
 
-    if (look.style === 'wave') {
-      // one smooth line across, softly filled underneath
-      const pts = [];
-      for (let i = 0; i < n; i++) pts.push([i * (bw + gap) + bw / 2, top + H - Math.max(0.04, Math.min(1, level(i)) ** 1.3) * H]);
-      sg.beginPath();
-      sg.moveTo(0, pts[0][1]);
-      for (let i = 0; i < n - 1; i++) sg.quadraticCurveTo(pts[i][0], pts[i][1], (pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2);
-      sg.lineTo(w, pts[n - 1][1]);
-      sg.lineWidth = Math.max(2, 2 * dpr);
-      sg.globalAlpha = 0.95;
-      sg.stroke();
-      sg.lineTo(w, h); sg.lineTo(0, h); sg.closePath();
-      sg.globalAlpha = 0.18;
-      sg.shadowBlur = 0;
-      sg.fill();
-    } else {
-      for (let i = 0; i < n; i++) {
-        const v = Math.min(1, level(i)), x = i * (bw + gap);
-        sg.globalAlpha = 0.45 + v * 0.55;
+    // mono: bars stand on the bottom. stereo: left channel grows up from the middle, right channel down
+    const rows = stereo ? [[0, h / 2, -1, h / 2 - pad], [1, h / 2, 1, h / 2 - pad]] : [[0, h - pad, -1, h - pad * 2]];
+    for (const [c, base, dir, H] of rows) {
+      if (o.style === 'wave') {
+        // one smooth line across, softly filled toward the base
+        const pts = [];
+        for (let i = 0; i < n; i++) pts.push([xAt(i) + bw / 2, base + dir * Math.max(0.04, level(c, i) ** 1.3) * H]);
         sg.beginPath();
-        if (look.style === 'monstercat') {
-          // Monstercat's solid, square-topped blocks standing on one line
-          const unit = w / n, mw = Math.max(1, unit * 0.78);
-          const bh = Math.max(2 * dpr, v ** 1.15 * H);
-          sg.globalAlpha = 0.95;
-          sg.rect(i * unit + (unit - mw) / 2, top + H - bh, mw, bh);
-        } else if (look.style === 'dots') {
+        sg.moveTo(0, pts[0][1]);
+        for (let i = 0; i < n - 1; i++) sg.quadraticCurveTo(pts[i][0], pts[i][1], (pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2);
+        sg.lineTo(w, pts[n - 1][1]);
+        sg.lineWidth = Math.max(2, 2 * dpr);
+        sg.globalAlpha = 0.95;
+        sg.stroke();
+        sg.lineTo(w, base); sg.lineTo(0, base); sg.closePath();
+        sg.globalAlpha = 0.18;
+        const blur = sg.shadowBlur; sg.shadowBlur = 0; sg.fill(); sg.shadowBlur = blur;
+        continue;
+      }
+      for (let i = 0; i < n; i++) {
+        const v = level(c, i), x = xAt(i);
+        sg.globalAlpha = o.style === 'monstercat' ? 0.95 : 0.45 + v * 0.55;
+        sg.beginPath();
+        if (o.style === 'dots') {
           // a dot that rides up and down with the music
-          const r = Math.min(bw / 2, H / 4);
-          sg.arc(x + bw / 2, top + H - r - v ** 1.3 * (H - r * 2), r, 0, Math.PI * 2);
-        } else if (look.style === 'rays') {
+          const r = Math.max(1, Math.min(bw / 2, H / 4));
+          sg.arc(x + bw / 2, base + dir * (r + v ** 1.3 * (H - r * 2)), r, 0, Math.PI * 2);
+        } else if (o.style === 'rays' && !stereo) {
           // spikes that grow up and down from the middle
-          const bh = Math.max(bw * 0.4, v ** 1.3 * H), mid = top + H / 2;
-          sg.moveTo(x + bw / 2, mid - bh / 2);
-          sg.lineTo(x + bw, mid);
-          sg.lineTo(x + bw / 2, mid + bh / 2);
-          sg.lineTo(x, mid);
+          const bh = Math.max(bw * 0.4, v ** 1.3 * H), mid = pad + H / 2;
+          sg.moveTo(x + bw / 2, mid - bh / 2); sg.lineTo(x + bw, mid); sg.lineTo(x + bw / 2, mid + bh / 2); sg.lineTo(x, mid);
           sg.closePath();
+        } else if (o.style === 'rays') {
+          const bh = Math.max(bw * 0.4, v ** 1.3 * H);
+          sg.moveTo(x, base); sg.lineTo(x + bw / 2, base + dir * bh); sg.lineTo(x + bw, base); sg.closePath();
         } else {
-          const bh = Math.max(bw * 0.8, v ** 1.3 * H), y = top + H - bh, r = Math.min(bw / 2, bh / 2);
-          if (sg.roundRect) sg.roundRect(x, y, bw, bh, r); else sg.rect(x, y, bw, bh);
+          // bars, and Monstercat's square-topped blocks
+          const bh = Math.max(o.style === 'monstercat' ? 2 * dpr : Math.min(bw * 0.8, H), v ** (o.style === 'monstercat' ? 1.15 : 1.3) * H);
+          const y = dir < 0 ? base - bh : base, r = o.round ? Math.max(0, Math.min(bw / 2, bh / 2)) : 0;
+          if (r && sg.roundRect) sg.roundRect(x, y, bw, bh, r); else sg.rect(x, y, bw, bh);
         }
         sg.fill();
       }
@@ -289,6 +291,7 @@
   // the next song: who/what/how long, shown in the last few seconds of this one
   let upFor = '';
   function upNext(pos, dur) {
+    if (!up) return;
     const n = s && s.next;
     const left = dur - pos;
     const show = !!(n && s.playing && dur && pos > 3 && left <= (n.seconds || 10) && left > 0.25);
@@ -308,7 +311,7 @@
   }
 
   function tick() {
-    if (!s || !s.id) { up.classList.remove('show'); return; }
+    if (!s || !s.id) { up?.classList.remove('show'); return; }
     const pos = Math.min(s.duration || Infinity, s.position + (s.playing ? (performance.now() - got) / 1000 : 0));
     const dur = s.duration || 0;
     upNext(pos, dur);

@@ -39,9 +39,17 @@ it updates the moment the song changes, and shows "paused" when you pause.
   "music bars that move with the song" switches the bars on or off straight
   away, no address change needed. (no bars for Spotify songs: Spotify's sound
   plays in the Spotify app, where moonlit can't hear it.)
-  how the bars look comes from "visualizer" in moonlit's settings: style
-  (bars / dots / wave / rays / monstercat), speed, inertia, spin, size, number
-  of bars, colours and glow. changes show on the overlay straight away.
+  how the bars look comes from "visualizer" in moonlit's settings (mode, filter,
+  detail, speed, gravity, inertia, round corners, automatic scaling, log scale,
+  stereo, colour, glow). changes show on the overlay straight away.
+
+  VISUALIZER SOURCE (just the bars, like the Spectralizer plugin)
+  in moonlit: sliders → visualizer → "OBS visualizer source": copy the address
+  (http://localhost:4848/overlay?layout=bars) and add it as a Browser source.
+  set bar width, bar height and bar spacing in pixels there; moonlit shows the
+  size to give the source (bars × (width + spacing), bar height). it's
+  see-through, so put it anywhere on your scene. unlike Spectralizer it only
+  hears moonlit's own music (not Spotify or other desktop sound).
   "show “up next” before a song ends": in the last 5-30 seconds of a song the
   card opens up underneath to show the next song (cover, artist - title and its
   length, plus "requested by ..." for chat requests); the one-line style grows

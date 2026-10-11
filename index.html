@@ -9,7 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <link rel="manifest" href="manifest.webmanifest?v=39">
+  <link rel="manifest" href="manifest.webmanifest?v=40">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="moonlit">
@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=39">
+  <link rel="stylesheet" href="style.css?v=40">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -283,10 +283,10 @@
     </section>
     <section id="vizSection">
       <p class="eyebrow">visualizer</p>
-      <p class="hint small viz-top">the ring around the record and the OBS overlay's music bars both follow these.</p>
-      <p class="hint small viz-off" id="vizOffHint" hidden>the ring around the record only shows with <b>full</b> effects (the OBS overlay bars still work).</p>
+      <p class="hint small viz-top">the ring around the record, the OBS overlay's music bars and the OBS visualizer source all follow these.</p>
+      <p class="hint small viz-off" id="vizOffHint" hidden>the ring around the record only shows with <b>full</b> effects (the OBS bars still work).</p>
       <div class="field">
-        <span>style</span>
+        <span>mode</span>
         <div class="seg seg5" id="vizStyleSeg" role="radiogroup" aria-label="visualizer style">
           <button role="radio" data-style="bars">bars</button>
           <button role="radio" data-style="dots">dots</button>
@@ -295,29 +295,61 @@
           <button role="radio" data-style="monstercat">monstercat</button>
         </div>
       </div>
+      <label class="field"><span>filter</span>
+        <select id="vizFilter">
+          <option value="none">none</option>
+          <option value="monstercat">monstercat filter (bars flow into smooth hills)</option>
+        </select>
+      </label>
+      <label class="field viz-range" id="vizStrengthField"><span>filter strength <b id="vizStrengthVal"></b></span>
+        <input type="range" id="vizStrength" min="1.1" max="3" step="0.05" aria-label="filter strength"></label>
+      <label class="field viz-range"><span>detail <b id="vizBarsVal"></b></span>
+        <input type="range" id="vizBars" min="8" max="160" step="1" aria-label="number of bars"></label>
       <label class="field viz-range"><span>speed <b id="vizSpeedVal"></b></span>
         <input type="range" id="vizSpeed" min="0.25" max="3" step="0.05" aria-label="visualizer speed"></label>
+      <label class="field viz-range"><span>gravity <b id="vizGravityVal"></b></span>
+        <input type="range" id="vizGravity" min="0" max="1" step="0.01" aria-label="gravity"></label>
       <label class="field viz-range"><span>inertia <b id="vizInertiaVal"></b></span>
         <input type="range" id="vizInertia" min="0" max="1" step="0.05" aria-label="visualizer inertia"></label>
-      <p class="hint small viz-note">inertia gives the bars weight: they lag a little, swing past and settle.</p>
-      <label class="field viz-range"><span>spin <b id="vizSpinVal"></b></span>
-        <input type="range" id="vizSpin" min="-3" max="3" step="0.1" aria-label="visualizer spin"></label>
-      <label class="field viz-range"><span>size <b id="vizSizeVal"></b></span>
-        <input type="range" id="vizSize" min="0.4" max="2" step="0.05" aria-label="visualizer size"></label>
-      <label class="field viz-range"><span>bars <b id="vizBarsVal"></b></span>
-        <input type="range" id="vizBars" min="24" max="160" step="4" aria-label="number of bars"></label>
+      <p class="hint small viz-note">gravity: bars jump up, then drop faster and faster. inertia: bars get weight, lag a little, swing past and settle (when it's on, gravity rests).</p>
+      <div class="viz-checks">
+        <label class="check"><input type="checkbox" id="vizRound"> use round corners</label>
+        <label class="check"><input type="checkbox" id="vizAutoscale"> enable automatic scaling</label>
+        <label class="check"><input type="checkbox" id="vizLog"> logarithmic frequency scale</label>
+        <label class="check"><input type="checkbox" id="vizStereo"> stereo</label>
+      </div>
       <div class="viz-colors">
-        <label class="field"><span>colors</span>
+        <label class="field"><span>color</span>
           <select id="vizColor">
             <option value="theme">theme colors</option>
             <option value="rainbow">rainbow</option>
             <option value="custom">my own color</option>
           </select>
         </label>
-        <label class="field" id="vizCustomField" hidden><span>color</span><input type="color" id="vizCustom" aria-label="visualizer color"></label>
+        <label class="field" id="vizCustomField" hidden><span>pick</span><input type="color" id="vizCustom" aria-label="visualizer color"></label>
       </div>
       <label class="check"><input type="checkbox" id="vizGlow"> glow</label>
-      <button class="link-btn" id="vizReset" type="button">reset the visualizer</button>
+      <p class="viz-sub">ring around the record</p>
+      <label class="field viz-range"><span>spin <b id="vizSpinVal"></b></span>
+        <input type="range" id="vizSpin" min="-3" max="3" step="0.1" aria-label="visualizer spin"></label>
+      <label class="field viz-range"><span>size <b id="vizSizeVal"></b></span>
+        <input type="range" id="vizSize" min="0.4" max="2" step="0.05" aria-label="visualizer size"></label>
+      <div id="vizObsBox" hidden>
+        <p class="viz-sub">OBS visualizer source</p>
+        <p class="hint small viz-note">just the bars, see-through, like Spectralizer. in OBS add a <b>Browser</b> source with this address:</p>
+        <div class="overlay-url">
+          <input type="text" id="vizUrl" readonly aria-label="visualizer address">
+          <button class="pill" id="vizUrlCopy" type="button">copy</button>
+        </div>
+        <div class="viz-px">
+          <label class="field"><span>bar width (px)</span><input type="number" id="vizBarWidth" min="1" max="60" step="1"></label>
+          <label class="field"><span>bar height (px)</span><input type="number" id="vizBarHeight" min="10" max="1000" step="1"></label>
+          <label class="field"><span>bar spacing (px)</span><input type="number" id="vizBarSpacing" min="0" max="40" step="1"></label>
+        </div>
+        <p class="hint small viz-note" id="vizSizeHint"></p>
+        <button class="link-btn" id="vizPreview" type="button">preview in browser</button>
+      </div>
+      <p><button class="link-btn" id="vizReset" type="button">reset the visualizer</button></p>
     </section>
     <section>
       <p class="eyebrow">you</p>
@@ -468,7 +500,7 @@
       <p class="hint" id="appHint">add moonlit to your home screen so it opens like a real app, full screen and even offline.</p>
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v39</p>
+      <p class="version">moonlit v40</p>
     </section>
   </div>
 
@@ -481,9 +513,10 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="app.js?v=39"></script>
-  <script src="obs.js?v=39"></script>
-  <script src="live.js?v=39"></script>
-  <script src="requests.js?v=39"></script>
+  <script src="vizcore.js?v=40"></script>
+  <script src="app.js?v=40"></script>
+  <script src="obs.js?v=40"></script>
+  <script src="live.js?v=40"></script>
+  <script src="requests.js?v=40"></script>
 </body>
 </html>

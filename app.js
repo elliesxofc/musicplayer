@@ -402,21 +402,27 @@ document.querySelectorAll('#perfSeg button').forEach(b => b.onclick = () => {
   toast(PERF[b.dataset.perf].toast);
 });
 
-/* visualizer settings: style, speed, spin, size, number of bars, colors, glow */
+/* visualizer settings, like OBS's Spectralizer: mode, filter + strength, detail, speed, gravity,
+   inertia, round corners, automatic scaling, log scale, stereo, colour, glow, bar sizes */
 function setupVizSettings() {
+  const num = (v, d) => (+v).toFixed(d).replace(/\.?0+$/, '') || '0';
   const ranges = {
-    speed: [$('#vizSpeed'), v => `${(+v).toFixed(2).replace(/\.?0+$/, '')}×`],
+    strength: [$('#vizStrength'), v => num(v, 2)],
+    bars: [$('#vizBars'), v => `${v} bars`],
+    speed: [$('#vizSpeed'), v => `${num(v, 2)}×`],
+    gravity: [$('#vizGravity'), v => (+v === 0 ? 'off' : (+v).toFixed(2))],
     inertia: [$('#vizInertia'), v => (+v === 0 ? 'off' : `${Math.round(v * 100)}%`)],
-    spin: [$('#vizSpin'), v => (+v === 0 ? 'off' : `${+v > 0 ? '↻' : '↺'} ${Math.abs(+v).toFixed(1).replace(/\.0$/, '')}`)],
+    spin: [$('#vizSpin'), v => (+v === 0 ? 'off' : `${+v > 0 ? '↻' : '↺'} ${num(Math.abs(v), 1)}`)],
     size: [$('#vizSize'), v => `${Math.round(v * 100)}%`],
-    bars: [$('#vizBars'), v => String(v)],
   };
+  const checks = { round: $('#vizRound'), autoscale: $('#vizAutoscale'), log: $('#vizLog'), stereo: $('#vizStereo'), glow: $('#vizGlow') };
+  const px = { barWidth: [$('#vizBarWidth'), 1, 60], barHeight: [$('#vizBarHeight'), 10, 1000], barSpacing: [$('#vizBarSpacing'), 0, 40] };
   const save = patch => {
-    const next = { ...vizOpts(), ...patch };
+    const next = VizCore.options({ ...vizOpts(), ...patch });
     prefs.set('viz', next);
     viz.configure(next);
     show(next);
-    pushOverlay(); // the OBS overlay's music bars follow these settings too
+    pushOverlay(); // the OBS overlay and visualizer source follow these settings too
   };
   function show(o) {
     document.querySelectorAll('#vizStyleSeg button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.style === o.style)));
@@ -425,18 +431,43 @@ function setupVizSettings() {
       setFill(input);
       $(`#${input.id}Val`).textContent = label(o[key]);
     }
+    for (const [key, box] of Object.entries(checks)) box.checked = !!o[key];
+    for (const [key, [input]] of Object.entries(px)) if (document.activeElement !== input) input.value = o[key];
+    $('#vizFilter').value = o.filter;
+    $('#vizStrengthField').hidden = o.filter !== 'monstercat';
     $('#vizColor').value = o.color;
     $('#vizCustom').value = o.custom;
     $('#vizCustomField').hidden = o.color !== 'custom';
-    $('#vizGlow').checked = o.glow;
+    // the visualizer source's size in OBS: every bar + the gaps between them
+    const w = o.bars * (o.barWidth + o.barSpacing) - o.barSpacing;
+    $('#vizSizeHint').textContent = `size in OBS: ${w} × ${o.barHeight}${o.stereo ? ' (stereo: left channel up, right channel down)' : ''}.`;
   }
-  document.querySelectorAll('#vizStyleSeg button').forEach(b => b.onclick = () => save({ style: b.dataset.style }));
+  // the monstercat look comes with its filter switched on (it can be switched off again)
+  document.querySelectorAll('#vizStyleSeg button').forEach(b => b.onclick = () =>
+    save(b.dataset.style === 'monstercat' && vizOpts().style !== 'monstercat' ? { style: 'monstercat', filter: 'monstercat' } : { style: b.dataset.style }));
   for (const [key, [input]] of Object.entries(ranges)) input.oninput = () => save({ [key]: +input.value });
+  for (const [key, box] of Object.entries(checks)) box.onchange = () => save({ [key]: box.checked });
+  for (const [key, [input, min, max]] of Object.entries(px)) {
+    input.oninput = () => { const n = Math.round(+input.value); if (n >= min && n <= max) save({ [key]: n }); };
+    input.onchange = () => { save({ [key]: Math.max(min, Math.min(max, Math.round(+input.value) || VIZ_DEFAULTS[key])) }); input.value = vizOpts()[key]; };
+  }
+  $('#vizFilter').onchange = () => save({ filter: $('#vizFilter').value });
   $('#vizColor').onchange = () => save({ color: $('#vizColor').value });
   $('#vizCustom').oninput = () => save({ custom: $('#vizCustom').value });
-  $('#vizGlow').onchange = () => save({ glow: $('#vizGlow').checked });
-  $('#vizReset').onclick = () => { prefs.set('viz', {}); viz.configure(VIZ_DEFAULTS); show(VIZ_DEFAULTS); pushOverlay(); toast('visualizer reset ✦'); };
+  $('#vizReset').onclick = () => { prefs.set('viz', {}); viz.configure(VIZ_DEFAULTS); show(VizCore.options({})); pushOverlay(); toast('visualizer reset ✦'); };
   show(vizOpts());
+  // desktop app: the visualizer as its own OBS source
+  if (desktop && desktop.overlay) desktop.overlay.url().then(base => {
+    if (!base) return;
+    const url = `${base}?layout=bars`;
+    $('#vizObsBox').hidden = false;
+    $('#vizUrl').value = url;
+    $('#vizUrlCopy').onclick = async () => {
+      try { await navigator.clipboard.writeText(url); } catch { $('#vizUrl').select(); document.execCommand('copy'); }
+      toast('copied ✦ paste it in a Browser source in OBS');
+    };
+    $('#vizPreview').onclick = () => desktop.overlay.open(url);
+  }).catch(() => {});
 }
 
 function buildFloaties() {
@@ -470,46 +501,16 @@ function heartBurst(from) {
 }
 
 /* ───────────── visualizer ───────────── */
-const VIZ_DEFAULTS = { style: 'bars', speed: 1, inertia: 0, spin: 0, size: 1, bars: 72, color: 'theme', custom: '#ff7eb6', glow: true };
-
-// Monstercat's look: every loud bar lifts its neighbours a little, so the bars flow
-// into smooth hills instead of jumping one by one (the same idea as cava's monstercat filter)
-function monstercat(v) {
-  const n = v.length;
-  for (let z = 0; z < n; z++) {
-    let lift = v[z];
-    for (let m = z - 1; m >= 0 && (lift /= 1.5) > v[m]; m--) v[m] = lift;
-    lift = v[z];
-    for (let m = z + 1; m < n && (lift /= 1.5) > v[m]; m++) v[m] = lift;
-  }
-  return v;
-}
-// Moves the bars toward where the music wants them. Inertia 0: they follow straight away
-// (rise fast, fall back gently). With inertia they get weight: a spring that lags, then
-// swings past and settles, more so the higher it is. f = frames passed × speed.
-function moveLevels(levels, vel, targets, f, inertia, rise, fall) {
-  if (!inertia) {
-    const up = 1 - (1 - rise) ** f, down = 1 - (1 - fall) ** f;
-    for (let i = 0; i < levels.length; i++) { levels[i] += (targets[i] - levels[i]) * (targets[i] > levels[i] ? up : down); vel[i] = 0; }
-    return;
-  }
-  const k = 0.42 - 0.36 * inertia, keep = 0.5 + 0.38 * inertia;
-  const steps = Math.max(1, Math.ceil(f)), h = f / steps;
-  for (let i = 0; i < levels.length; i++) {
-    let l = levels[i], v = vel[i];
-    for (let s = 0; s < steps; s++) { v = (v + (targets[i] - l) * k * h) * keep ** h; l += v * h; }
-    if (l < 0) { l = 0; v = 0; }
-    levels[i] = Math.min(1.25, l); vel[i] = v;
-  }
-}
-const vizOpts = () => ({ ...VIZ_DEFAULTS, ...prefs.get('viz', {}) });
+const VIZ_DEFAULTS = VizCore.DEFAULTS;
+const vizOpts = () => VizCore.options(prefs.get('viz', {}));
 const viz = (() => {
   const canvas = $('#viz');
   const g = canvas.getContext('2d');
   let opts = vizOpts();
-  let levels = new Float32Array(opts.bars), vel = new Float32Array(opts.bars), goal = new Float32Array(opts.bars);
+  const shape = VizCore.shaper();
   let ctx = null, analyser = null, freq = null, color = '#fff', color2 = '#fff';
-  // speed: how quickly the ring jumps up and falls back (1 = moonlit's usual)
+  let analyserL = null, analyserR = null, freqL = null, freqR = null; // for stereo
+  // speed: how quickly the bars jump up and fall back (1 = moonlit's usual)
   const smoothing = () => Math.min(0.95, Math.max(0.3, 0.95 - 0.13 * opts.speed));
 
   function ensureAudioGraph() {
@@ -517,16 +518,31 @@ const viz = (() => {
     try {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
       const src = ctx.createMediaElementSource(audio);
-      analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = smoothing();
+      const make = () => { const a = ctx.createAnalyser(); a.fftSize = 2048; a.smoothingTimeConstant = smoothing(); return a; };
+      analyser = make();
       freq = new Uint8Array(analyser.frequencyBinCount);
       src.connect(analyser);
       analyser.connect(ctx.destination);
+      // left and right on their own, only listened to (they don't go to the speakers)
+      const split = ctx.createChannelSplitter(2);
+      src.connect(split);
+      analyserL = make(); analyserR = make();
+      split.connect(analyserL, 0); split.connect(analyserR, 1);
+      freqL = new Uint8Array(analyserL.frequencyBinCount); freqR = new Uint8Array(analyserR.frequencyBinCount);
       // once audio runs through the AudioContext, the context decides the output device
       const sink = prefs.get('sinkId', '');
       if (sink && ctx.setSinkId) ctx.setSinkId(sink).catch(() => toast("your chosen sound output isn't connected, so music is on the default device", 6000));
     } catch { ctx = null; }
+  }
+
+  // n levels (0-255), bass → treble; with stereo: n for the left channel, then n for the right
+  function read(n, stereo) {
+    if (stereo && analyserL) {
+      analyserL.getByteFrequencyData(freqL); analyserR.getByteFrequencyData(freqR);
+      return [...VizCore.bands(freqL, n, opts.log), ...VizCore.bands(freqR, n, opts.log)];
+    }
+    analyser.getByteFrequencyData(freq);
+    return VizCore.bands(freq, n, opts.log);
   }
 
   function resize() {
@@ -544,13 +560,13 @@ const viz = (() => {
   }
 
   function configure(next) {
-    opts = { ...VIZ_DEFAULTS, ...next };
-    if (levels.length !== opts.bars) { levels = new Float32Array(opts.bars); vel = new Float32Array(opts.bars); goal = new Float32Array(opts.bars); }
-    if (analyser) analyser.smoothingTimeConstant = smoothing();
+    opts = VizCore.options(next);
+    for (const a of [analyser, analyserL, analyserR]) if (a) a.smoothingTimeConstant = smoothing();
     lastDraw = 0;
   }
 
   let raf = 0, enabled = true, lastDraw = 0, lastT = 0, turn = 0;
+  const settled = () => shape.levels().every(v => v < 0.07);
   function frame(t) {
     raf = requestAnimationFrame(frame);
     const dt = Math.min(100, t - (lastT || t));
@@ -561,39 +577,36 @@ const viz = (() => {
     const playing = !audio.paused;
     turn += opts.spin * dt * 0.00035 * (playing ? 1 : 0.3);
     // nothing playing, no spin and the ring has settled: 12 frames a second is plenty for the gentle idle shimmer
-    if (!playing && !opts.spin && t - lastDraw < 83 && levels.every(v => v < 0.07)) return;
+    if (!playing && !opts.spin && t - lastDraw < 83 && settled()) return;
     lastDraw = t;
-    if (analyser && playing) analyser.getByteFrequencyData(freq);
+    const BARS = opts.bars, half = Math.ceil(BARS / 2);
+    const f = (dt / 16.7) * opts.speed;
+    // the ring is mirrored: the left half shows bass at the top down to treble at the bottom, the
+    // right half the same again (with stereo: left half = left channel, right half = right channel)
+    const raw = analyser && playing ? read(half, opts.stereo) : null;
+    const goal = new Array(BARS);
+    for (let i = 0; i < BARS; i++) {
+      const right = i >= half, k = right ? BARS - 1 - i : i;
+      goal[i] = raw ? (raw[opts.stereo && right ? half + k : k] / 255) ** 1.6 : 0;
+    }
+    if (raw && opts.autoscale) shape.scale(goal, f);
+    if (opts.filter === 'monstercat') {
+      // each half on its own, so the mirror line stays clean
+      const a = goal.slice(0, half), b = goal.slice(half).reverse();
+      VizCore.monstercat(a, opts.strength); VizCore.monstercat(b, opts.strength);
+      goal.splice(0, BARS, ...a, ...b.reverse());
+    }
+    for (let i = 0; i < BARS; i++) goal[i] = Math.max(goal[i], 0.03 + 0.02 * Math.sin((t * opts.speed) / 900 + i * 0.5 * (72 / BARS)));
+    const levels = shape.move(goal, f, opts);
+
     g.clearRect(0, 0, w, h);
-    const BARS = levels.length, half = BARS / 2;
     const cx = w / 2, cy = h / 2;
     // the canvas is 1.9× the record, so there's room for big sizes; sizes are measured from the record
     const rec = w / 2 / 1.9, edge = rec * 1.86;
     const inner = rec * 1.035; // just outside the record
     const maxLen = Math.min(rec * 0.375 * opts.size, edge - inner);
-    // frame-rate independent rise and fall, scaled by the speed setting
-    const f = (dt / 16.7) * opts.speed;
-    for (let i = 0; i < BARS; i++) {
-      // mirror the spectrum so the ring is symmetrical
-      const k = i < half ? i : BARS - 1 - i;
-      let target = 0.03 + 0.02 * Math.sin((t * opts.speed) / 900 + i * 0.5 * (72 / BARS));
-      if (analyser && playing) {
-        const bin = Math.floor(2 + (k / half) ** 1.6 * (freq.length * 0.62));
-        target = Math.max(target, (freq[bin] / 255) ** 1.6);
-      }
-      goal[i] = target;
-    }
-    if (opts.style === 'monstercat') {
-      // smooth each half on its own, so the mirror line stays clean
-      const a = goal.subarray(0, Math.ceil(half)), b = goal.subarray(Math.ceil(half)).reverse();
-      monstercat(a); monstercat(b); b.reverse();
-    }
-    moveLevels(levels, vel, goal, f, opts.inertia, 0.45, 0.12);
     const thin = 72 / BARS; // more bars → thinner lines
-    const paint = i => {
-      if (opts.color === 'rainbow') return `hsl(${(i / BARS) * 360 + t * 0.02 * opts.speed} 90% 72%)`;
-      return null;
-    };
+    const paint = i => (opts.color === 'rainbow' ? `hsl(${(i / BARS) * 360 + t * 0.02 * opts.speed} 90% 72%)` : null);
     let fill;
     if (opts.color === 'custom') fill = opts.custom;
     else if (opts.color === 'theme') {
@@ -604,7 +617,7 @@ const viz = (() => {
     g.strokeStyle = g.fillStyle = fill || color;
     g.shadowColor = opts.color === 'custom' ? opts.custom : color;
     g.shadowBlur = playing && opts.glow ? rec * 0.035 : 0;
-    g.lineCap = 'round';
+    g.lineCap = opts.round ? 'round' : 'butt';
     g.lineJoin = 'round';
     const angle = i => (i / BARS) * Math.PI * 2 - Math.PI / 2 + turn;
 
@@ -640,14 +653,13 @@ const viz = (() => {
         if (c) { g.strokeStyle = g.fillStyle = c; if (opts.glow) g.shadowColor = c; }
         g.globalAlpha = Math.min(1, 0.35 + levels[i] * 0.65);
         if (opts.style === 'dots') {
-          const r = Math.max(1.5, rec * 0.013 * Math.min(1.6, thin)) * (0.7 + levels[i] * 0.9);
+          const r = Math.max(1.5, rec * 0.013 * Math.min(1.6, thin)) * (0.7 + Math.min(1, levels[i]) * 0.9);
           g.beginPath();
           g.arc(cx + cos * (inner + len), cy + sin * (inner + len), r, 0, Math.PI * 2);
           g.fill();
         } else if (opts.style === 'monstercat') {
           // Monstercat's solid, flat-topped blocks, packed close together
           g.globalAlpha = 0.92;
-          g.lineCap = 'butt';
           g.lineWidth = Math.max(2, ((Math.PI * 2 * inner) / BARS) * 0.62);
           g.beginPath();
           g.moveTo(cx + cos * inner, cy + sin * inner);
@@ -682,22 +694,13 @@ const viz = (() => {
     if (on) raf = requestAnimationFrame(frame);
     else g.clearRect(0, 0, canvas.width, canvas.height);
   }
-  // a few levels for the OBS overlay's music bars: bass on the left, treble on the right.
-  // Works in every effects mode (lite only stops drawing the ring, not the analyser).
-  function sample(n) {
+  // levels for the OBS overlay: bass on the left, treble on the right (and the right channel
+  // after the left with stereo). Works in every effects mode (lite only stops drawing the ring).
+  function sample(n, stereo) {
     if (!analyser || audio.paused) return null;
-    analyser.getByteFrequencyData(freq);
-    const out = new Array(n);
-    const top = freq.length * 0.62;
-    for (let i = 0; i < n; i++) {
-      const a = Math.floor(2 + (i / n) ** 1.6 * top), b = Math.max(a + 1, Math.floor(2 + ((i + 1) / n) ** 1.6 * top));
-      let peak = 0;
-      for (let j = a; j < b; j++) peak = Math.max(peak, freq[j]);
-      out[i] = peak;
-    }
-    return out;
+    return read(n, stereo);
   }
-  return { ensureAudioGraph, refreshColor, setEnabled, sample, configure, getCtx: () => ctx };
+  return { ensureAudioGraph, refreshColor, setEnabled, sample, configure, opts: () => opts, getCtx: () => ctx };
 })();
 
 /* ───────────── library rendering ───────────── */
@@ -1626,15 +1629,15 @@ function pushOverlay() {
 
 // The overlay's music bars: sampled ~30 times a second, but only while an overlay is open
 // in OBS (or a browser), the bars are switched on, and music is playing.
-// as many overlay bars as the visualizer's "bars" setting asks for, scaled down to fit a row
-const spectrumBars = () => Math.max(8, Math.min(64, Math.round(vizOpts().bars * 28 / 72)));
+
 let overlayWatchers = 0, spectrumTimer = 0;
 function feedSpectrum() {
   if (!desktop || !desktop.overlay) return;
-  const want = overlayWatchers > 0 && prefs.get('overlaySpectrum', true) && !audio.paused && onAir()?.source === 'moonlit';
+  // (the visualizer source in OBS needs them even when the card's bars are switched off)
+  const want = overlayWatchers > 0 && !audio.paused && onAir()?.source === 'moonlit';
   if (want && !spectrumTimer) {
     spectrumTimer = setInterval(() => {
-      const levels = viz.sample(spectrumBars());
+      const o = viz.opts(), levels = viz.sample(o.bars, o.stereo);
       if (levels) desktop.overlay.spectrum(levels);
     }, 33);
   } else if (!want && spectrumTimer) {

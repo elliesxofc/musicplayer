@@ -249,6 +249,11 @@
     const unit = w / n, gap = solo ? o.barSpacing * dpr : unit * o.gap;
     const bw = solo ? o.barWidth * dpr : Math.max(0.5, unit - gap);
     const xAt = i => (solo ? i * (bw + gap) : i * unit + gap / 2);
+    // bars' edges on whole screen pixels, so touching bars really touch (a bar edge between two
+    // pixels gets blurred, and shows as a faint line between neighbours)
+    const left = i => Math.round(xAt(i)), right = i => Math.round(solo ? xAt(i) + bw : (i + 1) * unit - gap / 2);
+    // round corners shrink as the bars get closer, so touching bars make one solid shape
+    const rounding = o.round ? Math.min(1, (solo ? o.barSpacing / Math.max(1, o.barWidth) : o.gap) / 0.2) : 0;
 
     // mono: bars stand on the bottom. stereo: left channel grows up from the middle, right channel down
     const rows = stereo ? [[0, h / 2, -1, h / 2 - pad], [1, h / 2, 1, h / 2 - pad]] : [[0, h - pad, -1, h - pad * 2]];
@@ -269,10 +274,14 @@
         const blur = sg.shadowBlur; sg.shadowBlur = 0; sg.fill(); sg.shadowBlur = blur;
         continue;
       }
+      // touching bars (and Monstercat's blocks) are drawn as one shape: one glow around the
+      // outside, instead of each bar's glow showing as a line across its neighbour
+      const touching = solo ? o.barSpacing === 0 : o.gap < 0.02;
+      const oneShape = (o.style === 'bars' || o.style === 'monstercat') && (o.style === 'monstercat' || touching);
+      if (oneShape) { sg.globalAlpha = 0.95; sg.beginPath(); }
       for (let i = 0; i < n; i++) {
         const v = level(c, i), x = xAt(i);
-        sg.globalAlpha = o.style === 'monstercat' ? 0.95 : 0.45 + v * 0.55;
-        sg.beginPath();
+        if (!oneShape) { sg.globalAlpha = 0.45 + v * 0.55; sg.beginPath(); }
         if (o.style === 'dots') {
           // a dot that rides up and down with the music
           const r = Math.max(1, Math.min(bw / 2, H / 4));
@@ -288,11 +297,13 @@
         } else {
           // bars, and Monstercat's square-topped blocks
           const bh = Math.max(o.style === 'monstercat' ? 2 * dpr : Math.min(bw * 0.8, H), v ** (o.style === 'monstercat' ? 1.15 : 1.3) * H);
-          const y = dir < 0 ? base - bh : base, r = o.round ? Math.max(0, Math.min(bw / 2, bh / 2)) : 0;
-          if (r && sg.roundRect) sg.roundRect(x, y, bw, bh, r); else sg.rect(x, y, bw, bh);
+          const x0 = left(i), bwi = Math.max(1, right(i) - x0);
+          const y = dir < 0 ? base - bh : base, r = Math.max(0, Math.min(bwi / 2, bh / 2)) * rounding;
+          if (r >= 0.5 && sg.roundRect) sg.roundRect(x0, y, bwi, bh, r); else sg.rect(x0, y, bwi, bh);
         }
-        sg.fill();
+        if (!oneShape) sg.fill();
       }
+      if (oneShape) sg.fill();
     }
     sg.globalAlpha = 1;
   }

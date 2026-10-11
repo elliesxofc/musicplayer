@@ -773,3 +773,4 @@ body.super .deck { display: none; }  /* the record is put away in super lite */
 .viz-px .field { margin-bottom: 6px; }
 .viz-px .field span { font-size: 12px; }
 #vizObsBox .overlay-url { margin-bottom: 12px; }
+.viz-onoverlay { margin: 8px 0 16px; font-weight: 600; }

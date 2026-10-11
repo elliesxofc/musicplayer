@@ -1669,8 +1669,18 @@ async function setupOverlay() {
   layout.value = prefs.get('overlayLayout', 'card');
   hide.checked = prefs.get('overlayHide', false);
   // the bars switch on and off live, without changing the address in OBS
-  bars.checked = prefs.get('overlaySpectrum', true);
-  bars.onchange = () => { prefs.set('overlaySpectrum', bars.checked); pushOverlay(); };
+  // the same switch lives in two places: here and at the top of "visualizer"
+  const vizOn = $('#vizOnOverlay');
+  $('#vizOverlayRow').hidden = false;
+  bars.checked = vizOn.checked = prefs.get('overlaySpectrum', true);
+  const setBars = on => {
+    prefs.set('overlaySpectrum', on);
+    bars.checked = vizOn.checked = on;
+    pushOverlay();
+    toast(on ? 'visualizer on the overlay ✦' : 'visualizer hidden on the overlay');
+  };
+  bars.onchange = () => setBars(bars.checked);
+  vizOn.onchange = () => setBars(vizOn.checked);
   // "up next" in the last seconds of a song (live, no address change)
   const upOn = $('#overlayUpNext'), upSecs = $('#overlayUpNextSecs');
   upOn.checked = prefs.get('overlayUpNext', true);

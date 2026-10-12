@@ -1615,33 +1615,88 @@ async function setupDesktop() {
 }
 
 // "Do you want to close the program, <your name>?" when moonlit is closed (desktop app)
+// The "Do you want to close the program, <name>?" popup. Used by the desktop app's close
+// button and tray quit, and by the Back button on phones. done(yes) gets the answer.
+let closeAskDone = null;
+function askToClose(done) {
+  const name = prefs.get('name', '').trim();
+  $('#closeAskTitle').textContent = name ? `Do you want to close the program, ${name}?` : 'Do you want to close the program?';
+  $('#closeAskSub').textContent = !audio.paused ? 'the music will stop.' : '';
+  $('#closeDontAsk').checked = false;
+  $('#closeAsk').hidden = false;
+  closeAskDone = done;
+  $('#closeYes').focus();
+}
+function answerCloseAsk(yes) {
+  if (!closeAskDone) return;
+  const done = closeAskDone;
+  closeAskDone = null;
+  $('#closeAsk').hidden = true;
+  if ($('#closeDontAsk').checked) setAskClose(false);
+  if (yes) saveProgress(true);
+  done(yes);
+}
+// "ask before closing moonlit": one setting, shown in the desktop app section (desktop) or the app section (phones)
+function setAskClose(on) {
+  prefs.set('askClose', on);
+  for (const id of ['#askClose', '#askCloseWeb']) { const c = $(id); if (c) c.checked = on; }
+}
+$('#closeYes').onclick = () => answerCloseAsk(true);
+$('#closeNo').onclick = () => answerCloseAsk(false);
+$('#closeAsk').onclick = e => { if (e.target === $('#closeAsk')) answerCloseAsk(false); }; // tapping outside keeps it open
+$('#closeAsk').onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); answerCloseAsk(false); } };
+for (const id of ['#askClose', '#askCloseWeb']) {
+  const c = $(id);
+  if (c) { c.checked = prefs.get('askClose', true); c.onchange = () => setAskClose(c.checked); }
+}
+
+// desktop app: the window's close button and the tray's quit
 function setupCloseAsk() {
-  const box = $('#closeAsk'), ask = $('#askClose');
-  ask.checked = prefs.get('askClose', true);
-  ask.onchange = () => prefs.set('askClose', ask.checked);
-  let open = false;
-  const answer = yes => {
-    if (!open) return;
-    open = false;
-    box.hidden = true;
-    if ($('#closeDontAsk').checked) { prefs.set('askClose', false); ask.checked = false; }
-    if (yes) saveProgress(true);
-    desktop.answerClose(yes);
-  };
   desktop.onCloseRequest(() => {
     if (!prefs.get('askClose', true)) { saveProgress(true); desktop.answerClose(true); return; }
-    const name = prefs.get('name', '').trim();
-    $('#closeAskTitle').textContent = name ? `Do you want to close the program, ${name}?` : 'Do you want to close the program?';
-    $('#closeAskSub').textContent = !audio.paused ? 'the music will stop.' : '';
-    $('#closeDontAsk').checked = false;
-    box.hidden = false;
-    open = true;
-    $('#closeYes').focus();
+    askToClose(yes => desktop.answerClose(yes));
   });
-  $('#closeYes').onclick = () => answer(true);
-  $('#closeNo').onclick = () => answer(false);
-  box.onclick = e => { if (e.target === box) answer(false); }; // clicking outside keeps it open
-  box.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); answer(false); } };
+}
+
+// Phones (and the installed app on them): Back closes whatever is open first (settings,
+// library, downloads), and otherwise asks before leaving moonlit. Browsers only let a page
+// catch Back after you've tapped it once, so the catch is set on the first tap.
+function setupBackAsk() {
+  if (desktop) return;
+  const phoneLike = matchMedia('(display-mode: standalone)').matches || matchMedia('(pointer: coarse)').matches;
+  if (!phoneLike) return;
+  $('#askCloseWebRow').hidden = false;
+  let armed = false, leaving = false;
+  const arm = () => {
+    if (armed || leaving) return;
+    history.pushState({ moonlit: 'back' }, '');
+    armed = true;
+  };
+  addEventListener('pointerdown', arm, true);
+  addEventListener('popstate', () => {
+    if (!armed || leaving) return;
+    armed = false; // Back used up the catch
+    if (closeAskDone) { answerCloseAsk(false); arm(); return; } // Back while asking = "No"
+    const settingsOpen = !$('#settings').hidden, dlOpen = $('#downloads') && !$('#downloads').hidden;
+    if (settingsOpen || dlOpen || el.library.classList.contains('open')) {
+      setSettings(false); setDownloads(false); setLibrary(false);
+      arm();
+      return;
+    }
+    const leave = () => {
+      leaving = true;
+      audio.pause();
+      saveProgress(true);
+      // an installed app closes; a tab goes back to where you came from; if neither is
+      // possible, the next Back leaves as usual (nothing catches it any more)
+      window.close();
+      setTimeout(() => { if (!document.hidden) history.go(armed ? -2 : -1); }, 150);
+      setTimeout(() => { if (!document.hidden) toast('press back once more to leave'); }, 600);
+    };
+    if (!prefs.get('askClose', true)) { leave(); return; }
+    arm(); // so Back pressed again while the popup is up counts as "No"
+    askToClose(yes => { if (yes) leave(); else arm(); });
+  });
 }
 
 // the tray icon (moonlit hidden from the taskbar) and the "now playing" Windows notification
@@ -2060,6 +2115,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   buildFloaties();
   setupVizSettings();
   setupFolding();
+  setupBackAsk();
   applyPerf(prefs.get('perf', prefs.get('lite', false) ? 'lite' : 'full')); // older versions saved a lite on/off switch
   applyTheme(prefs.get('theme', 'midnight-rose'));
   el.nameInput.value = prefs.get('name', '');

@@ -7,6 +7,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 // set when running as the desktop app (Electron); see desktop/preload.js
 const desktop = window.moonlitDesktop || null;
+document.body.classList.toggle('is-desktop', !!desktop);
 
 const THEMES = [
   { id: 'midnight-rose', name: 'midnight rose', swatch: 'linear-gradient(135deg,#2a0f22 30%,#ff7eb6)', color: '#170a14' },

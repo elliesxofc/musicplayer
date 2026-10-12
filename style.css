@@ -842,3 +842,7 @@ body.asleep *, body.asleep *::before, body.asleep *::after { animation-play-stat
 .confirm-check { justify-content: center; margin: 14px 0 0; font-size: 12.5px; color: var(--muted); }
 @keyframes confirm-fade { from { opacity: 0; } }
 @keyframes confirm-pop { from { opacity: 0; transform: translateY(10px) scale(.96); } }
+/* OBS-only settings: only in the desktop app (the phone / website version has no OBS overlay) */
+body:not(.is-desktop) .desktop-only { display: none !important; }
+/* phones can't pick a whole folder from the browser */
+@media (pointer: coarse) { #addFolderBtn { display: none; } }

@@ -126,6 +126,30 @@ if (!app.requestSingleInstanceLock()) {
     win.on('close', remember);
     win.on('closed', () => { win = null; });
     tray.attach(win);
+    // "Do you want to close the program?": the page shows its own popup and answers. If it
+    // doesn't answer in a moment (stuck), moonlit closes anyway; Windows shutting down never asks.
+    let closeOk = false, asking = false, askTimer = 0;
+    win.on('close', e => {
+      if (closeOk) return;
+      if (tray.get().tray && !tray.quitting()) return; // the tray hides it instead
+      e.preventDefault();
+      if (asking) return;
+      asking = true;
+      tray.show();
+      win.webContents.send('app:close-request');
+      askTimer = setTimeout(() => { closeOk = true; app.quit(); }, 2500);
+    });
+    ipcMain.removeAllListeners('app:close-seen');
+    ipcMain.removeAllListeners('app:close-answer');
+    ipcMain.on('app:close-seen', () => clearTimeout(askTimer)); // the popup is up: wait for the answer
+    ipcMain.on('app:close-answer', (_e, yes) => {
+      clearTimeout(askTimer);
+      asking = false;
+      if (yes) { closeOk = true; app.quit(); } else tray.cancelQuit();
+    });
+    const shuttingDown = () => { closeOk = true; };
+    win.on('session-end', shuttingDown);
+    win.on('query-session-end', shuttingDown);
     // moonlit never slows down in the background (so music never stutters), which also means
     // the page can't tell when nobody sees it; say so, so the pretty animations can rest
     const seen = on => () => { if (win) win.webContents.send('app:visible', on); };

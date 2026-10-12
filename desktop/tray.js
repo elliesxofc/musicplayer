@@ -116,7 +116,9 @@ function createTray({ root, getWindow, send, load, save }) {
   }
 
   app.whenReady().then(apply);
-  return { attach, show, nowPlaying, setPlaying, set, get: () => settings, quitting: () => quitting };
+  // a quit that was called off ("keep it open" in the close popup)
+  const cancelQuit = () => { quitting = false; };
+  return { attach, show, nowPlaying, setPlaying, set, get: () => settings, quitting: () => quitting, cancelQuit };
 }
 
 module.exports = { createTray };

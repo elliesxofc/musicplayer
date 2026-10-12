@@ -180,7 +180,6 @@ body.playing .obs-live svg { animation: blink 1.6s ease-in-out infinite; }
   content: ""; position: absolute; bottom: 2px; width: 4px; height: 4px; border-radius: 50%;
   background: var(--accent); box-shadow: 0 0 8px var(--accent);
 }
-.lib-toggle { display: none; }
 
 /* ───────────── stage ───────────── */
 .stage {
@@ -362,6 +361,9 @@ body.playing .play-ring { opacity: .9; }
   overflow: hidden;
 }
 .lib-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 22px 22px 12px; }
+.lib-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.lib-actions .lib-mini { width: 38px; height: 38px; }
+.lib-actions .lib-mini svg { width: 18px; height: 18px; }
 .lib-head h2 { margin: 0; font-family: var(--font-display); font-weight: 400; font-style: italic; font-size: 25px; }
 .lib-count { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
 .add-btn, .pill {
@@ -805,3 +807,37 @@ body.super .deck { display: none; }  /* the record is put away in super lite */
 #settings section > .eyebrow:first-child:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 /* nobody can see the window (minimised / in the tray): every animation rests */
 body.asleep *, body.asleep *::before, body.asleep *::after { animation-play-state: paused !important; }
+
+/* the library can be closed in the big layout too (the list button brings it back) */
+.lib-toggle { display: grid; }
+@media (min-width: 901px) {
+  .app { transition: grid-template-columns .45s var(--ease), gap .45s var(--ease); }
+  body.lib-hidden .app { grid-template-columns: 1fr 0px; gap: 0; }
+  body.lib-hidden .library { opacity: 0; pointer-events: none; transform: translateX(30px); visibility: hidden; }
+  .library { transition: opacity .3s ease, transform .45s var(--ease), visibility .3s; }
+  .lib-toggle[aria-pressed="false"] { opacity: .6; }
+}
+
+/* "Do you want to close the program?" */
+.confirm-wrap {
+  position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px;
+  background: rgb(0 0 0 / .45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  animation: confirm-fade .25s ease;
+}
+.confirm-wrap[hidden] { display: none; }
+.confirm {
+  width: min(400px, 100%); padding: 26px 26px 18px; border-radius: var(--radius); text-align: center;
+  background: color-mix(in srgb, var(--bg2) 92%, var(--bg)); border: 1px solid var(--glass-line);
+  box-shadow: 0 30px 80px -20px rgb(0 0 0 / .6), inset 0 1px 0 rgb(255 255 255 / .06);
+  animation: confirm-pop .35s var(--ease);
+}
+.confirm-moon { font-size: 34px; line-height: 1; color: var(--accent); margin-bottom: 8px; filter: drop-shadow(0 0 12px var(--accent)); }
+.confirm h3 { margin: 0 0 6px; font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 23px; line-height: 1.25; }
+.confirm-sub { margin: 0 0 18px; font-size: 13px; color: var(--muted); }
+.confirm-sub:empty { display: none; }
+.confirm-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.confirm-no { padding: 10px 18px; border-radius: 999px; font-size: 14px; color: var(--ink); background: var(--faint); border: 1px solid var(--glass-line); }
+.confirm-no:hover { filter: brightness(1.15); }
+.confirm-check { justify-content: center; margin: 14px 0 0; font-size: 12.5px; color: var(--muted); }
+@keyframes confirm-fade { from { opacity: 0; } }
+@keyframes confirm-pop { from { opacity: 0; transform: translateY(10px) scale(.96); } }

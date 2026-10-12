@@ -7,6 +7,7 @@
     style: 'bars', filter: 'none', strength: 1.5, bars: 72,
     speed: 1, inertia: 0, gravity: 0, spin: 0, size: 1,
     round: true, autoscale: false, log: false, stereo: false,
+    ring: true, // the visualizer around the record in moonlit itself
     color: 'theme', custom: '#ff7eb6', glow: true,
     barWidth: 6, barHeight: 100, barSpacing: 2,
     gap: 0.25, // space between the overlay card's bars, as a share of each bar's room (0 = touching)

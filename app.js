@@ -421,7 +421,7 @@ function setupVizSettings() {
     spin: [$('#vizSpin'), v => (+v === 0 ? 'off' : `${+v > 0 ? '↻' : '↺'} ${num(Math.abs(v), 1)}`)],
     size: [$('#vizSize'), v => `${Math.round(v * 100)}%`],
   };
-  const checks = { round: $('#vizRound'), autoscale: $('#vizAutoscale'), log: $('#vizLog'), stereo: $('#vizStereo'), glow: $('#vizGlow') };
+  const checks = { ring: $('#vizRing'), round: $('#vizRound'), autoscale: $('#vizAutoscale'), log: $('#vizLog'), stereo: $('#vizStereo'), glow: $('#vizGlow') };
   const px = { barWidth: [$('#vizBarWidth'), 1, 60], barHeight: [$('#vizBarHeight'), 10, 1000], barSpacing: [$('#vizBarSpacing'), 0, 40] };
   const save = patch => {
     const next = VizCore.options({ ...vizOpts(), ...patch });
@@ -601,7 +601,7 @@ const viz = (() => {
     lastDraw = 0;
   }
 
-  let raf = 0, enabled = true, lastDraw = 0, lastT = 0, turn = 0;
+  let raf = 0, enabled = true, lastDraw = 0, lastT = 0, turn = 0, cleared = false;
   const settled = () => shape.levels().every(v => v < 0.07);
   function frame(t) {
     raf = requestAnimationFrame(frame);
@@ -609,6 +609,9 @@ const viz = (() => {
     lastT = t;
     if (document.hidden || document.body.classList.contains('asleep')) return;
     const w = canvas.width, h = canvas.height;
+    // the ring switched off (visualizer → "show the visualizer around the record")
+    if (!opts.ring) { if (!cleared) { g.clearRect(0, 0, w, h); cleared = true; } return; }
+    cleared = false;
     if (!w) return;
     const playing = !audio.paused;
     turn += opts.spin * dt * 0.00035 * (playing ? 1 : 0.3);
@@ -1272,6 +1275,7 @@ if ('mediaSession' in navigator) {
 /* keyboard */
 document.addEventListener('keydown', e => {
   if (e.target.closest('input[type="search"], input[type="text"], textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!$('#closeAsk').hidden) return; // the close popup has the keyboard
   const k = e.key.toLowerCase();
   const onRange = e.target.matches('input[type="range"]');
   if (k === ' ' || k === 'k') { e.preventDefault(); togglePlay(); }
@@ -1290,6 +1294,19 @@ document.addEventListener('keydown', e => {
 
 /* ───────────── files in ───────────── */
 $('#addBtn').onclick = () => el.file.click();
+// a whole folder (and the folders inside it); songs already in the library are skipped
+$('#addFolderBtn').onclick = () => $('#folderInput').click();
+$('#folderInput').onchange = () => {
+  const input = $('#folderInput');
+  const files = [...input.files].filter(f => f.type.startsWith('audio/') || AUDIO_EXT.test(f.name));
+  input.value = '';
+  if (!files.length) { toast('no songs in that folder'); return; }
+  const fresh = files.filter(f => !state.tracks.some(t => t.file && t.file.name === f.name && t.file.size === f.size));
+  const had = files.length - fresh.length;
+  if (!fresh.length) { toast(`all ${files.length} songs in that folder are already in your library ✦`); return; }
+  if (had) toast(`${had} already in your library, adding the other ${fresh.length}…`, 3000);
+  addFiles(fresh);
+};
 el.file.onchange = () => { addFiles(el.file.files); el.file.value = ''; };
 
 let dragDepth = 0;
@@ -1318,7 +1335,21 @@ function setLibrary(open) {
   el.library.classList.toggle('open', open);
   el.scrim.classList.toggle('show', open);
 }
-$('#libToggle').onclick = () => setLibrary(!el.library.classList.contains('open'));
+// In the big layout the library sits beside the record; it can be closed there too
+// (remembered), and the list button brings it back.
+const narrow = () => matchMedia('(max-width: 900px)').matches;
+function setLibraryShown(shown) {
+  document.body.classList.toggle('lib-hidden', !shown);
+  prefs.set('libHidden', !shown);
+  $('#libToggle').setAttribute('aria-pressed', String(shown));
+  $('#libToggle').setAttribute('aria-label', shown ? 'close the library' : 'open the library');
+}
+setLibraryShown(!prefs.get('libHidden', false));
+$('#libToggle').onclick = () => {
+  if (narrow()) setLibrary(!el.library.classList.contains('open'));
+  else setLibraryShown(document.body.classList.contains('lib-hidden'));
+};
+$('#libClose').onclick = () => (narrow() ? setLibrary(false) : setLibraryShown(false));
 el.scrim.onclick = () => setLibrary(false);
 
 window.addEventListener('pagehide', () => saveProgress(true));
@@ -1574,11 +1605,42 @@ async function setupDesktop() {
   };
   resume.onchange = () => prefs.set('autoResume', resume.checked);
   if (desktop.tray) setupTray();
+  if (desktop.onCloseRequest) setupCloseAsk();
   // minimised or hidden in the tray: pause the animations and the ring (the music, the OBS
   // overlay and its bars carry on)
   desktop.onVisible?.(on => document.body.classList.toggle('asleep', !on));
   const v = $('.version');
   v.textContent += ` · desktop ${await desktop.version().catch(() => '')}`.trimEnd();
+}
+
+// "Do you want to close the program, <your name>?" when moonlit is closed (desktop app)
+function setupCloseAsk() {
+  const box = $('#closeAsk'), ask = $('#askClose');
+  ask.checked = prefs.get('askClose', true);
+  ask.onchange = () => prefs.set('askClose', ask.checked);
+  let open = false;
+  const answer = yes => {
+    if (!open) return;
+    open = false;
+    box.hidden = true;
+    if ($('#closeDontAsk').checked) { prefs.set('askClose', false); ask.checked = false; }
+    if (yes) saveProgress(true);
+    desktop.answerClose(yes);
+  };
+  desktop.onCloseRequest(() => {
+    if (!prefs.get('askClose', true)) { saveProgress(true); desktop.answerClose(true); return; }
+    const name = prefs.get('name', '').trim();
+    $('#closeAskTitle').textContent = name ? `Do you want to close the program, ${name}?` : 'Do you want to close the program?';
+    $('#closeAskSub').textContent = !audio.paused ? 'the music will stop.' : '';
+    $('#closeDontAsk').checked = false;
+    box.hidden = false;
+    open = true;
+    $('#closeYes').focus();
+  });
+  $('#closeYes').onclick = () => answer(true);
+  $('#closeNo').onclick = () => answer(false);
+  box.onclick = e => { if (e.target === box) answer(false); }; // clicking outside keeps it open
+  box.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); answer(false); } };
 }
 
 // the tray icon (moonlit hidden from the taskbar) and the "now playing" Windows notification

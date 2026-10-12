@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
   getOpenAtLogin: () => ipcRenderer.invoke('startup:get'),
   setOpenAtLogin: on => ipcRenderer.invoke('startup:set', !!on),
   version: () => ipcRenderer.invoke('app:version'),
+  // closing moonlit: the page shows "Do you want to close the program?" and answers
+  onCloseRequest: callback => ipcRenderer.on('app:close-request', () => { ipcRenderer.send('app:close-seen'); callback(); }),
+  answerClose: yes => ipcRenderer.send('app:close-answer', !!yes),
   // the window was hidden / minimised (false) or shown again (true)
   onVisible: callback => ipcRenderer.on('app:visible', (_e, on) => callback(!!on)),
   // songs opened from Windows (double-click / Open with)

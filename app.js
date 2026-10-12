@@ -476,6 +476,28 @@ function setupVizSettings() {
   }).catch(() => {});
 }
 
+// Settings sections fold away when you click their heading (remembered), so the long
+// panel stays easy to find your way around
+function setupFolding() {
+  const folded = new Set(prefs.get('foldedSections', []));
+  document.querySelectorAll('#settings section').forEach(sec => {
+    const head = sec.querySelector(':scope > .eyebrow:first-child');
+    if (!head) return;
+    const key = sec.id || head.textContent.trim();
+    head.tabIndex = 0;
+    head.setAttribute('role', 'button');
+    const set = fold => {
+      sec.classList.toggle('folded', fold);
+      head.setAttribute('aria-expanded', String(!fold));
+      if (fold) folded.add(key); else folded.delete(key);
+      prefs.set('foldedSections', [...folded]);
+    };
+    set(folded.has(key));
+    head.onclick = () => set(!sec.classList.contains('folded'));
+    head.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); head.click(); } };
+  });
+}
+
 function buildFloaties() {
   const box = $('#floaties');
   const n = matchMedia('(max-width: 900px)').matches ? 8 : 14;
@@ -542,14 +564,22 @@ const viz = (() => {
   }
 
   // n levels (0-255), bass → treble; with stereo: n for the left channel, then n for the right
+  // (into one reused buffer: this runs every frame, so it makes no new arrays)
+  let bandBuf = new Float32Array(0);
   function read(n, stereo) {
+    const len = stereo && analyserL ? n * 2 : n;
+    if (bandBuf.length < len) bandBuf = new Float32Array(len * 2);
     if (stereo && analyserL) {
       analyserL.getByteFrequencyData(freqL); analyserR.getByteFrequencyData(freqR);
-      return [...VizCore.bands(freqL, n, opts.log), ...VizCore.bands(freqR, n, opts.log)];
+      VizCore.bands(freqL, n, opts.log, bandBuf.subarray(0, n));
+      VizCore.bands(freqR, n, opts.log, bandBuf.subarray(n, len));
+    } else {
+      analyser.getByteFrequencyData(freq);
+      VizCore.bands(freq, n, opts.log, bandBuf.subarray(0, n));
     }
-    analyser.getByteFrequencyData(freq);
-    return VizCore.bands(freq, n, opts.log);
+    return bandBuf.subarray(0, len);
   }
+  let goal = new Float32Array(0);
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -577,7 +607,7 @@ const viz = (() => {
     raf = requestAnimationFrame(frame);
     const dt = Math.min(100, t - (lastT || t));
     lastT = t;
-    if (document.hidden) return;
+    if (document.hidden || document.body.classList.contains('asleep')) return;
     const w = canvas.width, h = canvas.height;
     if (!w) return;
     const playing = !audio.paused;
@@ -590,18 +620,14 @@ const viz = (() => {
     // the ring is mirrored: the left half shows bass at the top down to treble at the bottom, the
     // right half the same again (with stereo: left half = left channel, right half = right channel)
     const raw = analyser && playing ? read(half, opts.stereo) : null;
-    const goal = new Array(BARS);
+    if (goal.length !== BARS) goal = new Float32Array(BARS);
     for (let i = 0; i < BARS; i++) {
       const right = i >= half, k = right ? BARS - 1 - i : i;
       goal[i] = raw ? (raw[opts.stereo && right ? half + k : k] / 255) ** 1.6 : 0;
     }
     if (raw && opts.autoscale) shape.scale(goal, f);
-    if (opts.filter === 'monstercat') {
-      // each half on its own, so the mirror line stays clean
-      const a = goal.slice(0, half), b = goal.slice(half).reverse();
-      VizCore.monstercat(a, opts.strength); VizCore.monstercat(b, opts.strength);
-      goal.splice(0, BARS, ...a, ...b.reverse());
-    }
+    // each half on its own, so the mirror line stays clean
+    if (opts.filter === 'monstercat') { VizCore.monstercat(goal, opts.strength, 0, half); VizCore.monstercat(goal, opts.strength, half, BARS); }
     for (let i = 0; i < BARS; i++) goal[i] = Math.max(goal[i], 0.03 + 0.02 * Math.sin((t * opts.speed) / 900 + i * 0.5 * (72 / BARS)));
     const levels = shape.move(goal, f, opts);
 
@@ -704,7 +730,7 @@ const viz = (() => {
   // after the left with stereo). Works in every effects mode (lite only stops drawing the ring).
   function sample(n, stereo) {
     if (!analyser || audio.paused) return null;
-    return read(n, stereo);
+    return Array.from(read(n, stereo), Math.round);
   }
   return { ensureAudioGraph, refreshColor, setEnabled, sample, configure, opts: () => opts, getCtx: () => ctx };
 })();
@@ -1547,8 +1573,35 @@ async function setupDesktop() {
     toast(login.checked ? 'moonlit will open when your PC starts' : "moonlit won't open by itself any more");
   };
   resume.onchange = () => prefs.set('autoResume', resume.checked);
+  if (desktop.tray) setupTray();
+  // minimised or hidden in the tray: pause the animations and the ring (the music, the OBS
+  // overlay and its bars carry on)
+  desktop.onVisible?.(on => document.body.classList.toggle('asleep', !on));
   const v = $('.version');
   v.textContent += ` · desktop ${await desktop.version().catch(() => '')}`.trimEnd();
+}
+
+// the tray icon (moonlit hidden from the taskbar) and the "now playing" Windows notification
+async function setupTray() {
+  const T = desktop.tray, on = $('#trayOn'), notify = $('#notifyOn'), always = $('#notifyAlways');
+  const show = st => { on.checked = st.tray; notify.checked = st.notify; always.checked = st.notifyAlways; always.disabled = !st.notify; };
+  show(await T.get());
+  on.onchange = async () => { show(await T.set({ tray: on.checked })); toast(on.checked ? 'closing moonlit now hides it by the clock ✦' : 'moonlit is back in the taskbar'); };
+  notify.onchange = async () => show(await T.set({ notify: notify.checked }));
+  always.onchange = async () => show(await T.set({ notifyAlways: always.checked }));
+  // play/pause, next and previous from the tray menu
+  T.onCommand(cmd => { if (cmd === 'toggle') togglePlay(); else if (cmd === 'next') next(); else if (cmd === 'prev') prev(); });
+  // tell the tray (and the notification) about each new song, once it really starts playing
+  let told = null;
+  audio.addEventListener('playing', async () => {
+    T.playing(true);
+    const t = byId(state.currentId);
+    if (!t || told === t.id) return;
+    told = t.id;
+    const cover = t.cover ? await t.cover.arrayBuffer().catch(() => null) : null;
+    T.nowPlaying({ id: t.id, title: t.title, artist: t.artist || '', album: t.album || '', cover });
+  });
+  audio.addEventListener('pause', () => T.playing(false));
 }
 
 /* ───────────── songs opened from Windows (desktop app as default player) ───────────── */
@@ -1943,6 +1996,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   buildThemeGrid();
   buildFloaties();
   setupVizSettings();
+  setupFolding();
   applyPerf(prefs.get('perf', prefs.get('lite', false) ? 'lite' : 'full')); // older versions saved a lite on/off switch
   applyTheme(prefs.get('theme', 'midnight-rose'));
   el.nameInput.value = prefs.get('name', '');

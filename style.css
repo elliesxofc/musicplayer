@@ -461,7 +461,7 @@ body:not(.playing) .bars i { animation-play-state: paused; }
 .panel section { padding: 14px 0 4px; }
 .panel section + section { border-top: 1px solid var(--glass-line); margin-top: 10px; }
 .eyebrow { margin: 0 0 10px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
-.theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.theme-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .theme-opt {
   display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 10px 4px 8px; border-radius: 14px;
   font-size: 12px; color: var(--muted); border: 1px solid transparent; transition: background .2s, border-color .2s;
@@ -787,3 +787,21 @@ body.super .deck { display: none; }  /* the record is put away in super lite */
 .viz-px .field span { font-size: 12px; }
 #vizObsBox .overlay-url { margin-bottom: 12px; }
 .viz-onoverlay { margin: 8px 0 16px; font-weight: 600; }
+.check.sub-check { margin-left: 27px; }
+.check:has(input:disabled) { opacity: .5; cursor: default; }
+/* settings sections fold away: click a section's heading */
+#settings section > .eyebrow:first-child {
+  display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;
+  margin: -4px 0 6px; padding: 4px 0;
+}
+#settings section > .eyebrow:first-child::after {
+  content: ""; width: 7px; height: 7px; margin-right: 4px; border: solid currentColor; border-width: 0 1.6px 1.6px 0;
+  transform: rotate(45deg) translateY(-2px); transition: transform .25s var(--ease); opacity: .8;
+}
+#settings section.folded > .eyebrow:first-child { margin-bottom: 0; }
+#settings section.folded > .eyebrow:first-child::after { transform: rotate(-45deg); }
+#settings section.folded > :not(.eyebrow:first-child) { display: none !important; }
+#settings section > .eyebrow:first-child:hover { filter: brightness(1.15); }
+#settings section > .eyebrow:first-child:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+/* nobody can see the window (minimised / in the tray): every animation rests */
+body.asleep *, body.asleep *::before, body.asleep *::after { animation-play-state: paused !important; }

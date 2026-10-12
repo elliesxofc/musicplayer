@@ -9,6 +9,7 @@ const { app, BrowserWindow, protocol, net, session, ipcMain, dialog, shell, Menu
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
+const { createTray } = require('./tray');
 
 const ROOT = path.join(__dirname, '..');
 const ORIGIN = 'moonlit://app';
@@ -57,17 +58,35 @@ function writeConfig(patch) {
 }
 
 /* ───────────── one window, one player ───────────── */
+// Windows shows notifications under this name (the same id the installer gives the app)
+if (process.platform === 'win32') app.setAppUserModelId('io.github.elliesxofc.moonlit');
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   let win = null;
 
+  // the tray icon, hiding to it, and the "now playing" notification
+  const tray = createTray({
+    root: ROOT,
+    getWindow: () => win,
+    send: (channel, ...args) => { if (win) win.webContents.send(channel, ...args); },
+    load: () => readConfig().tray || {},
+    save: settings => writeConfig({ tray: settings }),
+  });
+  ipcMain.handle('tray:get', () => tray.get());
+  ipcMain.handle('tray:set', (_e, patch) => tray.set({
+    ...(patch && 'tray' in patch ? { tray: !!patch.tray } : {}),
+    ...(patch && 'notify' in patch ? { notify: !!patch.notify } : {}),
+    ...(patch && 'notifyAlways' in patch ? { notifyAlways: !!patch.notifyAlways } : {}),
+  }));
+  ipcMain.on('tray:now-playing', (_e, songInfo) => tray.nowPlaying(songInfo && typeof songInfo === 'object' ? songInfo : null));
+  ipcMain.on('tray:playing', (_e, on) => tray.setPlaying(!!on));
+
   // opening moonlit (or a song) while it's already running: use this window
   app.on('second-instance', (_e, argv) => {
     if (!win) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
+    tray.show(); // also brings it back from the tray
     const files = acceptFiles(audioFilesIn(argv));
     if (files.length) win.webContents.send('files:open', files);
   });
@@ -106,6 +125,12 @@ if (!app.requestSingleInstanceLock()) {
     win.on('move', remember);
     win.on('close', remember);
     win.on('closed', () => { win = null; });
+    tray.attach(win);
+    // moonlit never slows down in the background (so music never stutters), which also means
+    // the page can't tell when nobody sees it; say so, so the pretty animations can rest
+    const seen = on => () => { if (win) win.webContents.send('app:visible', on); };
+    win.on('hide', seen(false)); win.on('minimize', seen(false));
+    win.on('show', seen(true)); win.on('restore', seen(true));
 
     // links (e.g. the VB-CABLE site) open in your normal browser
     win.webContents.setWindowOpenHandler(({ url }) => {

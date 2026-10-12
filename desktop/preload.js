@@ -11,10 +11,20 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
   getOpenAtLogin: () => ipcRenderer.invoke('startup:get'),
   setOpenAtLogin: on => ipcRenderer.invoke('startup:set', !!on),
   version: () => ipcRenderer.invoke('app:version'),
+  // the window was hidden / minimised (false) or shown again (true)
+  onVisible: callback => ipcRenderer.on('app:visible', (_e, on) => callback(!!on)),
   // songs opened from Windows (double-click / Open with)
   takePendingFiles: () => ipcRenderer.invoke('files:pending'),
   readFile: file => ipcRenderer.invoke('files:read', String(file)),
   onOpenFiles: callback => ipcRenderer.on('files:open', (_e, files) => callback(files)),
+  // the tray icon (hide moonlit from the taskbar) and "now playing" notifications
+  tray: {
+    get: () => ipcRenderer.invoke('tray:get'),
+    set: patch => ipcRenderer.invoke('tray:set', patch),
+    nowPlaying: song => ipcRenderer.send('tray:now-playing', song),
+    playing: on => ipcRenderer.send('tray:playing', !!on),
+    onCommand: cb => ipcRenderer.on('tray:command', (_e, cmd) => cb(String(cmd))),
+  },
   // now-playing overlay for OBS
   overlay: {
     state: s => ipcRenderer.send('overlay:state', s),

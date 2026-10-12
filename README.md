@@ -37,7 +37,7 @@ drag audio files onto the page or tap **add songs**.
 - six pink themes: midnight rose, strawberry milk, cherry noir, bubblegum, sakura dusk, rosé gold
 - customize panel (sliders icon): theme, your name for the greeting, optional watermark
 - **library**: add songs one by one or a whole folder (with the folders inside it; songs already in the library are skipped). in the big layout the library can be closed (✕, or the list button) so the record sits in the middle
-- **closing** (desktop app): moonlit asks "Do you want to close the program, <your name>?" (your name from *you* in the settings), with "don't ask me again"; switchable under *desktop app*
+- **closing** (desktop app): moonlit asks "Do you want to close the program, <your name>?" (your name from *you* in the settings), with Yes / No and "don't ask me again"; switchable under *desktop app*
 - **tray** (desktop app): optionally keep moonlit by the clock (hidden icons, under ^) instead of the taskbar; closing or minimising hides it there and the music keeps playing. right-click the icon for play/pause, next, previous and quit
 - **notifications** (desktop app): a silent Windows notification with the cover when a new song starts (by default only while moonlit isn't in front)
 - **stream control** (desktop app): go live, record, switch scenes, show/hide sources and mix audio in OBS from moonlit, through OBS's WebSocket server. see [`OBS-SETUP.txt`](OBS-SETUP.txt)

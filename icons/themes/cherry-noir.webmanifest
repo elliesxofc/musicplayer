@@ -1,0 +1,36 @@
+{
+  "name": "moonlit",
+  "short_name": "moonlit",
+  "description": "a little private music player, just for you",
+  "id": "./",
+  "start_url": "../../",
+  "scope": "../../",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0709",
+  "theme_color": "#0a0709",
+  "categories": [
+    "music",
+    "entertainment"
+  ],
+  "icons": [
+    {
+      "src": "cherry-noir-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "cherry-noir-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "cherry-noir-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

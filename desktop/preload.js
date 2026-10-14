@@ -19,6 +19,13 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
   // songs opened from Windows (double-click / Open with)
   takePendingFiles: () => ipcRenderer.invoke('files:pending'),
   readFile: file => ipcRenderer.invoke('files:read', String(file)),
+  // the window, taskbar and tray icon in a theme's colours (null: the usual icon)
+  setIcon: theme => ipcRenderer.invoke('app:icon', theme == null ? null : String(theme)),
+  // playlist files: import (a file picker) and export (a save dialog)
+  playlist: {
+    open: () => ipcRenderer.invoke('playlist:open'),
+    save: (name, text) => ipcRenderer.invoke('playlist:save', String(name), String(text)),
+  },
   onOpenFiles: callback => ipcRenderer.on('files:open', (_e, files) => callback(files)),
   // the tray icon (hide moonlit from the taskbar) and "now playing" notifications
   tray: {
@@ -47,6 +54,8 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
     // song requests: commands from chat, and the player's answers
     onCommand: cb => ipcRenderer.on('chat:command', (_e, c) => cb(c)),
     say: text => ipcRenderer.send('chat:say', String(text)),
+    // the request channel list: a channel link, @handle or video link → { ok, id, name }
+    resolveChannel: input => ipcRenderer.invoke('channels:resolve', String(input)),
   },
   // Spotify's now playing
   spotify: {

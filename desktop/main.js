@@ -8,7 +8,7 @@
 const { app, BrowserWindow, protocol, net, session, ipcMain, dialog, shell, Menu, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
-const { pathToFileURL } = require('node:url');
+const { pathToFileURL, fileURLToPath } = require('node:url');
 const { createTray } = require('./tray');
 
 const ROOT = path.join(__dirname, '..');
@@ -57,6 +57,47 @@ function writeConfig(patch) {
   return next;
 }
 
+/* ───────────── the app's icon in the theme's colours (when "match the icon" is on) ───────────── */
+const iconTheme = () => { const t = readConfig().iconTheme; return typeof t === 'string' && /^[a-z-]{1,40}$/.test(t) ? t : null; };
+function themedIcon(size) {
+  const t = iconTheme();
+  const file = t && path.join(ROOT, 'icons', 'themes', `${t}-${size}.png`);
+  return file && fs.existsSync(file) ? file : path.join(ROOT, 'icons', size <= 192 ? 'icon-192.png' : 'icon-512.png');
+}
+// a Windows .ico (PNG inside) for the taskbar button
+function writeIco(file, pngs) {
+  const head = Buffer.alloc(6 + 16 * pngs.length);
+  head.writeUInt16LE(1, 2);
+  head.writeUInt16LE(pngs.length, 4);
+  let offset = head.length;
+  pngs.forEach(({ size, data }, i) => {
+    const at = 6 + 16 * i;
+    head.writeUInt8(size >= 256 ? 0 : size, at);
+    head.writeUInt8(size >= 256 ? 0 : size, at + 1);
+    head.writeUInt16LE(1, at + 4);
+    head.writeUInt16LE(32, at + 6);
+    head.writeUInt32LE(data.length, at + 8);
+    head.writeUInt32LE(offset, at + 12);
+    offset += data.length;
+  });
+  fs.writeFileSync(file, Buffer.concat([head, ...pngs.map(p => p.data)]));
+}
+function applyIcon(win) {
+  if (!win || win.isDestroyed()) return;
+  const { nativeImage } = require('electron');
+  const img = nativeImage.createFromPath(themedIcon(512));
+  if (img.isEmpty()) return;
+  win.setIcon(img);
+  if (process.platform !== 'win32') return;
+  // Windows takes the taskbar button's picture from an .ico, so one is made for the theme
+  try {
+    const t = iconTheme() || 'default';
+    const ico = path.join(app.getPath('userData'), `taskbar-${t}.ico`);
+    if (!fs.existsSync(ico)) writeIco(ico, [256, 48, 32, 16].map(size => ({ size, data: img.resize({ width: size, height: size, quality: 'best' }).toPNG() })));
+    win.setAppDetails({ appId: 'io.github.elliesxofc.moonlit', appIconPath: ico, appIconIndex: 0, relaunchCommand: `"${process.execPath}"`, relaunchDisplayName: 'moonlit' });
+  } catch { /* the window icon is still set */ }
+}
+
 /* ───────────── one window, one player ───────────── */
 // Windows shows notifications under this name (the same id the installer gives the app)
 if (process.platform === 'win32') app.setAppUserModelId('io.github.elliesxofc.moonlit');
@@ -69,10 +110,20 @@ if (!app.requestSingleInstanceLock()) {
   // the tray icon, hiding to it, and the "now playing" notification
   const tray = createTray({
     root: ROOT,
+    iconFile: () => themedIcon(192),
     getWindow: () => win,
     send: (channel, ...args) => { if (win) win.webContents.send(channel, ...args); },
     load: () => readConfig().tray || {},
     save: settings => writeConfig({ tray: settings }),
+  });
+  // the theme changed (or "match the icon" was switched): theme id, or null for the usual icon
+  ipcMain.handle('app:icon', (_e, theme) => {
+    const next = typeof theme === 'string' && /^[a-z-]{1,40}$/.test(theme) && fs.existsSync(path.join(ROOT, 'icons', 'themes', `${theme}-512.png`)) ? theme : null;
+    if (next === iconTheme()) return next;
+    writeConfig({ iconTheme: next });
+    applyIcon(win);
+    tray.refreshIcon();
+    return next;
   });
   ipcMain.handle('tray:get', () => tray.get());
   ipcMain.handle('tray:set', (_e, patch) => tray.set({
@@ -102,7 +153,7 @@ if (!app.requestSingleInstanceLock()) {
       minHeight: 560,
       title: 'moonlit',
       backgroundColor: '#170a14',
-      icon: path.join(ROOT, 'icons', 'icon-512.png'),
+      icon: themedIcon(512),
       autoHideMenuBar: true,
       show: false,
       webPreferences: {
@@ -116,6 +167,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     if (saved.maximized) win.maximize();
     win.once('ready-to-show', () => win.show());
+    if (iconTheme()) applyIcon(win);
 
     const remember = () => {
       if (!win || win.isMinimized()) return;
@@ -254,6 +306,46 @@ ipcMain.handle('files:read', async (_e, file) => {
   }
 });
 
+/* ───────────── playlist files (.m3u8 / .m3u) ───────────── */
+// import: the file's text, plus the songs it points to that are on this PC (so they can be
+// added to the library: only these, the ones the playlist you picked names, may be read)
+ipcMain.handle('playlist:open', async e => {
+  const res = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
+    title: 'import a playlist',
+    filters: [{ name: 'playlists', extensions: ['m3u8', 'm3u'] }, { name: 'all files', extensions: ['*'] }],
+    properties: ['openFile'],
+  });
+  const file = !res.canceled && res.filePaths[0];
+  if (!file) return null;
+  const buf = fs.readFileSync(file);
+  if (buf.length > 5_000_000) return { error: "that file is too big to be a playlist" };
+  let text = buf.toString('utf8').replace(/^\uFEFF/, '');
+  if (text.includes('\uFFFD')) text = buf.toString('latin1'); // an old .m3u in the Windows code page
+  const dir = path.dirname(file), files = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    let p = line;
+    if (/^file:/i.test(p)) { try { p = fileURLToPath(p); } catch { continue; } }
+    else if (/^[a-z][a-z0-9+.-]+:\/\//i.test(p)) continue; // web links
+    const abs = path.resolve(dir, p);
+    try { if (AUDIO_RE.test(abs) && fs.statSync(abs).isFile()) { opened.add(abs); files[line] = abs; } } catch { /* not on this PC */ }
+  }
+  return { name: path.basename(file).replace(/\.m3u8?$/i, ''), text, files };
+});
+// export: save the playlist where you choose (your Music folder to start with)
+ipcMain.handle('playlist:save', async (e, name, text) => {
+  const safe = String(name || 'playlist').replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').trim().slice(0, 120) || 'playlist';
+  const res = await dialog.showSaveDialog(BrowserWindow.fromWebContents(e.sender), {
+    title: 'save the playlist',
+    defaultPath: path.join(app.getPath('music'), `${safe}.m3u8`),
+    filters: [{ name: 'playlist', extensions: ['m3u8'] }],
+  });
+  if (res.canceled || !res.filePath) return null;
+  fs.writeFileSync(res.filePath, String(text || '').slice(0, 20_000_000), 'utf8');
+  return res.filePath;
+});
+
 /* ───────────── downloader (YouTube / Spotify links → songs) ───────────── */
 let downloader = null;
 function dl() {
@@ -285,6 +377,11 @@ ipcMain.handle('dl:request', (_e, query, rules) => dl().request(String(query || 
   anyChannel: !!(rules && rules.anyChannel),
   maxSeconds: Math.max(60, Math.min(3600, Number(rules && rules.maxSeconds) || 600)),
   blocked: Array.isArray(rules && rules.blocked) ? rules.blocked.map(String).slice(0, 500) : [],
+}));
+// the song request channel list: a pasted channel link, @handle or video link → the channel's ID
+ipcMain.handle('channels:resolve', (_e, input) => require('./channels').resolveChannel(String(input || '').slice(0, 500), {
+  fetchImpl: (u, o) => net.fetch(u, o),
+  fallback: (u, kind) => dl().channelOf(u, kind),
 }));
 app.on('before-quit', () => { if (downloader) downloader.stopAll(); });
 

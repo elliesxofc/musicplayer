@@ -83,6 +83,27 @@
   };
 
   /* ───────────── !nowplaying in YouTube chat ───────────── */
+  // one value from a .env file: KEY=value, "quoted", 'quoted', export KEY=..., # comments
+  function envValue(text, key) {
+    const rows = String(text).replace(/^\uFEFF/, '').split(/\r?\n/);
+    for (let i = 0; i < rows.length; i++) {
+      const m = /^\s*(?:export\s+)?([\w.-]+)\s*=\s*(.*)$/.exec(rows[i]);
+      if (!m || m[1] !== key) continue;
+      let v = m[2];
+      const q = v[0];
+      if (q === '"' || q === "'" || q === '`') {
+        // a quoted value can carry on over several lines
+        while (v.indexOf(q, 1) === -1 && i + 1 < rows.length) v += '\n' + rows[++i];
+        const end = v.indexOf(q, 1);
+        v = end === -1 ? v.slice(1) : v.slice(1, end);
+        if (q === '"') v = v.replace(/\\n/g, '\n');
+      } else {
+        v = v.replace(/\s+#.*$/, '');
+      }
+      return v.trim();
+    }
+    return '';
+  }
   const C = D.chat;
   const on = $('#chatOn'), stream = $('#chatStream'), login = $('#chatLogin');
 
@@ -95,6 +116,19 @@
   }
   on.onchange = () => save();
   $('#chatSave').onclick = () => save().then(() => toast('saved'));
+
+  // the song request app's .env file: only YOUTUBE_BOT_CREDENTIALS is read, the rest is ignored
+  $('#chatEnvBtn').onclick = () => { $('#chatEnvInput').value = ''; $('#chatEnvInput').click(); };
+  $('#chatEnvInput').onchange = async () => {
+    const file = $('#chatEnvInput').files[0];
+    if (!file) return;
+    if (file.size > 1_000_000) { toast("that file is too big to be a .env file"); return; }
+    const value = envValue(await file.text(), 'YOUTUBE_BOT_CREDENTIALS');
+    if (!value) { toast("no YOUTUBE_BOT_CREDENTIALS in that file. is it the song request app's .env?", 5000); return; }
+    login.value = value;
+    await save();
+    toast('bot login imported from the .env file ✓ (nothing else was taken from it)', 4500);
+  };
   C.onStatus(s => setStatus($('#chatStatus'), s));
 
   // what the bot would answer right now, shown while the settings are open

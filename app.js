@@ -300,6 +300,32 @@ function applyTheme(id) {
   viz.refreshColor();
   overlayPalette = null;
   setTimeout(pushOverlay); // the OBS overlay can follow the theme
+  syncIcon();
+}
+
+// moonlit's icon in the theme's colours: the browser tab, the installed phone app's icon
+// (through the web app manifest) and, in the desktop app, the window, taskbar and tray icon
+function syncIcon() {
+  const id = prefs.get('theme', 'midnight-rose');
+  const themed = prefs.get('themeIcon', true) && id !== 'midnight-rose' && THEMES.some(t => t.id === id);
+  const d = `icons/themes/${id}`;
+  const set = (sel, href) => { const l = $(sel); if (l && l.getAttribute('href') !== href) l.setAttribute('href', href); };
+  set('#iconSvg', themed ? `${d}.svg` : 'icons/icon.svg');
+  set('#iconPng', themed ? `${d}-32.png` : 'icons/favicon-32.png');
+  set('#iconTouch', themed ? `${d}-180.png` : 'icons/apple-touch-icon.png');
+  set('#manifestLink', themed ? `${d}.webmanifest` : 'manifest.webmanifest?v=49');
+  if (desktop && desktop.setIcon) desktop.setIcon(themed ? id : null).catch(() => {});
+}
+function setupThemeIcon() {
+  const box = $('#themeIcon');
+  box.checked = prefs.get('themeIcon', true);
+  box.onchange = () => { prefs.set('themeIcon', box.checked); syncIcon(); };
+  const phone = !desktop && (matchMedia('(display-mode: standalone)').matches || matchMedia('(pointer: coarse)').matches);
+  $('#themeIconHint').textContent = desktop
+    ? 'the window, the taskbar and the tray icon change with the theme. a pinned taskbar shortcut may keep the usual icon until moonlit is opened.'
+    : phone
+      ? "the home screen icon follows when your phone checks the app for updates (Chrome on Android asks you to accept the new icon, it can take a day). removing the app from the home screen and installing it again changes it right away."
+      : 'the browser tab and the installed app change with the theme.';
 }
 
 function buildThemeGrid() {
@@ -742,9 +768,10 @@ const viz = (() => {
 /* ───────────── library rendering ───────────── */
 function visibleTracks() {
   const q = state.query.toLowerCase();
-  return state.tracks.filter(t =>
-    (state.view === 'all' || t.fav) &&
-    (!q || `${t.title} ${t.artist || ''} ${t.album || ''}`.toLowerCase().includes(q)));
+  const pl = currentPlaylist();
+  // a playlist keeps its own order; "all" and "loved" follow the library's
+  const from = pl ? pl.ids.map(byId).filter(Boolean) : state.tracks.filter(t => state.view !== 'loved' || t.fav);
+  return q ? from.filter(t => `${t.title} ${t.artist || ''} ${t.album || ''}`.toLowerCase().includes(q)) : from;
 }
 
 function updateCount() {
@@ -768,7 +795,9 @@ function renderList(animate = false) {
     const li = document.createElement('li');
     li.className = 'empty-sub';
     li.style.cssText = 'text-align:center;padding:30px 10px';
-    li.textContent = state.view === 'loved' && !state.query ? 'no loved songs yet — tap the heart ♡' : 'nothing matches that';
+    li.textContent = state.query ? 'nothing matches that'
+      : state.view === 'loved' ? 'no loved songs yet — tap the heart ♡'
+      : "none of this playlist's songs are in your library yet. add them, then open the playlist again";
     el.list.append(li);
     return;
   }
@@ -818,11 +847,195 @@ el.list.addEventListener('click', e => {
   if (matchMedia('(max-width: 900px)').matches) setLibrary(false);
 });
 
-document.querySelectorAll('.tab').forEach(tab => tab.onclick = () => {
-  state.view = tab.dataset.view;
-  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t === tab));
+function setView(view) {
+  state.view = view;
+  if (!currentPlaylist() && view.startsWith('pl:')) state.view = 'all';
+  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.view === state.view)));
+  // an open playlist shows as a bar under the search, with a ✕ back to all songs
+  const pl = currentPlaylist();
+  $('#plBar').hidden = !pl;
+  if (pl) {
+    $('#plBarName').textContent = pl.name;
+    $('#plBarName').title = pl.name;
+    const n = pl.ids.filter(byId).length;
+    $('#plBarCount').textContent = `${n} song${n === 1 ? '' : 's'}`;
+  }
   renderList();
-});
+  syncPlaylistMenu();
+}
+document.querySelectorAll('.tab').forEach(tab => tab.onclick = () => setView(tab.dataset.view));
+
+/* ───────────── playlists: import and export (.m3u8 files) ─────────────
+   A playlist file lists songs by file name (plus "artist - title" and the length), the way
+   VLC, foobar2000, Winamp and most players write them. Importing one finds those songs in
+   your library (on the PC, songs it points to that aren't in your library yet are added),
+   and it becomes a tab next to "all" and "loved". */
+let playlists = prefs.get('playlists', []).filter(p => p && p.id && Array.isArray(p.ids));
+const savePlaylists = () => prefs.set('playlists', playlists);
+function currentPlaylist() {
+  return state.view.startsWith('pl:') ? playlists.find(p => p.id === state.view.slice(3)) || null : null;
+}
+const oneLine = s => String(s || '').replace(/[\r\n]+/g, ' ').trim();
+
+function toM3u(name, tracks) {
+  const out = ['#EXTM3U', `#PLAYLIST:${oneLine(name)}`];
+  for (const t of tracks) {
+    out.push(`#EXTINF:${Math.round(t.duration) || -1},${oneLine(t.artist ? `${t.artist} - ${t.title}` : t.title)}`);
+    if (t.album) out.push(`#EXTALB:${oneLine(t.album)}`);
+    out.push(oneLine(t.file && t.file.name) || `${oneLine(t.title)}.mp3`);
+  }
+  return out.join('\r\n') + '\r\n';
+}
+
+function parseM3u(text) {
+  const entries = [];
+  let name = '', info = null;
+  for (const raw of String(text).replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const l = raw.trim();
+    if (!l) continue;
+    let m;
+    if ((m = /^#PLAYLIST:(.*)$/i.exec(l))) name = m[1].trim();
+    else if ((m = /^#EXTINF:\s*(-?[\d.]+)?[^,]*,(.*)$/i.exec(l))) info = { duration: Number(m[1]) || 0, label: m[2].trim() };
+    else if (!l.startsWith('#')) { entries.push({ line: l, ...(info || {}) }); info = null; }
+  }
+  return { name, entries };
+}
+
+// "C:\Music\Song.mp3", "file:///C:/Music/Song%20Name.mp3", "../Song.mp3" → "Song.mp3"
+function fileNameOf(line) {
+  let s = line;
+  if (/^file:/i.test(s)) { try { s = decodeURIComponent(new URL(s).pathname); } catch { /* keep it */ } }
+  return s.split(/[\\/]/).pop();
+}
+const matchKey = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|webm|weba|aiff?)$/, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+function matchEntries(entries) {
+  const byFile = new Map(), byName = new Map();
+  const put = (map, k, t) => { if (k && !map.has(k)) map.set(k, t); };
+  for (const t of state.tracks) {
+    if (t.file && t.file.name) put(byFile, t.file.name.toLowerCase(), t);
+    if (t.artist) put(byName, matchKey(`${t.artist} - ${t.title}`), t);
+    put(byName, matchKey(t.title), t);
+    if (t.file && t.file.name) put(byName, matchKey(t.file.name), t);
+  }
+  return entries.map(e => {
+    const file = fileNameOf(e.line);
+    return byFile.get(file.toLowerCase()) || byName.get(matchKey(e.label)) || byName.get(matchKey(file)) || null;
+  });
+}
+
+async function importPlaylist({ name, text, files = {} }) {
+  const parsed = parseM3u(text);
+  if (!parsed.entries.length) { toast("that file has no songs in it. is it a playlist (.m3u8 / .m3u)?", 5000); return; }
+  let found = matchEntries(parsed.entries);
+  // on the PC: songs the playlist points to that aren't in your library yet are added
+  const missing = [...new Set(parsed.entries.filter((e, i) => !found[i] && files[e.line]).map(e => files[e.line]))];
+  if (missing.length && desktop) {
+    toast(`adding ${missing.length} song${missing.length === 1 ? '' : 's'} from the playlist…`, 0);
+    await openExternalFiles(missing, { play: false, quiet: true });
+    found = matchEntries(parsed.entries);
+  }
+  const ids = [...new Set(found.filter(Boolean).map(t => t.id))];
+  const title = (parsed.name || name || 'playlist').slice(0, 80);
+  // importing the same playlist again updates it
+  const old = playlists.find(p => p.name === title);
+  const pl = old || { id: uid(), name: title, ids: [] };
+  pl.ids = ids;
+  if (!old) playlists.push(pl);
+  savePlaylists();
+  setView(`pl:${pl.id}`);
+  $('#plMenu').hidden = true;
+  $('#plBtn').setAttribute('aria-expanded', 'false');
+  const lost = parsed.entries.length - found.filter(Boolean).length;
+  toast(`playlist "${title}": ${ids.length} song${ids.length === 1 ? '' : 's'}` +
+    (lost ? ` · ${lost} not in your library (add them, then import it again)` : ' ✦'), lost ? 6000 : 3000);
+}
+
+async function exportPlaylist() {
+  const tracks = visibleTracks();
+  if (!tracks.length) { toast('this list is empty, nothing to save'); return; }
+  const pl = currentPlaylist();
+  const name = pl ? pl.name : state.view === 'loved' ? 'moonlit - loved' : 'moonlit - all songs';
+  const text = toM3u(name, tracks);
+  if (desktop && desktop.playlist) {
+    const where = await desktop.playlist.save(name, text).catch(() => null);
+    if (where) toast(`saved ${tracks.length} song${tracks.length === 1 ? '' : 's'} as ${fileNameOf(where)} ✓`, 4000);
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'audio/x-mpegurl' }));
+  // browsers fall back to "download" for some letters, so the file name is kept to plain ones
+  const plain = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w .()&'-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  a.download = `${plain || 'playlist'}.m3u8`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+  toast(`saved ${tracks.length} song${tracks.length === 1 ? '' : 's'} as a playlist file ✓`, 4000);
+}
+
+function syncPlaylistMenu() {
+  const list = $('#plList');
+  list.innerHTML = '';
+  for (const p of playlists) {
+    const b = document.createElement('button');
+    b.className = 'pl-chip';
+    b.type = 'button';
+    b.textContent = p.name;
+    const n = document.createElement('small');
+    n.textContent = p.ids.filter(byId).length;
+    b.append(n);
+    b.setAttribute('aria-current', String(state.view === `pl:${p.id}`));
+    b.onclick = () => { setView(`pl:${p.id}`); $('#plMenu').hidden = true; $('#plBtn').setAttribute('aria-expanded', 'false'); };
+    list.append(b);
+  }
+  const pl = currentPlaylist();
+  $('#plRemove').hidden = !pl;
+  $('#plExportText').textContent = pl ? `save "${pl.name}" as a playlist file`
+    : state.view === 'loved' ? 'save your loved songs as a playlist file' : 'save all your songs as a playlist file';
+}
+
+function setupPlaylists() {
+  const menu = $('#plMenu'), btn = $('#plBtn'), input = $('#plInput');
+  btn.onclick = () => {
+    menu.hidden = !menu.hidden;
+    btn.setAttribute('aria-expanded', String(!menu.hidden));
+    if (!menu.hidden) syncPlaylistMenu();
+  };
+  $('#plExport').onclick = exportPlaylist;
+  $('#plBarClose').onclick = () => setView('all');
+  $('#plImport').onclick = async () => {
+    if (desktop && desktop.playlist) {
+      const r = await desktop.playlist.open().catch(() => null);
+      if (r && r.error) toast(r.error);
+      else if (r) importPlaylist(r);
+      return;
+    }
+    input.value = '';
+    input.click();
+  };
+  // file-type filters hide .m3u8 files on some phones, so every file can be picked
+  if (!matchMedia('(pointer: coarse)').matches) input.accept = '.m3u8,.m3u,audio/x-mpegurl,audio/mpegurl,application/vnd.apple.mpegurl';
+  input.onchange = async () => {
+    const f = input.files[0];
+    if (!f) return;
+    if (f.size > 5_000_000) { toast('that file is too big to be a playlist'); return; }
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    let text;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { text = new TextDecoder('windows-1252').decode(bytes); }
+    importPlaylist({ name: f.name.replace(/\.m3u8?$/i, ''), text });
+  };
+  $('#plRemove').onclick = () => {
+    const pl = currentPlaylist();
+    if (!pl || !confirm(`remove the playlist "${pl.name}"?\n\nonly the playlist goes. its songs stay in your library.`)) return;
+    playlists = playlists.filter(p => p !== pl);
+    savePlaylists();
+    setView('all');
+    toast('playlist removed');
+  };
+  syncPlaylistMenu();
+}
 let searchTimer;
 el.search.addEventListener('input', () => {
   clearTimeout(searchTimer);
@@ -2115,6 +2328,8 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   buildFloaties();
   setupVizSettings();
   setupFolding();
+  setupPlaylists();
+  setupThemeIcon();
   setupBackAsk();
   applyPerf(prefs.get('perf', prefs.get('lite', false) ? 'lite' : 'full')); // older versions saved a lite on/off switch
   applyTheme(prefs.get('theme', 'midnight-rose'));

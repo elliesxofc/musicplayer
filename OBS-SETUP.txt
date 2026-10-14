@@ -95,7 +95,9 @@ viewers type !nowplaying and your bot answers, e.g.
   - your channel, like @yourname: moonlit finds your live stream by itself
     each time you go live (or paste one stream's link)
   - bot login: the same line as YOUTUBE_BOT_CREDENTIALS in the song request
-    app. it's saved encrypted on this PC only.
+    app. it's saved encrypted on this PC only. or click "import from a .env
+    file" and pick the song request app's .env file: only the bot login is
+    taken from it (API keys and anything else in the file are ignored).
 
 
 NEW (desktop app): song requests in YouTube chat
@@ -113,7 +115,10 @@ moonlit → sliders → "chat · !nowplaying" → "take song requests".
   next. a song is only downloaded once.
 - YouTube songs can only come from copyright-free channels (NCS, Monstercat,
   TheFatRat, Tobu, … the list is editable), up to 10 minutes long
-  (changeable), no live streams. mods follow these rules too, unless you
+  (changeable), no live streams. to add a channel, paste its YouTube link
+  (or a link to one of its videos, or its @handle) into "add a channel":
+  moonlit turns it into the channel's ID (UC…), which always matches. links
+  typed straight into the list are turned into IDs when you click "save list". mods follow these rules too, unless you
   switch on "mods and you can request any song".
 - blocked words: songs with these words in the title, artist or channel can
   never be requested, by anyone (starts with nazi, hitler, … add your own).

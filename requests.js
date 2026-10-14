@@ -288,11 +288,62 @@
   const saveChannels = () => { prefs.set('srChannels', srChannels.value.trim() || DEFAULT_CHANNELS); savedNote(srChannels, $('#srChannelsSaved'), 'channel'); };
   srChannels.oninput = saveChannels;
   srChannels.onchange = () => { if (!srChannels.value.trim()) { srChannels.value = DEFAULT_CHANNELS; saveChannels(); } };
-  $('#srChannelsSave').onclick = () => {
+  // links and @handles in the list → "UC… # name" (an ID always matches; links never did)
+  const needsLookup = line => /youtube\.com|youtu\.be|^\s*@/i.test(line.split('#')[0]);
+  const idLine = r => `${r.id}${r.name ? `  # ${r.name}` : ''}`;
+  const listHas = id => srChannels.value.split('\n').some(l => l.split('#')[0].trim() === id);
+  let converting = false;
+  async function convertLinks() {
+    const rows = srChannels.value.split('\n');
+    const todo = rows.map((l, i) => i).filter(i => needsLookup(rows[i]));
+    if (!todo.length || !C.resolveChannel) return { done: 0, failed: [] };
+    $('#srChannelsSaved').textContent = `looking up ${todo.length} channel${todo.length === 1 ? '' : 's'}…`;
+    const failed = [];
+    let done = 0;
+    const seen = new Set(rows.filter((l, i) => !todo.includes(i)).map(l => l.split('#')[0].trim()));
+    for (const i of todo) {
+      const r = await C.resolveChannel(rows[i]).catch(() => null);
+      if (r && r.ok) { rows[i] = seen.has(r.id) ? null : idLine(r); seen.add(r.id); done++; }
+      else failed.push(rows[i].split('#')[0].trim());
+    }
+    srChannels.value = rows.filter(l => l !== null).join('\n');
+    return { done, failed };
+  }
+  $('#srChannelsSave').onclick = async () => {
+    if (converting) return;
     if (!srChannels.value.trim()) srChannels.value = DEFAULT_CHANNELS;
-    saveChannels();
-    toast(`channel list saved ✓ (${lines(srChannels)} channels)`);
+    converting = true;
+    try {
+      const { done, failed } = await convertLinks();
+      saveChannels();
+      const n = lines(srChannels);
+      if (failed.length) toast(`saved, but couldn't find ${failed.length === 1 ? `this channel: ${failed[0]}` : `${failed.length} channels`}. check the link`, 6000);
+      else toast(`channel list saved ✓ (${n} channel${n === 1 ? '' : 's'}${done ? `, ${done === 1 ? '1 link turned into a channel ID' : `${done} links turned into channel IDs`}` : ''})`, 4000);
+    } finally { converting = false; }
   };
+
+  // the "add a channel" box: paste a link, get "UC… # name" added to the list
+  const addBox = $('#srChannelAdd'), addBtn = $('#srChannelAddBtn');
+  async function addChannel() {
+    const text = addBox.value.trim();
+    if (!text || addBtn.disabled) return;
+    addBtn.disabled = true;
+    addBtn.textContent = 'looking it up…';
+    try {
+      const r = await C.resolveChannel(text).catch(err => ({ ok: false, error: err.message }));
+      if (!r || !r.ok) { toast((r && r.error) || "couldn't find that channel", 5000); return; }
+      if (listHas(r.id)) { toast(`${r.name || r.id} is already on the list ✓`); addBox.value = ''; return; }
+      srChannels.value = `${srChannels.value.replace(/\s+$/, '')}\n${idLine(r)}`.replace(/^\n/, '');
+      saveChannels();
+      addBox.value = '';
+      toast(`added ${r.name || 'the channel'} (${r.id}) ✓`, 4000);
+    } finally {
+      addBtn.disabled = false;
+      addBtn.textContent = 'add channel';
+    }
+  }
+  addBtn.onclick = addChannel;
+  addBox.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addChannel(); } };
   savedNote(srChannels, $('#srChannelsSaved'), 'channel');
   savedNote(srBlocked, $('#srBlockedSaved'), 'word');
   srMax.oninput = () => { const n = Math.round(Number(srMax.value)); if (n >= 1 && n <= 60) prefs.set('srMax', n); };

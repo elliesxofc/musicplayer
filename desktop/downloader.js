@@ -11,6 +11,7 @@ const { app, net, dialog, shell } = require('electron');
 const { pickMatch } = require('./match');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { channelKey } = require('./channels');
 const fs = require('node:fs');
 
 const PARALLEL = 3;
@@ -541,9 +542,12 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   }
 
   const norm = s => String(s || '').toLowerCase().replace(/^@/, '').trim();
-  // "UC_aEa8K-EOJ3D6gOs7HcyNg  # NoCopyrightSounds" → the part before the #
-  const channelKeys = list => (list || []).map(l => norm(String(l).split('#')[0])).filter(Boolean);
-  const allowedChannel = (e, keys) => keys.some(k => [e.channel_id, e.uploader_id, e.channel, e.uploader].some(v => norm(v) === k));
+  // "UC_aEa8K-EOJ3D6gOs7HcyNg  # NoCopyrightSounds" → the ID; a channel link → its ID or @handle
+  const channelKeys = list => (list || []).map(l => channelKey(l)).filter(Boolean);
+  // the end of "https://www.youtube.com/@name" or ".../channel/UC…"
+  const urlTail = u => { const m = /\/(?:channel\/|@)([^/?#]+)/.exec(String(u || '')); return m ? decodeURIComponent(m[1]) : ''; };
+  const allowedChannel = (e, keys) => keys.some(k =>
+    [e.channel_id, e.uploader_id, e.channel, e.uploader, urlTail(e.channel_url), urlTail(e.uploader_url)].some(v => v && norm(v) === k));
 
   // words that can never be requested, checked against the title and the channel
   const blockedBy = (text, words) => {
@@ -595,6 +599,14 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
     }
   }
 
+  // a channel (or a video's channel) through yt-dlp, when YouTube's page couldn't be read
+  async function channelOf(url, kind) {
+    await ensureReady();
+    const info = await runJson(kind === 'video' ? ['-J', '--no-playlist', url] : ['-J', '--flat-playlist', '--playlist-items', '1', url]);
+    const id = [info.channel_id, info.uploader_id, info.id].find(v => /^UC[\w-]{22}$/.test(v || ''));
+    return id ? { id, name: info.channel || info.uploader || '' } : null;
+  }
+
   // a request's download that has played: delete the file (only files moonlit downloaded for requests)
   function forgetRequest(file) {
     const map = { ...(readConfig().requestFiles || {}) };
@@ -616,7 +628,7 @@ function createDownloader({ send, readConfig, writeConfig, allowRead }) {
   }
 
   return {
-    add, addList, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll, request, forgetRequest, requestFiles,
+    add, addList, cancel, cancelAll, retry, clearFinished, chooseFolder, openFolder, stopAll, request, forgetRequest, requestFiles, channelOf,
     list: () => [...jobs.values()].map(publicJob),
     folder: outDir,
   };

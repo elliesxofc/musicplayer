@@ -10,12 +10,12 @@
 const { Tray, Menu, Notification, nativeImage, app } = require('electron');
 const path = require('node:path');
 
-function createTray({ root, getWindow, send, load, save }) {
+function createTray({ root, getWindow, send, load, save, iconFile = () => path.join(root, 'icons', 'icon-192.png') }) {
   let settings = { tray: false, notify: true, notifyAlways: false, ...load() };
   let tray = null, song = null, playing = false, quitting = false, toldAboutTray = false;
 
   const icon = () => {
-    const img = nativeImage.createFromPath(path.join(root, 'icons', 'icon-192.png'));
+    const img = nativeImage.createFromPath(iconFile()); // follows the theme when that's on
     return img.isEmpty() ? img : img.resize({ width: 32, height: 32 });
   };
 
@@ -106,6 +106,9 @@ function createTray({ root, getWindow, send, load, save }) {
     n.show();
   }
 
+  // the theme (and with it the icon) changed
+  function refreshIcon() { if (tray) tray.setImage(icon()); }
+
   function setPlaying(on) { if (playing !== !!on) { playing = !!on; refresh(); } }
 
   function set(patch) {
@@ -118,7 +121,7 @@ function createTray({ root, getWindow, send, load, save }) {
   app.whenReady().then(apply);
   // a quit that was called off ("keep it open" in the close popup)
   const cancelQuit = () => { quitting = false; };
-  return { attach, show, nowPlaying, setPlaying, set, get: () => settings, quitting: () => quitting, cancelQuit };
+  return { attach, show, nowPlaying, setPlaying, set, refreshIcon, get: () => settings, quitting: () => quitting, cancelQuit };
 }
 
 module.exports = { createTray };

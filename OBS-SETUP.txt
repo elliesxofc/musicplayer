@@ -132,6 +132,11 @@ moonlit → sliders → "chat · !nowplaying" → "take song requests".
   moonlit turns it into the channel's ID (UC…), which always matches. links
   typed straight into the list are turned into IDs when you click "save list". mods follow these rules too, unless you
   switch on "mods and you can request any song".
+- stream owner full access (on by default): the channel you stream on, and
+  up to two of your own channels ("your channels with full access": paste a
+  link or @handle, then "save my channels"), can request any YouTube song,
+  of any length, with no cooldown. nobody else gets this. blocked words
+  still count.
 - blocked words: songs with these words in the title, artist or channel can
   never be requested, by anyone (starts with nazi, hitler, … add your own).
 - any song in your library can be requested, so keep songs you wouldn't

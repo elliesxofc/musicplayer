@@ -34,7 +34,11 @@
   const on = () => prefs.get('srOn', true);
   const channels = () => prefs.get('srChannels', DEFAULT_CHANNELS).split('\n').map(s => s.trim()).filter(Boolean);
   const maxMinutes = () => Math.max(1, Math.min(60, Number(prefs.get('srMax', 10)) || 10));
-  const isMod = u => u.mod || u.owner;
+  // the stream owner: the channel streaming, or one of your own channels listed in settings
+  const ownerIds = () => prefs.get('srOwners', []).map(o => o && o.id).filter(Boolean);
+  const isOwner = u => !!u.owner || ownerIds().includes(u.id);
+  const ownerAny = () => prefs.get('srOwnerAny', true);
+  const isMod = u => u.mod || isOwner(u);
   const songName = t => [t.artist, t.title].filter(Boolean).join(' - ') || t.title;
   const say = text => C.say(text);
 
@@ -88,7 +92,9 @@
       const job = { by: user.name, userId: user.id, query, cancelled: false, at: Date.now() };
       pending.push(job);
       render();
-      const rules = { channels: channels(), anyChannel: (mod && modsAnySong()) || prefs.get('srAny', false), maxSeconds: maxMinutes() * 60, blocked: blockedWords() };
+      // full access for the stream owner: any channel, any length (blocked words still count)
+      const full = ownerAny() && isOwner(user);
+      const rules = { channels: channels(), anyChannel: full || (mod && modsAnySong()) || prefs.get('srAny', false), maxSeconds: full ? 3600 : maxMinutes() * 60, blocked: blockedWords() };
       const result = await D.download.request(query, rules).catch(err => ({ ok: false, reason: 'error', error: err.message }));
       pending.splice(pending.indexOf(job), 1);
       render();
@@ -263,6 +269,41 @@
   const srOn = $('#srOn'), srAny = $('#srAny'), srChannels = $('#srChannels'), srMax = $('#srMax'), srCleanup = $('#srCleanup');
   srCleanup.checked = cleanupOn();
   const srModsAny = $('#srModsAny'), srBlocked = $('#srBlocked');
+
+  // stream owner full access, and your own channels (turned into channel IDs, which chat sends)
+  const srOwnerAny = $('#srOwnerAny'), ownerBoxes = [$('#srOwner1'), $('#srOwner2')];
+  srOwnerAny.checked = ownerAny();
+  $('#srOwnerField').hidden = !srOwnerAny.checked;
+  srOwnerAny.onchange = () => { prefs.set('srOwnerAny', srOwnerAny.checked); $('#srOwnerField').hidden = !srOwnerAny.checked; };
+  const ownerText = o => (o ? `${o.id}${o.name ? `  # ${o.name}` : ''}` : '');
+  const showOwners = () => {
+    const list = prefs.get('srOwners', []);
+    ownerBoxes.forEach((b, i) => { b.value = ownerText(list[i]); });
+    const names = list.filter(Boolean).map(o => o.name || o.id);
+    $('#srOwnerSaved').textContent = names.length ? `full access: ${names.join(' and ')} ✓` : '';
+    $('#srOwnerSaved').classList.toggle('ok', names.length > 0);
+  };
+  showOwners();
+  let savingOwners = false;
+  $('#srOwnerSave').onclick = async () => {
+    if (savingOwners) return;
+    savingOwners = true;
+    $('#srOwnerSaved').textContent = 'looking up your channels…';
+    try {
+      const list = [], failed = [];
+      for (const box of ownerBoxes) {
+        const text = box.value.trim();
+        if (!text) { list.push(null); continue; }
+        const r = await C.resolveChannel(text).catch(() => null);
+        if (r && r.ok) list.push({ id: r.id, name: r.name });
+        else { list.push(prefs.get('srOwners', [])[ownerBoxes.indexOf(box)] || null); failed.push(text); }
+      }
+      prefs.set('srOwners', list);
+      showOwners();
+      if (failed.length) toast(`couldn't find ${failed.join(' or ')}. check the link`, 5000);
+      else toast(list.some(Boolean) ? 'your channels are saved ✓ they have full access' : 'your channels are cleared');
+    } finally { savingOwners = false; }
+  };
   srModsAny.checked = modsAnySong();
   srModsAny.onchange = () => prefs.set('srModsAny', srModsAny.checked);
   srBlocked.value = prefs.get('srBlocked', DEFAULT_BLOCKED);

@@ -313,7 +313,7 @@ function syncIcon() {
   set('#iconSvg', themed ? `${d}.svg` : 'icons/icon.svg');
   set('#iconPng', themed ? `${d}-32.png` : 'icons/favicon-32.png');
   set('#iconTouch', themed ? `${d}-180.png` : 'icons/apple-touch-icon.png');
-  set('#manifestLink', themed ? `${d}.webmanifest` : 'manifest.webmanifest?v=49');
+  set('#manifestLink', themed ? `${d}.webmanifest` : 'manifest.webmanifest?v=50');
   if (desktop && desktop.setIcon) desktop.setIcon(themed ? id : null).catch(() => {});
 }
 function setupThemeIcon() {

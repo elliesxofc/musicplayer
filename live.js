@@ -131,6 +131,73 @@
   };
   C.onStatus(s => setStatus($('#chatStatus'), s));
 
+  /* ───────────── !uptime and !aboutme ─────────────
+     !uptime: how long the stream has been live, from OBS (stream control has to be connected).
+     !aboutme: where the music comes from, a message you can change ({placeholders} filled in). */
+  const ABOUT_DEFAULT = "🌙 the music here plays from moonlit {version}, a little music player running on {owner} {os} PC. it's been open for {open}, with {songs} in the library. get it: {link}";
+  const OPENED = Date.now();
+  const span = ms => {
+    const s = Math.max(0, Math.floor(ms / 1000)), d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    const part = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    if (d) return `${part(d, 'day')} ${part(h, 'hour')}`;
+    if (h) return `${part(h, 'hour')} ${part(m, 'minute')}`;
+    if (m) return `${part(m, 'minute')} ${part(s % 60, 'second')}`;
+    return part(s % 60, 'second');
+  };
+  const osName = () => { const p = navigator.platform || ''; return /win/i.test(p) ? 'Windows' : /mac/i.test(p) ? 'Mac' : /linux/i.test(p) ? 'Linux' : ''; };
+  let version = '';
+  if (D.version) D.version().then(v => { version = v; }).catch(() => {});
+
+  async function uptimeAnswer() {
+    const s = window.obsStreamStatus ? await window.obsStreamStatus() : null;
+    if (!s) return "I can't see the stream's uptime right now (OBS isn't connected to moonlit).";
+    if (!s.live) return "the stream isn't live right now.";
+    return `⏱ the stream has been live for ${span(s.ms)}${s.reconnecting ? ' (reconnecting right now)' : ''}.`;
+  }
+  function aboutAnswer() {
+    const name = prefs.get('name', '').trim();
+    const os = osName();
+    const fill = {
+      version: version ? `v${version}` : '',
+      owner: name ? `${name}'s` : 'the streamer\'s',
+      name: name || 'the streamer',
+      os,
+      open: span(Date.now() - OPENED),
+      songs: `${state.tracks.length.toLocaleString()} song${state.tracks.length === 1 ? '' : 's'}`,
+      link: 'elliesxofc.github.io/musicplayer',
+    };
+    return (prefs.get('aboutMe', '') || ABOUT_DEFAULT)
+      .replace(/\{(\w+)\}/g, (all, k) => (k in fill ? fill[k] : all))
+      .replace(/\s{2,}/g, ' ').replace(/\s+([.,)])/g, '$1').trim();
+  }
+
+  const lastInfo = {};
+  C.onCommand(async ({ cmd }) => {
+    if (cmd !== 'uptime' && cmd !== 'aboutme') return;
+    if (!prefs.get(cmd === 'uptime' ? 'cmdUptime' : 'cmdAbout', true)) return;
+    // one answer every 10 seconds per command, however many people ask
+    if (Date.now() - (lastInfo[cmd] || 0) < 10_000) return;
+    lastInfo[cmd] = Date.now();
+    C.say(cmd === 'uptime' ? await uptimeAnswer() : aboutAnswer());
+  });
+
+  const cmdUptime = $('#cmdUptime'), cmdAbout = $('#cmdAbout'), aboutText = $('#aboutText');
+  cmdUptime.checked = prefs.get('cmdUptime', true);
+  cmdAbout.checked = prefs.get('cmdAbout', true);
+  cmdUptime.onchange = () => prefs.set('cmdUptime', cmdUptime.checked);
+  cmdAbout.onchange = () => { prefs.set('cmdAbout', cmdAbout.checked); $('#aboutField').hidden = !cmdAbout.checked; };
+  $('#aboutField').hidden = !cmdAbout.checked;
+  aboutText.value = prefs.get('aboutMe', '') || ABOUT_DEFAULT;
+  const showAbout = () => { $('#aboutPreview').textContent = `the bot answers: ${aboutAnswer()}`; };
+  aboutText.oninput = () => {
+    const v = aboutText.value.trim();
+    prefs.set('aboutMe', v && v !== ABOUT_DEFAULT ? v.slice(0, 400) : '');
+    showAbout();
+  };
+  $('#aboutReset').onclick = () => { aboutText.value = ABOUT_DEFAULT; prefs.set('aboutMe', ''); showAbout(); };
+  $('#settingsBtn').addEventListener('click', () => setTimeout(showAbout, 80));
+  showAbout();
+
   // what the bot would answer right now, shown while the settings are open
   async function preview() {
     if ($('#settings').hidden) return;

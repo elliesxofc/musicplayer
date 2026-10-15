@@ -10,8 +10,8 @@ const { Masterchat, stringify } = require('masterchat');
 
 // only !nowplaying: shorter names like !song are often taken by other bots (Nightbot, …)
 const COMMAND = /^!nowplaying\b/i;
-// song requests: handled by the player (it knows the library and the queue)
-const REQUEST_COMMAND = /^!(sr|songrequest|queue|q|skip|wrongsong)(?:\s+([\s\S]*))?$/i;
+// song requests, !uptime and !aboutme: handled by the player (it knows the library, the queue and OBS)
+const REQUEST_COMMAND = /^!(sr|songrequest|queue|q|skip|wrongsong|uptime|aboutme)(?:\s+([\s\S]*))?$/i;
 const REPLY_GAP = 5000; // one answer every 5 seconds at most, however many people ask
 const RETRY = 60_000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';

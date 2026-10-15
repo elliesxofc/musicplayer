@@ -100,6 +100,18 @@ viewers type !nowplaying and your bot answers, e.g.
     taken from it (API keys and anything else in the file are ignored).
 
 
+NEW (desktop app): !uptime and !aboutme
+----------------------------------------
+moonlit → sliders → "chat · !nowplaying" → "more commands" (both on by default):
+  !uptime    how long the stream has been live. read from OBS, so connect OBS
+             in stream control (the camera button) first
+  !aboutme   where the music comes from: moonlit, its version, whose PC it runs
+             on, how long it's been open and how many songs are in the library.
+             the text can be changed; {version} {owner} {os} {open} {songs}
+             and {link} fill themselves in
+one answer every 10 seconds per command, however many people ask.
+
+
 NEW (desktop app): song requests in YouTube chat
 -------------------------------------------------
 like the song request app, inside moonlit. turn on !nowplaying first (above), then

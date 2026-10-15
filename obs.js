@@ -392,6 +392,13 @@
   ui.rec.onclick = () => obs.call(st.rec.active ? 'StopRecord' : 'StartRecord').then(pollStatus).catch(err => toast(err.message));
   ui.recPause.onclick = () => obs.call(st.rec.paused ? 'ResumeRecord' : 'PauseRecord').then(pollStatus).catch(err => toast(err.message));
 
+  // for !uptime in chat: how long OBS has been streaming (null when OBS isn't connected)
+  window.obsStreamStatus = async () => {
+    if (!obs.connected) return null;
+    const s = await obs.call('GetStreamStatus').catch(() => null);
+    return s ? { live: !!s.outputActive, reconnecting: !!s.outputReconnecting, ms: s.outputDuration || 0 } : null;
+  };
+
   renderOutputs();
   if (prefs.get('ocAuto', true) && prefs.get('ocConnected', false)) connect(false);
   else setConn('not connected to OBS', 'off');

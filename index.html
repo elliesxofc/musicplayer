@@ -9,7 +9,7 @@
   <link rel="icon" id="iconSvg" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" id="iconPng" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" id="iconTouch" href="icons/apple-touch-icon.png">
-  <link rel="manifest" id="manifestLink" href="manifest.webmanifest?v=49">
+  <link rel="manifest" id="manifestLink" href="manifest.webmanifest?v=50">
   <script>
     /* the icon in the theme's colours (before anything reads the icon or the manifest) */
     try {
@@ -30,7 +30,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=49">
+  <link rel="stylesheet" href="style.css?v=50">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -499,6 +499,18 @@
         <span class="obs-status" id="chatStatus">off</span>
       </div>
       <p class="hint small chat-preview" id="chatPreview"></p>
+      <div class="sr-box" id="infoBox">
+        <p class="eyebrow">more commands</p>
+        <label class="check"><input type="checkbox" id="cmdUptime"> <span><b>!uptime</b>: how long the stream has been live (from OBS: connect it in <b>stream control</b>, the camera button)</span></label>
+        <label class="check"><input type="checkbox" id="cmdAbout"> <span><b>!aboutme</b>: where the music comes from</span></label>
+        <div id="aboutField">
+          <label class="field"><span>the !aboutme answer. these fill themselves in: <b>{version}</b> <b>{owner}</b> (your name from <b>you</b>, like "Ellie's") <b>{os}</b> <b>{open}</b> (how long moonlit has been open) <b>{songs}</b> (like "120 songs") <b>{link}</b></span>
+            <textarea id="aboutText" rows="3" spellcheck="false" maxlength="400"></textarea>
+          </label>
+          <div class="sr-save-row"><button class="link-btn" id="aboutReset" type="button">back to the original text</button></div>
+          <p class="hint small chat-preview" id="aboutPreview"></p>
+        </div>
+      </div>
       <div class="sr-box" id="srBox" hidden>
         <p class="eyebrow">song requests</p>
         <label class="check"><input type="checkbox" id="srOn"> <span>take song requests: <b>!sr</b>, <b>!queue</b>, <b>!skip</b> (mods), <b>!wrongsong</b></span></label>
@@ -555,7 +567,7 @@
       <button class="pill" id="installBtn" hidden><svg><use href="#i-plus"/></svg>install moonlit</button>
       <label class="check" id="askCloseWebRow" hidden><input type="checkbox" id="askCloseWeb"> ask before closing moonlit (back button)</label>
       <p class="hint storage" id="storageInfo" hidden></p>
-      <p class="version">moonlit v49</p>
+      <p class="version">moonlit v50</p>
     </section>
   </div>
 
@@ -582,10 +594,10 @@
   <input type="file" id="folderInput" webkitdirectory multiple hidden>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="vizcore.js?v=49"></script>
-  <script src="app.js?v=49"></script>
-  <script src="obs.js?v=49"></script>
-  <script src="live.js?v=49"></script>
-  <script src="requests.js?v=49"></script>
+  <script src="vizcore.js?v=50"></script>
+  <script src="app.js?v=50"></script>
+  <script src="obs.js?v=50"></script>
+  <script src="live.js?v=50"></script>
+  <script src="requests.js?v=50"></script>
 </body>
 </html>

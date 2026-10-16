@@ -231,6 +231,34 @@
     renderAudio();
   }
 
+  /* When the stream started, by the clock. OBS's WebSocket times the stream by the video frames
+     it has sent, which falls behind the real time whenever the stream runs at a lower frame rate
+     than OBS's canvas or frames get skipped (e.g. 22 minutes while OBS's own clock says 43).
+     So moonlit notes the moment the stream starts; if it wasn't watching then, it asks YouTube
+     when the live stream started. Kept across restarts while the same stream goes on. */
+  let streamStart = Number(prefs.get('obsStreamStart', 0)) || 0, askingYouTube = false, askedAt = 0;
+  // guessed: taken from OBS's frames, until YouTube (or seeing the stream start) gives the real time
+  let guessed = !!prefs.get('obsStreamGuessed', false);
+  const setStart = (t, guess = false) => { streamStart = t; guessed = guess; prefs.set('obsStreamStart', t); prefs.set('obsStreamGuessed', guess); };
+  async function checkStart(s) {
+    if (!s.outputActive) { if (streamStart) setStart(0); return; }
+    const now = Date.now(), frames = s.outputDuration || 0;
+    // a start time left from an older stream (it can't be later than the frames say, and it
+    // won't be many times longer than them either)
+    if (streamStart && (now - streamStart < frames - 5000 || now - streamStart > frames * 4 + 600_000)) setStart(0);
+    if (!streamStart) setStart(now - frames, true); // for now; YouTube's start time replaces it
+    // ask YouTube (again every 30 seconds: the chat may only just be joining the stream)
+    if (!guessed || askingYouTube || now - askedAt < 30_000 || !desktop.chat || !desktop.chat.liveStart) return;
+    askingYouTube = true;
+    askedAt = now;
+    try {
+      const yt = await desktop.chat.liveStart().catch(() => 0);
+      // YouTube's clock starts a little after OBS's; only trust it when it's in line with OBS
+      if (yt && yt <= now && now - yt >= frames - 5000 && now - yt <= frames * 4 + 600_000) setStart(yt);
+    } finally { askingYouTube = false; }
+  }
+  const streamMs = () => (streamStart ? Math.max(0, Date.now() - streamStart) : st.stream.ms);
+
   async function pollStatus() {
     if (!obs.connected) return;
     const [s, r, stats] = await Promise.all([
@@ -245,6 +273,7 @@
         ? Math.round((s.outputBytes - prev.bytes) * 8 / ((now - prev.at) / 1000) / 1000) : 0;
       st.stream = { active: s.outputActive, reconnecting: s.outputReconnecting, ms: s.outputDuration, bytes: s.outputBytes, at: now,
         congestion: s.outputCongestion || 0, skipped: s.outputSkippedFrames || 0, total: s.outputTotalFrames || 0 };
+      checkStart(s);
     }
     if (r) st.rec = { active: r.outputActive, paused: r.outputPaused, ms: r.outputDuration };
     if (stats) st.stats = stats;
@@ -269,8 +298,8 @@
   for (const ev of ['InputCreated', 'InputRemoved', 'InputNameChanged']) obs.on(ev, () => refreshAudio().catch(() => {}));
   obs.on('StreamStateChanged', d => {
     st.stream.active = d.outputActive;
-    if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STARTED') toast('you’re live ✦');
-    if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STOPPED') toast('stream ended');
+    if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STARTED') { setStart(Date.now()); toast('you’re live ✦'); }
+    if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STOPPED') { setStart(0); toast('stream ended'); }
     if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_RECONNECTING') toast('stream connection dropped, OBS is reconnecting…', 5000);
     pollStatus();
   });
@@ -281,7 +310,7 @@
     const s = st.stream, r = st.rec;
     ui.stream.classList.toggle('live', s.active);
     ui.streamLabel.textContent = s.active ? (s.reconnecting ? 'reconnecting…' : 'end stream') : 'go live';
-    ui.streamTime.textContent = s.active ? clock(s.ms) : '';
+    ui.streamTime.textContent = s.active ? clock(streamMs()) : '';
     ui.rec.classList.toggle('on', r.active);
     ui.rec.textContent = r.active ? `stop recording · ${clock(r.ms)}` : 'record';
     ui.recPause.hidden = !r.active;
@@ -300,7 +329,7 @@
     // top bar badge
     ui.badge.hidden = !(s.active || r.active);
     ui.badge.classList.toggle('rec-only', !s.active && r.active);
-    ui.badge.textContent = s.active ? `● LIVE ${clock(s.ms)}` : r.active ? `● REC ${clock(r.ms)}` : '';
+    ui.badge.textContent = s.active ? `● LIVE ${clock(streamMs())}` : r.active ? `● REC ${clock(r.ms)}` : '';
   }
 
   function renderScenes() {
@@ -396,7 +425,9 @@
   window.obsStreamStatus = async () => {
     if (!obs.connected) return null;
     const s = await obs.call('GetStreamStatus').catch(() => null);
-    return s ? { live: !!s.outputActive, reconnecting: !!s.outputReconnecting, ms: s.outputDuration || 0 } : null;
+    if (!s) return null;
+    await checkStart(s);
+    return { live: !!s.outputActive, reconnecting: !!s.outputReconnecting, ms: s.outputActive ? streamMs() : 0 };
   };
 
   renderOutputs();

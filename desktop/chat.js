@@ -47,6 +47,13 @@ function liveIdFromPage(html) {
   return /"isLiveNow":true/.test(html) ? canon[1] : null;
 }
 
+// when a live stream started, from its watch page: "liveBroadcastDetails":{"isLiveNow":true,"startTimestamp":"…"}
+function liveStartFromPage(html) {
+  const m = /"liveBroadcastDetails":\{[^}]*"startTimestamp":"([^"]+)"/.exec(html) || /"startTimestamp":"([^"]+)"/.exec(html);
+  const t = m ? Date.parse(m[1]) : NaN;
+  return Number.isFinite(t) ? t : 0;
+}
+
 async function findLive(path) {
   const res = await fetch(`https://www.youtube.com${path}/live`, {
     headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', Cookie: 'SOCS=CAI; CONSENT=YES+1' },
@@ -107,6 +114,7 @@ function splitMessage(text, max = 200) {
 
 function createChat({ nowPlaying, onStatus, onCommand = () => {} }) {
   let mc = null, timer = null, run = 0, target = null, login = null, lastReply = 0;
+  let liveVideo = null, startCache = { id: null, at: 0 };
   let status = { text: 'off', kind: 'off' };
   const setStatus = (text, kind) => { status = { text, kind }; onStatus(status); };
 
@@ -135,6 +143,7 @@ function createChat({ nowPlaying, onStatus, onCommand = () => {} }) {
       const chat = await Masterchat.init(videoId, { credentials: login, mode: 'live' });
       if (me !== run) { chat.stop(); return; }
       mc = chat;
+      liveVideo = videoId;
       mc.on('chat', item => answer(item));
       mc.on('error', err => {
         if (me !== run) return;
@@ -185,8 +194,23 @@ function createChat({ nowPlaying, onStatus, onCommand = () => {} }) {
     }
   }
 
+  // when the stream moonlit's chat is in went live (ms), or 0 when that isn't known
+  async function liveStart(fetchImpl = fetch) {
+    if (!mc || !liveVideo) return 0;
+    if (startCache.id === liveVideo && startCache.at) return startCache.at;
+    try {
+      const res = await fetchImpl(`https://www.youtube.com/watch?v=${liveVideo}`, {
+        headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', Cookie: 'SOCS=CAI; CONSENT=YES+1' },
+      });
+      const at = liveStartFromPage(await res.text());
+      if (at) startCache = { id: liveVideo, at };
+      return at;
+    } catch { return 0; }
+  }
+
   return {
     status: () => status,
+    liveStart,
     preview: () => replyFor(nowPlaying()),
     say,
     // settings: { enabled, stream, login } (login already decrypted)
@@ -203,4 +227,4 @@ function createChat({ nowPlaying, onStatus, onCommand = () => {} }) {
   };
 }
 
-module.exports = { createChat, parseTarget, liveIdFromPage, parseLogin, replyFor, splitMessage, REQUEST_COMMAND };
+module.exports = { createChat, parseTarget, liveIdFromPage, liveStartFromPage, parseLogin, replyFor, splitMessage, REQUEST_COMMAND };

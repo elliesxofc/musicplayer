@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('moonlitDesktop', {
     get: () => ipcRenderer.invoke('chat:get'),
     set: settings => ipcRenderer.invoke('chat:set', settings),
     preview: () => ipcRenderer.invoke('chat:preview'),
+    // when the live stream the bot is in started on YouTube (ms, 0 if unknown), for !uptime
+    liveStart: () => ipcRenderer.invoke('chat:live-start'),
     onStatus: cb => ipcRenderer.on('chat:status', (_e, s) => cb(s)),
     // song requests: commands from chat, and the player's answers
     onCommand: cb => ipcRenderer.on('chat:command', (_e, c) => cb(c)),

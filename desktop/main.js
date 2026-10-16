@@ -435,6 +435,7 @@ ipcMain.handle('chat:set', (_e, next) => {
   return chat.status();
 });
 ipcMain.handle('chat:preview', () => chat.preview());
+ipcMain.handle('chat:live-start', () => chat.liveStart((u, o) => net.fetch(u, o)));
 ipcMain.on('chat:say', (_e, text) => { if (typeof text === 'string') chat.say(text.slice(0, 1000)); });
 app.on('before-quit', () => chat.stop());
 

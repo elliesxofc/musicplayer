@@ -37,6 +37,9 @@ it updates the moment the song changes, and shows "paused" when you pause.
   options in moonlit: style (card with cover / one line + time),
   "hide while paused" and "match moonlit's theme" (the card takes your theme's
   colours and changes with it, live). the address changes to match; paste it again in OBS.
+  "show the card behind the song and the bars": switch it off to keep only
+  the text, cover and bars (see-through), to fit a layout with its own frame.
+  changes straight away, no address change needed.
   "music bars that move with the song" switches the bars on or off straight
   away, no address change needed. (no bars for Spotify songs: Spotify's sound
   plays in the Spotify app, where moonlit can't hear it.)

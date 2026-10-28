@@ -13,7 +13,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 
 const PORTS = [4848, 4849, 4850, 4851, 4852];
-const EMPTY = { id: null, title: '', artist: '', album: '', line: '', duration: 0, position: 0, playing: false, spectrum: true, next: null, theme: null };
+const EMPTY = { id: null, title: '', artist: '', album: '', line: '', duration: 0, position: 0, playing: false, spectrum: true, next: null, theme: null, plain: false };
 
 function createOverlay() {
   let state = { ...EMPTY };

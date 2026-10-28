@@ -313,7 +313,7 @@ function syncIcon() {
   set('#iconSvg', themed ? `${d}.svg` : 'icons/icon.svg');
   set('#iconPng', themed ? `${d}-32.png` : 'icons/favicon-32.png');
   set('#iconTouch', themed ? `${d}-180.png` : 'icons/apple-touch-icon.png');
-  set('#manifestLink', themed ? `${d}.webmanifest` : 'manifest.webmanifest?v=52');
+  set('#manifestLink', themed ? `${d}.webmanifest` : 'manifest.webmanifest?v=53');
   if (desktop && desktop.setIcon) desktop.setIcon(themed ? id : null).catch(() => {});
 }
 function setupThemeIcon() {
@@ -2000,13 +2000,14 @@ function pushOverlay() {
   if (!desktop || !desktop.overlay) return;
   const now = onAir(), spectrum = prefs.get('overlaySpectrum', true), look = vizOpts();
   const theme = prefs.get('overlayTheme', false) ? themePalette() : null;
-  if (!now) desktop.overlay.state({ spectrum, viz: look, theme });
+  const plain = !prefs.get('overlayCard', true); // no card behind the song and the bars
+  if (!now) desktop.overlay.state({ spectrum, viz: look, theme, plain });
   else if (now.source === 'spotify') {
     const sp = now.song;
     desktop.overlay.state({
       id: sp.id, title: sp.title, artist: sp.artist, album: sp.album, line: formatSong(sp),
       duration: sp.duration, position: sp.position + (sp.playing ? (Date.now() - sp.at) / 1000 : 0),
-      playing: sp.playing, spectrum, viz: look, theme, source: 'spotify',
+      playing: sp.playing, spectrum, viz: look, theme, plain, source: 'spotify',
     });
   } else {
     const t = now.song;
@@ -2026,7 +2027,7 @@ function pushOverlay() {
       next: coming,
       id: t.id, title: t.title, artist: t.artist || '', album: t.album || '', line: formatSong(t),
       duration: Number.isFinite(audio.duration) ? audio.duration : (t.duration || 0),
-      position: audio.currentTime || 0, playing: !audio.paused, spectrum, viz: look, theme, source: 'moonlit',
+      position: audio.currentTime || 0, playing: !audio.paused, spectrum, viz: look, theme, plain, source: 'moonlit',
     });
   }
   feedSpectrum();
@@ -2089,6 +2090,10 @@ async function setupOverlay() {
   const themed = $('#overlayTheme');
   themed.checked = prefs.get('overlayTheme', false);
   themed.onchange = () => { prefs.set('overlayTheme', themed.checked); pushOverlay(); toast(themed.checked ? 'the overlay follows your theme ✦' : 'the overlay is back to its own pink'); };
+  // the card (or pill) behind the song and the bars: off for layouts with their own frame
+  const cardBg = $('#overlayCard');
+  cardBg.checked = prefs.get('overlayCard', true);
+  cardBg.onchange = () => { prefs.set('overlayCard', cardBg.checked); pushOverlay(); toast(cardBg.checked ? 'the overlay card is back' : 'overlay card hidden: just the song and the bars ✦'); };
   vizOn.onchange = () => setBars(vizOn.checked);
   // "up next" in the last seconds of a song (live, no address change)
   const upOn = $('#overlayUpNext'), upSecs = $('#overlayUpNextSecs');

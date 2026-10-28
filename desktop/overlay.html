@@ -91,6 +91,14 @@
   .line .upnext .un-text { flex-direction: row; align-items: baseline; gap: 8px; }
   .line .upnext .un-song { font-size: 17px; }
 
+  /* no card (moonlit: "show the card behind the song and the bars" off): only the text, cover and
+     bars, with a soft shadow so the words stay readable on any background */
+  body.plain .card, body.plain .line { background: none; border-color: transparent; box-shadow: none; }
+  body.plain .card, body.plain .line { text-shadow: 0 1px 2px rgba(0, 0, 0, .7), 0 0 12px rgba(0, 0, 0, .35); }
+  body.plain .card { padding-left: 0; }
+  body.plain .line { padding-left: 0; }
+  body.plain .spec { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5)); }
+
   /* only the visualizer (layout=bars): no card, no padding, the page is the bars */
   body.solo { padding: 0; }
   .spec.solo { margin: 0; transition: opacity .4s ease; }
@@ -150,6 +158,7 @@
   function apply(next) {
     if (next.build && BUILD !== '_' + '_BUILD__' && next.build !== BUILD) { location.reload(); return; }
     applyTheme(next.theme);
+    document.body.classList.toggle('plain', !!next.plain);
     const changed = !s || s.id !== next.id;
     s = next; got = performance.now();
     if (!s.id) { np.classList.add('hidden'); return; }

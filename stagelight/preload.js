@@ -1,0 +1,16 @@
+'use strict';
+
+// what Stagelight's settings window may ask the program for
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('stagelight', {
+  get: () => ipcRenderer.invoke('get'),
+  setObs: settings => ipcRenderer.invoke('set-obs', settings),
+  setPanelPassword: password => ipcRenderer.invoke('set-panel-password', String(password)),
+  setPort: port => ipcRenderer.invoke('set-port', Number(port)),
+  autostart: on => ipcRenderer.invoke('autostart', !!on),
+  logoutAll: () => ipcRenderer.invoke('logout-all'),
+  open: url => ipcRenderer.invoke('open', String(url)),
+  onStatus: cb => ipcRenderer.on('status', (_e, s) => cb(s)),
+  onLog: cb => ipcRenderer.on('log', (_e, line) => cb(line)),
+});

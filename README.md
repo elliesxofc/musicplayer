@@ -54,6 +54,13 @@ drag audio files onto the page or tap **add songs**.
 - **OBS now playing**: keeps a `nowplaying.txt` updated with the current song for an OBS text source. see [`OBS-SETUP.txt`](OBS-SETUP.txt)
 - works with media keys and the lock screen
 
+## Stagelight: OBS remote control
+
+a separate little program (in [`stagelight/`](stagelight/README.md)) that runs on the stream PC and
+lets a phone, tablet or another PC control OBS in a browser, behind a password: go live, record,
+scenes, sources and audio, with the stream's health. works on the same Wi-Fi, or from anywhere
+through Tailscale. download it from the **Actions** tab → **stagelight app**.
+
 ## desktop app (Windows / Mac / Linux)
 
 the same player as a real program, built with Electron. made for an always-on

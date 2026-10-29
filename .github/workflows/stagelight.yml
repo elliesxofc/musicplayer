@@ -1,0 +1,39 @@
+# Builds Stagelight (the OBS remote control) for Windows.
+# Run it from the Actions tab ("Run workflow"), or push a tag like stagelight-v1.0.0
+# to also publish the installer as a GitHub Release.
+name: stagelight app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['stagelight-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # only for electron-builder: Stagelight itself needs no packages
+      - run: npm ci
+      - run: npx electron-builder --projectDir stagelight --win --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stagelight-windows
+          path: stagelight/dist/*.exe
+          if-no-files-found: error
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" stagelight/dist/*.exe \
+            --title "Stagelight ${{ github.ref_name }}" \
+            --notes "stagelight-setup installs Stagelight, the remote control for OBS."

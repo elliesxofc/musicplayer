@@ -1,0 +1,48 @@
+{
+  "name": "stagelight",
+  "productName": "Stagelight",
+  "version": "1.0.0",
+  "description": "a remote control for OBS in any browser, with a password",
+  "author": "elliesxofc",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "build": {
+    "appId": "io.github.elliesxofc.stagelight",
+    "productName": "Stagelight",
+    "copyright": "made for elliesxofc",
+    "electronVersion": "44.4.5",
+    "files": [
+      "main.js",
+      "preload.js",
+      "obs.js",
+      "server.js",
+      "settings.html",
+      "settings.js",
+      "panel/**",
+      "icons/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "icons/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Stagelight",
+      "artifactName": "stagelight-setup-${version}.${ext}"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "icons/icon-512.png"
+    }
+  }
+}

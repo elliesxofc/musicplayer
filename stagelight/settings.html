@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
+  <title>Stagelight</title>
+  <link rel="stylesheet" href="panel/panel.css">
+  <style>
+    body { padding: 0; }
+    .wrap { max-width: 620px; margin: 0 auto; padding: 18px 18px 30px; display: flex; flex-direction: column; gap: 14px; }
+    .hero { display: flex; align-items: center; gap: 14px; }
+    .hero img { width: 54px; height: 54px; border-radius: 15px; box-shadow: 0 10px 34px -10px var(--amber); }
+    .hero h1 { font-size: 22px; }
+    .hero p { margin: 0; color: var(--muted); font-size: 13.5px; }
+    .card p.hint { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .card p.hint b { color: var(--ink); font-weight: 600; }
+    .grid { display: grid; grid-template-columns: 1fr 110px; gap: 10px; }
+    .field input { height: 42px; font-size: 14.5px; }
+    .status { display: flex; align-items: center; gap: 9px; font-size: 14px; margin: 0 0 4px; }
+    .addr { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgba(0, 0, 0, .25); border: 1px solid var(--line); margin-bottom: 8px; }
+    .addr code { flex: 1; font: 600 15px ui-monospace, Consolas, monospace; color: #ffd79a; overflow-wrap: anywhere; }
+    .addr small { color: var(--muted); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; }
+    .addr .btn { min-height: 34px; padding: 0 12px; font-size: 13px; }
+    .row.tight { margin-top: 0; }
+    .saved { font-size: 13px; color: var(--ok); min-height: 1.3em; margin: 6px 0 0; }
+    .saved.bad { color: #ff8aa6; }
+    .check { display: flex; align-items: center; gap: 10px; font-size: 14px; margin-top: 4px; }
+    .check input { width: 18px; height: 18px; accent-color: var(--amber); }
+    ol { margin: 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    ol b { color: var(--ink); font-weight: 600; }
+    .log { font: 12px ui-monospace, Consolas, monospace; color: var(--muted); max-height: 140px; overflow: auto; white-space: pre-wrap; margin: 0; }
+    a { color: var(--amber); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <img src="panel/icon.svg" alt="">
+      <div><h1>Stagelight</h1><p>control OBS from your phone or any browser</p></div>
+    </div>
+
+    <section class="card">
+      <h2>1 · OBS on this PC</h2>
+      <p class="hint">in OBS: <b>Tools → WebSocket Server Settings</b> → tick <b>Enable WebSocket Server</b> → <b>Show Connect Info</b>. copy the port and the password here. the password stays on this PC.</p>
+      <div class="grid">
+        <label class="field"><span>address</span><input id="obsHost" spellcheck="false" placeholder="localhost"></label>
+        <label class="field"><span>port</span><input id="obsPort" type="number" min="1" max="65535" placeholder="4455"></label>
+      </div>
+      <label class="field"><span>OBS WebSocket password</span><input id="obsPass" type="password" autocomplete="off"></label>
+      <button class="btn primary wide" id="obsSave">connect to OBS</button>
+      <p class="status"><i class="dot" id="obsDot"></i><span id="obsStatus">…</span></p>
+    </section>
+
+    <section class="card">
+      <h2>2 · the panel's password</h2>
+      <p class="hint">anyone who opens the panel needs this. pick a <b>new</b> one (not your OBS or email password), at least 8 characters, and only share it with people you trust to run your stream.</p>
+      <label class="field"><span id="panelPassLabel">panel password</span><input id="panelPass" type="password" autocomplete="new-password" minlength="8" maxlength="200"></label>
+      <button class="btn primary wide" id="panelPassSave">save the password</button>
+      <p class="saved" id="panelPassSaved"></p>
+    </section>
+
+    <section class="card">
+      <h2>3 · open the panel</h2>
+      <p class="hint">on a phone, tablet or PC on the <b>same Wi-Fi / network</b> as this PC, open:</p>
+      <div id="homeAddrs"></div>
+      <p class="hint" id="noHome" hidden>no home network found. is this PC connected?</p>
+      <p class="hint">the first time, Windows may ask whether Stagelight can use the network: allow it on <b>private networks</b>.</p>
+      <div id="tsAddrs"></div>
+      <details>
+        <summary class="muted">from anywhere (another house, mobile data): Tailscale</summary>
+        <ol>
+          <li>install <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> (free) on <b>this PC</b> and sign in.</li>
+          <li>install it on the <b>phone or PC</b> that controls the stream, signed in to the same account, or <b>share this PC</b> with your friend's account (Tailscale admin console → the PC → Share).</li>
+          <li>an address starting with <b>100.</b> shows up here. open it on that device, from anywhere.</li>
+        </ol>
+        <p class="hint">Tailscale keeps the panel off the open internet: only your devices (and people you share with) can reach it. don't open a port on your router for Stagelight.</p>
+      </details>
+      <p class="hint" id="sessions"></p>
+      <div class="row tight">
+        <button class="btn" id="openHere">open the panel on this PC</button>
+        <button class="btn" id="logoutAll">log everyone out</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>more</h2>
+      <label class="check"><input type="checkbox" id="autostart"> start Stagelight with Windows (in the tray, by the clock)</label>
+      <div class="grid">
+        <label class="field"><span>panel port (if 4850 is taken)</span><input id="port" type="number" min="1024" max="65535"></label>
+        <label class="field"><span>&nbsp;</span><button class="btn" id="portSave">change</button></label>
+      </div>
+      <p class="hint">closing this window keeps Stagelight running by the clock, so the panel keeps working. quit it from the tray icon.</p>
+      <h2>what happened</h2>
+      <pre class="log" id="log"></pre>
+    </section>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>

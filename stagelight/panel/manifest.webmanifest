@@ -1,0 +1,11 @@
+{
+  "name": "Stagelight",
+  "short_name": "Stagelight",
+  "description": "your stream's remote control",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d0b1a",
+  "theme_color": "#0d0b1a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

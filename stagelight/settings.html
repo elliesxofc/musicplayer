@@ -124,6 +124,8 @@
       <label class="check"><input type="checkbox" id="remoteView"> allow seeing this PC's screen from the panel</label>
       <label class="check"><input type="checkbox" id="remoteControl"> also allow mouse and keyboard</label>
       <p class="hint warn" id="remoteWarn">with mouse and keyboard on, every full access account can use this whole PC, not just OBS. only give full access to people you trust with your PC, and switch this off when you don't need it.</p>
+      <label class="check"><input type="checkbox" id="remoteFiles"> allow file transfer (browse this PC's files, download and upload them, like AnyDesk)</label>
+      <p class="hint warn" id="filesWarn" hidden>with file transfer on, every full access account can read and add files anywhere on this PC (after typing their password again). nothing can be deleted or overwritten from the panel. switch it off when you don't need it.</p>
       <label class="field"><span>most upload it may use (the stream comes first anyway: while live it's kept to 1.2 Mbps or less)</span>
         <select id="remoteMax">
           <option value="0">no limit (up to 8 Mbps)</option>

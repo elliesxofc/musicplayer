@@ -46,11 +46,17 @@ function showRemote(r) {
   $('#remoteControl').disabled = !r.view;
   $('#remoteWarn').hidden = !r.control;
   $('#remoteMax').value = String(r.max || 0);
+  $('#remoteFiles').checked = !!r.files;
+  $('#filesWarn').hidden = !r.files;
 }
 async function saveRemote() {
   showRemote(await S.setRemote({ view: $('#remoteView').checked, control: $('#remoteControl').checked }));
 }
 $('#remoteView').onchange = saveRemote;
+$('#remoteFiles').onchange = async () => {
+  if ($('#remoteFiles').checked && !confirm('allow file transfer?\n\nevery full access account can then read and add files anywhere on this PC (after typing their password again).')) { $('#remoteFiles').checked = false; return; }
+  showRemote(await S.setRemoteFiles($('#remoteFiles').checked));
+};
 $('#remoteMax').onchange = async () => showRemote(await S.setRemoteMax($('#remoteMax').value));
 $('#remoteControl').onchange = async () => {
   if ($('#remoteControl').checked && !confirm('allow mouse and keyboard?\n\nevery full access account can then use this whole PC (not just OBS). only do this if you trust them with your PC.')) {

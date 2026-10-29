@@ -108,6 +108,11 @@ Stagelight is made to stay out of OBS's way:
 - while you're live, the remote display shares the upload with the stream and the stream comes
   first: the picture stays at 1.2 Mbps and 15 fps, and drops to 0.4 Mbps and 8 fps as soon as
   OBS drops frames, struggles to send or reconnects, until the stream has been fine for a minute
+- file transfer (like AnyDesk's), a separate switch under the remote display, off by default: full
+  access accounts browse the stream PC's drives and folders, download files (a folder as a .zip,
+  up to 4 GB), upload files or whole folders into the open folder, and make folders, after typing
+  their password again (good for 30 minutes of use). Nothing can be deleted, renamed or
+  overwritten (a taken name gets " (2)"); every transfer is logged and shows a notification
 - the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
   Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
 

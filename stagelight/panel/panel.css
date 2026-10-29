@@ -242,3 +242,27 @@ body:not([data-role="full"]) .needs-full { display: none !important; }
 .obs-sec .btn { width: 100%; min-height: 40px; }
 .obs-sec .note { margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
 .obs-sec .note.warn { color: #ffc47a; }
+
+/* file transfer (remote display) */
+#fm { z-index: 12; }
+#formModal, #confirm { z-index: 14; } /* questions asked from the file window show above it */
+.fm-card { width: min(760px, 100%); height: min(86dvh, 820px); display: flex; flex-direction: column; }
+.fm-card .card-head h3 { flex: 1; margin: 0; }
+#fmMain { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+#fmMain[hidden] { display: none; }
+.fm-path { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.fm-path input { flex: 1; min-width: 0; height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0, 0, 0, .3); color: var(--ink); font: 13.5px ui-monospace, Consolas, monospace; }
+.fm-path .btn.small, .fm-tools .btn.small { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.fm-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+.fm-status { margin: 0 0 6px; min-height: 1.3em; font-size: 12.5px; color: var(--muted); }
+.fm-status.bad { color: #ff8aa6; }
+.fm-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; min-height: 0; border-top: 1px solid var(--line); }
+.fm-list li { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-bottom: 1px solid rgba(255, 255, 255, .04); }
+.fm-list li .ico { width: 22px; height: 22px; flex: none; color: var(--muted); }
+.fm-list li .nm { flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: var(--ink); font: inherit; font-size: 14px; padding: 6px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.fm-list li .nm.file { cursor: default; }
+.fm-list li .meta { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fm-list li .dl { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; color: var(--amber); flex: none; }
+.fm-list li .dl svg { width: 20px; height: 20px; }
+.fm-list .empty { color: var(--muted); font-size: 13.5px; padding: 14px 4px; }
+@media (max-width: 520px) { .fm-list li .meta { display: none; } }

@@ -5,7 +5,7 @@
    password-protected panel to phones, tablets and other PCs on the same network, or from
    anywhere through Tailscale. */
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, safeStorage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, safeStorage, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -75,7 +75,7 @@ const updateBusy = () => obs.setBusy(server.watcherCount() > 0 || winOpen() || r
 const UPLOAD_LIMITS = [0, 4_000_000, 2_000_000, 1_000_000, 500_000]; // 0 = no limit
 const remoteSettings = () => {
   const r = readConfig().remote || {};
-  return { view: !!r.view, control: !!r.view && !!r.control, max: UPLOAD_LIMITS.includes(r.max) ? r.max : 0 };
+  return { view: !!r.view, control: !!r.view && !!r.control, max: UPLOAD_LIMITS.includes(r.max) ? r.max : 0, files: !!r.files };
 };
 const remote = createRemote({
   root: ROOT, icon: ICON, getSettings: remoteSettings, log,
@@ -97,7 +97,16 @@ function accounts() {
 // your own web address through a Cloudflare Tunnel: off unless switched on here
 const webSettings = () => { const w = readConfig().web || {}; return { on: !!w.on, host: typeof w.host === 'string' ? w.host : '' }; };
 const mediaDir = () => path.join(app.getPath('userData'), 'media');
-const server = createServer({ obs, remote, mediaDir: mediaDir(), getAccounts: accounts, getWeb: webSettings, log, onWatchers: updateBusy });
+// file transfer: a notification on this PC for every file that comes or goes (a few at most per minute)
+let filesNoted = [];
+function noteFiles(text) {
+  const now = Date.now();
+  filesNoted = filesNoted.filter(t => now - t < 60_000);
+  if (filesNoted.length >= 4 || !Notification.isSupported()) return;
+  filesNoted.push(now);
+  new Notification({ title: 'Stagelight: file transfer', body: text, icon: ICON }).show();
+}
+const server = createServer({ obs, remote, mediaDir: mediaDir(), filesOn: () => remoteSettings().files, onFiles: noteFiles, getAccounts: accounts, getWeb: webSettings, log, onWatchers: updateBusy });
 
 /* The stream comes first: every Stagelight process (window, screen sharing, the GPU helper)
    runs below normal priority, so when the PC is busy Windows serves OBS before Stagelight. */
@@ -254,6 +263,11 @@ ipcMain.handle('set-web', (_e, next) => {
   writeConfig({ web: { on, host } });
   log(on ? `web address on: https://${host}` : 'web address off');
   return { ok: true, status: status() };
+});
+ipcMain.handle('set-remote-files', (_e, on) => {
+  writeConfig({ remote: { ...(readConfig().remote || {}), files: !!on } });
+  log(`file transfer ${on ? 'on' : 'off'}`);
+  return remoteSettings();
 });
 ipcMain.handle('set-remote-max', (_e, max) => {
   const m = UPLOAD_LIMITS.includes(Number(max)) ? Number(max) : 0;

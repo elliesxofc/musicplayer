@@ -1,7 +1,7 @@
 {
   "name": "stagelight",
   "productName": "Stagelight",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "a remote control for OBS in any browser, with a password",
   "author": "elliesxofc",
   "license": "UNLICENSED",
@@ -22,6 +22,7 @@
       "server.js",
       "remote.js",
       "input-win.js",
+      "files.js",
       "capture.html",
       "capture.js",
       "capture-preload.js",

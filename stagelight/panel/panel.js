@@ -588,7 +588,11 @@ const rdStage = $('#rdStage'), rdVideo = $('#rdVideo');
 
 async function remoteInfo() {
   const info = await api('/api/remote').catch(() => ({ view: false }));
-  $('#remoteCard').hidden = !info.view;
+  $('#remoteCard').hidden = !info.view && !info.files;
+  $('#remoteOpen').hidden = !info.view;
+  $('#filesOpen').hidden = !info.files;
+  $('#rdFiles').hidden = !info.files;
+  if (!info.view && info.files) $('#remoteHint').textContent = 'browse, download and upload files on the stream PC.';
   if (info.view) {
     $('#remoteHint').textContent = info.active
       ? `in use right now (${info.from}). opening it here takes over.`
@@ -909,6 +913,116 @@ $('#recBtn').onclick = async () => {
   if (st.record.active && !(await ask('stop recording?', 'the recording is saved where OBS saves recordings.', 'stop'))) return;
   act({ type: 'record', on: !st.record.active });
 };
+/* ───────────── file transfer (remote display, full access) ─────────────
+   Browse the stream PC's drives and folders, download files (folders as a .zip), upload files
+   or whole folders into the folder that's open, and make folders. */
+let fmPath = '', fmBusy = false;
+const fmSize = n => (n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
+const fmStatus = (text, bad = false) => { $('#fmStatus').textContent = text; $('#fmStatus').classList.toggle('bad', bad); };
+const fmIcon = id => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('class', 'ico'); const u = document.createElementNS('http://www.w3.org/2000/svg', 'use'); u.setAttribute('href', `#${id}`); s.append(u); return s; };
+async function fmApi(path, body) {
+  try { return await api(path, body); } catch (err) {
+    if (/password again/.test(err.message)) { fmLocked(); throw new Error('locked'); }
+    throw err;
+  }
+}
+function fmLocked() { $('#fmLock').hidden = false; $('#fmMain').hidden = true; $('#fmUser').textContent = me.user; setTimeout(() => $('#fmPass').focus(), 50); }
+async function openFiles() {
+  $('#fm').hidden = false;
+  let st;
+  try { st = await api('/api/files/state'); } catch (err) { $('#fm').hidden = true; return toast(err.message, 4000); }
+  if (!st.unlocked) return fmLocked();
+  $('#fmLock').hidden = true; $('#fmMain').hidden = false;
+  fmGo(fmPath);
+}
+$('#fmLock').onsubmit = async e => {
+  e.preventDefault();
+  try { await api('/api/files/unlock', { password: $('#fmPass').value }); } catch (err) { return toast(err.message, 4000); } finally { $('#fmPass').value = ''; }
+  $('#fmLock').hidden = true; $('#fmMain').hidden = false;
+  fmGo(fmPath);
+};
+async function fmGo(path) {
+  let r;
+  fmStatus('loading…');
+  try { r = await fmApi(`/api/files/list?path=${encodeURIComponent(path)}`); } catch (err) { if (err.message !== 'locked') fmStatus(err.message, true); return; }
+  fmPath = r.path; $('#fmPath').value = r.path;
+  $('#fmUp').disabled = r.parent == null;
+  $('#fmUp').dataset.to = r.parent ?? '';
+  for (const id of ['#fmUpFiles', '#fmUpFolder', '#fmMkdir', '#fmZip']) $(id).disabled = !r.path;
+  fmStatus(r.path ? `${r.entries.length} item${r.entries.length === 1 ? '' : 's'}${r.more ? ` (and ${r.more} more not shown)` : ''}` : 'pick a drive');
+  const list = $('#fmList');
+  list.replaceChildren(...r.entries.map(en => {
+    const li = document.createElement('li');
+    li.append(fmIcon(!r.path ? 'i-drive' : en.dir ? 'i-folder' : 'i-file'));
+    const nm = document.createElement('button');
+    nm.type = 'button'; nm.className = `nm${en.dir ? '' : ' file'}`; nm.textContent = en.name; nm.title = en.path;
+    if (en.dir) nm.onclick = () => fmGo(en.path);
+    const meta = document.createElement('span'); meta.className = 'meta';
+    meta.textContent = [en.dir ? '' : fmSize(en.size), en.mtime ? new Date(en.mtime).toLocaleDateString() : ''].filter(Boolean).join(' · ');
+    li.append(nm, meta);
+    if (r.path) {
+      const dl = document.createElement('a');
+      dl.className = 'dl'; dl.href = `/api/files/download?path=${encodeURIComponent(en.path)}${en.dir ? '&zip=1' : ''}`; // the stream PC names the file
+      dl.title = en.dir ? 'download the folder (.zip)' : 'download';
+      dl.setAttribute('aria-label', `download ${en.name}`);
+      dl.innerHTML = '<svg><use href="#i-down"/></svg>';
+      dl.onclick = () => toast(en.dir ? `zipping and downloading ${en.name}…` : `downloading ${en.name}…`);
+      li.append(dl);
+    }
+    return li;
+  }));
+  if (!r.entries.length) list.innerHTML = '<li class="empty">this folder is empty</li>';
+  list.scrollTop = 0;
+}
+$('#fmUp').onclick = () => fmGo($('#fmUp').dataset.to || '');
+$('#fmRoots').onclick = () => fmGo('');
+$('#fmPath').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); fmGo($('#fmPath').value.trim()); } };
+$('#fmZip').onclick = () => { if (!fmPath) return; const a = document.createElement('a'); a.href = `/api/files/download?path=${encodeURIComponent(fmPath)}&zip=1`; document.body.append(a); a.click(); a.remove(); toast('zipping and downloading this folder…'); };
+$('#fmMkdir').onclick = async () => {
+  const v = await form('new folder', `in ${fmPath}`, [{ name: 'name', label: 'folder name', required: true, placeholder: 'New folder' }], 'make it');
+  if (!v) return;
+  try { const r = await fmApi('/api/files/mkdir', { dir: fmPath, name: v.name }); toast(`made ${r.name} ✦`); fmGo(fmPath); } catch (err) { if (err.message !== 'locked') toast(err.message, 4000); }
+};
+$('#fmUpFiles').onclick = () => { $('#fmFileIn').value = ''; $('#fmFileIn').click(); };
+$('#fmUpFolder').onclick = () => { $('#fmDirIn').value = ''; $('#fmDirIn').click(); };
+// one file after the other, each into the folder that's open (a folder keeps its own folders)
+async function fmUpload(list) {
+  const items = [...list];
+  if (!items.length || fmBusy) return;
+  fmBusy = true;
+  const dir = fmPath, total = items.reduce((n, f) => n + f.size, 0);
+  let done = 0, ok = 0, failed = 0;
+  for (const [i, f] of items.entries()) {
+    const rel = f.webkitRelativePath || f.name;
+    try {
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `/api/files/upload?dir=${encodeURIComponent(dir)}&rel=${encodeURIComponent(rel)}`);
+        xhr.setRequestHeader('X-Stagelight', '1');
+        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+        xhr.upload.onprogress = e => fmStatus(`uploading ${i + 1} of ${items.length}: ${rel} · ${Math.round((done + e.loaded) / Math.max(1, total) * 100)}%`);
+        xhr.onload = () => { let r = {}; try { r = JSON.parse(xhr.responseText); } catch { /* not JSON */ } if (xhr.status === 200) resolve(); else reject(new Error(r.error || (xhr.status === 413 ? 'too big for this connection' : `error ${xhr.status}`))); };
+        xhr.onerror = () => reject(new Error("the upload didn't get through"));
+        xhr.send(f);
+      });
+      ok++;
+    } catch (err) {
+      failed++;
+      if (/password again/.test(err.message)) { fmBusy = false; return fmLocked(); }
+      toast(`${rel}: ${err.message}`, 5000);
+    }
+    done += f.size;
+  }
+  fmBusy = false;
+  if (fmPath === dir) await fmGo(dir);
+  fmStatus(`uploaded ${ok} file${ok === 1 ? '' : 's'}${failed ? `, ${failed} failed` : ''} ✦`, !!failed);
+}
+$('#fmFileIn').onchange = () => fmUpload($('#fmFileIn').files);
+$('#fmDirIn').onchange = () => fmUpload($('#fmDirIn').files);
+$('#fmClose').onclick = () => { if (fmBusy && !confirm('an upload is still going. close anyway? (it keeps going in the background)')) return; $('#fm').hidden = true; };
+$('#filesOpen').onclick = openFiles;
+$('#rdFiles').onclick = openFiles;
+
 /* ───────────── OBS's own settings (full access only) ───────────── */
 function obsField(label, input) {
   const l = document.createElement('label'); l.className = 'field';

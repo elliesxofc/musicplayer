@@ -16,6 +16,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const files = require('./files');
 
 const SESSION_MS = 12 * 3600 * 1000;
 const COOKIE = 'stagelight_session';
@@ -75,7 +76,7 @@ function mediaType(head) {
 
 const loopback = a => /^(127\.|::1$|::ffff:127\.)/.test(String(a || ''));
 
-function createServer({ obs, remote = null, mediaDir = '', getAccounts, getWeb = () => ({ on: false, host: '' }), log = () => {}, onWatchers = () => {} }) {
+function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false, onFiles = () => {}, getAccounts, getWeb = () => ({ on: false, host: '' }), log = () => {}, onWatchers = () => {} }) {
   const sessions = new Map(); // token → { expires, ip }
   const failures = new Map(); // ip → { count, lockedUntil, lockMs }
   const watchers = new Set(); // open event streams: { res, token }
@@ -234,6 +235,8 @@ function createServer({ obs, remote = null, mediaDir = '', getAccounts, getWeb =
       req.on('close', () => { watchers.delete(w); onWatchers(watchers.size); });
       return;
     }
+    // file transfer (remote display): browsing and downloads are GETs, so they're handled here
+    if (p.startsWith('/api/files/')) return filesApi(req, res, url, session);
     const isUpload = p === '/api/upload' && req.method === 'POST' && req.headers['x-stagelight'] === '1' && /^application\/octet-stream\b/.test(req.headers['content-type'] || '');
     if (!isUpload && (req.method !== 'POST' || !fromPanel(req))) return send(res, 403, { error: 'not from the panel' });
     if (p === '/api/logout') {
@@ -334,6 +337,60 @@ function createServer({ obs, remote = null, mediaDir = '', getAccounts, getWeb =
         send(res, 409, { error: err.message || 'OBS said no' });
       }
     });
+  }
+
+  /* ───────────── file transfer (like AnyDesk's), for the remote display ─────────────
+     Full access only, only while "allow file transfer" is on in Stagelight, and only after the
+     account's password is typed again (good for 30 minutes). Every transfer is noted. */
+  const FILES_MS = 30 * 60_000;
+  async function filesApi(req, res, url, session) {
+    const p = url.pathname;
+    const fail = (code, error, extra = {}) => send(res, code, { error, ...extra });
+    if (!atLeast(session.role, 'full')) return fail(403, 'only full access accounts can use file transfer');
+    if (!filesOn()) return fail(403, 'file transfer is switched off in Stagelight on the stream PC');
+    const s = sessions.get(session.token);
+    if (p === '/api/files/state' && req.method === 'GET') return send(res, 200, { on: true, unlocked: !!(s && s.filesUntil > Date.now()) });
+    if (p === '/api/files/unlock' && req.method === 'POST') {
+      if (!fromPanel(req)) return fail(403, 'not from the panel');
+      let body; try { body = await readBody(req); } catch { return fail(400, 'bad request'); }
+      const account = verify(ipOf(req), session.user, body.password, viaWeb(req));
+      if (account.error) return fail(account.error[0], account.error[1]);
+      if (s) s.filesUntil = Date.now() + FILES_MS;
+      log(`${session.user} opened file transfer from ${ipOf(req)}`);
+      return send(res, 200, { ok: true });
+    }
+    if (!s || !(s.filesUntil > Date.now())) return fail(423, 'type your password again to use file transfer', { locked: true });
+    s.filesUntil = Date.now() + FILES_MS; // in use: stays open
+    const who = `${session.user} (${ipOf(req)})`;
+    try {
+      if (p === '/api/files/list' && req.method === 'GET') return send(res, 200, await files.list(url.searchParams.get('path') || ''));
+      if (p === '/api/files/download' && req.method === 'GET') {
+        const target = url.searchParams.get('path') || '';
+        const r = url.searchParams.get('zip') === '1' ? await files.sendZip(res, target) : await files.sendFile(res, target);
+        log(`${who} downloaded ${r.files != null ? `the folder ${target} (${r.files} files, ` : `${target} (`}${Math.round(r.size / 1024)} KB)${r.stopped ? ', stopped' : ''}`);
+        onFiles(`${session.user} downloaded ${r.name}`);
+        return;
+      }
+      if (p === '/api/files/upload' && req.method === 'POST') {
+        if (req.headers['x-stagelight'] !== '1' || !/^application\/octet-stream\b/.test(req.headers['content-type'] || '')) return fail(403, 'not from the panel');
+        const r = await files.receive(req, url.searchParams.get('dir') || '', url.searchParams.get('rel') || '');
+        log(`${who} uploaded ${r.path} (${Math.round(r.size / 1024)} KB)`);
+        onFiles(`${session.user} uploaded ${r.name}`);
+        return send(res, 200, { ok: true, name: r.name });
+      }
+      if (p === '/api/files/mkdir' && req.method === 'POST') {
+        if (!fromPanel(req)) return fail(403, 'not from the panel');
+        let body; try { body = await readBody(req); } catch { return fail(400, 'bad request'); }
+        const r = await files.makeDir(body.dir, body.name);
+        log(`${who} made the folder ${r.path}`);
+        return send(res, 200, { ok: true, name: r.name });
+      }
+      return fail(404, 'not found');
+    } catch (err) {
+      if (res.headersSent) { res.destroy(); return; }
+      const msg = err.code === 'ENOENT' ? "that isn't there any more" : err.code === 'EACCES' || err.code === 'EPERM' ? "Windows doesn't allow that here" : err.code === 'ENOTDIR' ? "that's not a folder" : err.message || 'something went wrong';
+      return fail(typeof err.code === 'number' ? err.code : 409, msg);
+    }
   }
 
   // OBS changed: tell every open panel (and close the ones whose login ran out)

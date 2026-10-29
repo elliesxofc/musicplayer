@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('stagelight', {
   logoutAll: () => ipcRenderer.invoke('logout-all'),
   setRemote: settings => ipcRenderer.invoke('set-remote', settings),
   setRemoteMax: max => ipcRenderer.invoke('set-remote-max', Number(max)),
+  setRemoteFiles: on => ipcRenderer.invoke('set-remote-files', !!on),
   stopRemote: () => ipcRenderer.invoke('remote-stop'),
   setWeb: settings => ipcRenderer.invoke('set-web', settings),
   open: url => ipcRenderer.invoke('open', String(url)),

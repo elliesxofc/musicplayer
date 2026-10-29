@@ -27,7 +27,28 @@ function showStatus(s) {
   $('#tsAddrs').replaceChildren(...ts.map(addrRow));
   $('#sessions').textContent = s.sessions ? `${s.sessions} device${s.sessions === 1 ? ' is' : 's are'} logged in to the panel.` : 'nobody is logged in to the panel right now.';
   $('#openHere').dataset.url = `http://localhost:${s.port || $('#port').value}`;
+  const r = s.remote || {};
+  $('#remoteStatus').hidden = !r.active;
+  if (r.active) $('#remoteWho').textContent = `${r.from} is ${r.control ? 'controlling' : 'watching'} this PC right now`;
 }
+function showRemote(r) {
+  $('#remoteView').checked = r.view;
+  $('#remoteControl').checked = r.control;
+  $('#remoteControl').disabled = !r.view;
+  $('#remoteWarn').hidden = !r.control;
+}
+async function saveRemote() {
+  showRemote(await S.setRemote({ view: $('#remoteView').checked, control: $('#remoteControl').checked }));
+}
+$('#remoteView').onchange = saveRemote;
+$('#remoteControl').onchange = async () => {
+  if ($('#remoteControl').checked && !confirm('allow mouse and keyboard?\n\nanyone with the panel password can then use this whole PC (not just OBS). only do this if you trust everyone who has the password.')) {
+    $('#remoteControl').checked = false;
+    return;
+  }
+  saveRemote();
+};
+$('#remoteStop').onclick = async () => showStatus(await S.stopRemote());
 
 (async () => {
   const c = await S.get();
@@ -38,6 +59,8 @@ function showStatus(s) {
   $('#port').value = c.port;
   $('#autostart').checked = c.autostart;
   $('#log').textContent = c.log.join('\n');
+  showRemote(c.remote);
+  $('#remoteNoInput').hidden = c.remote.controlWorks;
   showStatus(c.status);
 })();
 

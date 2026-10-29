@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>Stagelight · remote display</title>
+  <style>
+    html, body { margin: 0; background: transparent; overflow: hidden; font: 600 13.5px "Segoe UI", system-ui, sans-serif; }
+    .bar {
+      display: flex; align-items: center; gap: 10px; height: 36px; margin: 4px; padding: 0 6px 0 14px; border-radius: 999px;
+      background: rgba(20, 14, 40, .94); color: #fff; border: 1px solid rgba(255, 181, 71, .7); box-shadow: 0 6px 24px rgba(0, 0, 0, .5);
+      -webkit-app-region: drag;
+    }
+    i { width: 9px; height: 9px; border-radius: 50%; background: #ff3d6e; box-shadow: 0 0 8px #ff3d6e; flex: none; animation: pulse 1.4s ease-in-out infinite; }
+    span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button { -webkit-app-region: no-drag; border: 0; border-radius: 999px; height: 26px; padding: 0 12px; font: inherit; background: #ffb547; color: #1a0f05; cursor: pointer; }
+    @keyframes pulse { 50% { opacity: .35; } }
+  </style>
+</head>
+<body>
+  <div class="bar"><i></i><span id="text"></span><button id="stop">stop</button></div>
+  <script src="bar.js"></script>
+</body>
+</html>

@@ -38,7 +38,7 @@ function checkPassword(password, stored) {
   return crypto.timingSafeEqual(want, got);
 }
 
-function createServer({ obs, getPassword, log = () => {} }) {
+function createServer({ obs, remote = null, getPassword, log = () => {} }) {
   const sessions = new Map(); // token → { expires, ip }
   const failures = new Map(); // ip → { count, lockedUntil, lockMs }
   const watchers = new Set(); // open event streams: { res, token }
@@ -80,23 +80,31 @@ function createServer({ obs, getPassword, log = () => {} }) {
   // without asking first, and Stagelight never says yes) and JSON
   const fromPanel = req => req.headers['x-stagelight'] === '1' && /^application\/json\b/.test(req.headers['content-type'] || '');
 
-  async function login(req, res) {
-    const ip = ipOf(req), now = Date.now();
+  // the password, with the lockout: null when it's right, otherwise [status, message]
+  function verify(ip, password) {
+    const now = Date.now();
     const f = failures.get(ip) || { count: 0, lockedUntil: 0, lockMs: 60_000 };
-    if (f.lockedUntil > now) return send(res, 429, { error: `too many wrong passwords. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds` });
+    if (f.lockedUntil > now) return [429, `too many wrong passwords. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds`];
     const stored = getPassword();
-    if (!stored) return send(res, 403, { error: "the panel password isn't set yet. set it in Stagelight on the stream PC" });
-    let body;
-    try { body = await readBody(req); } catch { return send(res, 400, { error: 'bad request' }); }
-    const ok = typeof body.password === 'string' && body.password.length <= 200 && checkPassword(body.password, stored);
+    if (!stored) return [403, "the panel password isn't set yet. set it in Stagelight on the stream PC"];
+    const ok = typeof password === 'string' && password.length <= 200 && checkPassword(password, stored);
     if (!ok) {
       f.count++;
       if (f.count >= 5) { f.lockedUntil = now + f.lockMs; f.lockMs = Math.min(f.lockMs * 2, 3600_000); f.count = 0; }
       failures.set(ip, f);
       log(`wrong panel password from ${ip}`);
-      return send(res, 401, { error: f.lockedUntil > now ? `too many wrong passwords. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds` : 'wrong password' });
+      return [401, f.lockedUntil > now ? `too many wrong passwords. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds` : 'wrong password'];
     }
     failures.delete(ip);
+    return null;
+  }
+
+  async function login(req, res) {
+    const ip = ipOf(req), now = Date.now();
+    let body;
+    try { body = await readBody(req); } catch { return send(res, 400, { error: 'bad request' }); }
+    const bad = verify(ip, body.password);
+    if (bad) return send(res, bad[0], { error: bad[1] });
     const token = crypto.randomBytes(32).toString('base64url');
     sessions.set(token, { expires: now + SESSION_MS, ip });
     log(`panel opened from ${ip}`);
@@ -122,6 +130,10 @@ function createServer({ obs, getPassword, log = () => {} }) {
     if (!session) return send(res, 401, { error: 'log in first' });
 
     if (p === '/api/state' && req.method === 'GET') return send(res, 200, obs.snapshot());
+    if (p === '/api/remote' && req.method === 'GET') {
+      if (!remote) return send(res, 200, { view: false });
+      return send(res, 200, { ...remote.info(), screens: remote.settings().view ? await remote.screens() : [] });
+    }
     if (p === '/api/preview' && req.method === 'GET') {
       const jpg = await obs.screenshot();
       return jpg ? send(res, 200, jpg, 'image/jpeg') : send(res, 503, { error: 'no preview right now' });
@@ -140,6 +152,19 @@ function createServer({ obs, getPassword, log = () => {} }) {
       for (const w of watchers) if (w.token === session.token) w.res.end();
       return send(res, 200, { ok: true }, undefined, { 'Set-Cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` });
     }
+    // the remote display: the password again first (a phone left logged in isn't enough)
+    if (p === '/api/remote/start' && remote) {
+      let body;
+      try { body = await readBody(req, 200_000); } catch { return send(res, 400, { error: 'bad request' }); }
+      const bad = verify(ipOf(req), body.password);
+      if (bad) return send(res, bad[0], { error: bad[1] });
+      try {
+        return send(res, 200, await remote.start({ sdp: body.sdp, screenId: String(body.screen || ''), quality: String(body.quality || ''), from: ipOf(req) }));
+      } catch (err) {
+        return send(res, 409, { error: err.message });
+      }
+    }
+    if (p === '/api/remote/stop' && remote) { remote.end('ended from the panel'); return send(res, 200, { ok: true }); }
     if (p === '/api/action') {
       let body;
       try { body = await readBody(req); } catch { return send(res, 400, { error: 'bad request' }); }

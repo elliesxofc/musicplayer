@@ -11,6 +11,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { createObs } = require('./obs');
 const { createServer, hashPassword } = require('./server');
+const { createRemote } = require('./remote');
+
+// the remote display's video goes straight between the PCs: real addresses (not hidden ones)
+// so a phone on the same network or Tailscale finds this PC
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
 
 const ROOT = __dirname;
 const ICON = path.join(ROOT, 'icons', 'icon-256.png');
@@ -63,11 +68,18 @@ const log = line => {
 };
 
 const obs = createObs({ onChange: snap => { server.broadcast(snap); sendWin('status', status()); refreshTray(); }, log });
-const server = createServer({ obs, getPassword: () => readConfig().panelPassword || null, log });
+const remoteSettings = () => { const r = readConfig().remote || {}; return { view: !!r.view, control: !!r.view && !!r.control }; };
+const remote = createRemote({
+  root: ROOT, icon: ICON, getSettings: remoteSettings, log,
+  onChange: () => { sendWin('status', status()); refreshTray(); },
+});
+remote.settings = remoteSettings;
+remote.info = () => ({ ...remoteSettings(), controlWorks: remote.canControl(), ...remote.status() });
+const server = createServer({ obs, remote, getPassword: () => readConfig().panelPassword || null, log });
 
 function status() {
   const s = obs.snapshot();
-  return { obs: s.status, connected: s.connected, live: s.stream.active, recording: s.record.active, sessions: server.sessionCount(), port: server.port(), addresses: addresses() };
+  return { obs: s.status, connected: s.connected, live: s.stream.active, recording: s.record.active, sessions: server.sessionCount(), port: server.port(), addresses: addresses(), remote: remote.status() };
 }
 
 async function startServer() {
@@ -104,6 +116,7 @@ function refreshTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: `Stagelight · ${what}`, enabled: false },
     { type: 'separator' },
+    ...(remote.status().active ? [{ label: `stop the remote display (${remote.status().from})`, click: () => remote.end('stopped on the stream PC') }] : []),
     { label: 'open the panel here', click: () => shell.openExternal(`http://localhost:${server.port() || panelPort()}`) },
     { label: 'settings', click: showWindow },
     { type: 'separator' },
@@ -112,7 +125,7 @@ function refreshTray() {
 }
 
 app.on('second-instance', showWindow);
-app.on('before-quit', () => { quitting = true; obs.stop(); server.stop(); });
+app.on('before-quit', () => { quitting = true; remote.stop(); obs.stop(); server.stop(); });
 app.on('window-all-closed', () => { /* stays in the tray */ });
 
 app.whenReady().then(async () => {
@@ -135,6 +148,7 @@ ipcMain.handle('get', () => {
     hasPanelPassword: !!c.panelPassword,
     port: panelPort(),
     autostart: app.getLoginItemSettings().openAtLogin,
+    remote: { ...remoteSettings(), controlWorks: remote.canControl() },
     status: status(),
     log: logLines,
   };
@@ -169,6 +183,15 @@ ipcMain.handle('autostart', (_e, on) => {
   app.setLoginItemSettings({ openAtLogin: !!on, args: ['--hidden'] });
   return app.getLoginItemSettings().openAtLogin;
 });
+// the remote display: watching, and mouse and keyboard (both off unless switched on here)
+ipcMain.handle('set-remote', (_e, next) => {
+  const view = !!(next && next.view), control = view && !!(next && next.control);
+  writeConfig({ remote: { view, control } });
+  remote.settingsChanged();
+  log(`remote display ${view ? (control ? 'on, with mouse and keyboard' : 'on, watching only') : 'off'}`);
+  return remoteSettings();
+});
+ipcMain.handle('remote-stop', () => { remote.end('stopped on the stream PC'); return status(); });
 ipcMain.handle('logout-all', () => { server.logoutAll(); log('logged everyone out of the panel'); return status(); });
 ipcMain.handle('open', (_e, url) => {
   if (typeof url === 'string' && /^https?:\/\//.test(url)) shell.openExternal(url);

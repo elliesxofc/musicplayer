@@ -84,6 +84,12 @@
       </div>
     </section>
 
+    <section class="card" id="remoteCard" hidden>
+      <h2>remote display</h2>
+      <p class="hint" id="remoteHint"></p>
+      <button class="btn primary wide" id="remoteOpen">open the PC's full screen</button>
+    </section>
+
     <section class="card">
       <h2>scenes</h2>
       <div class="scenes" id="scenes"></div>
@@ -113,6 +119,49 @@
       </div>
     </div>
   </div>
+  <!-- the remote display: the PC's whole screen, with its mouse and keyboard -->
+  <div class="rd" id="rd" hidden>
+    <div class="rd-bar">
+      <select id="rdScreen" aria-label="which screen"></select>
+      <select id="rdQuality" aria-label="picture">
+        <option value="smooth">smooth · 720p</option>
+        <option value="sharp">sharp · 1080p</option>
+        <option value="fast">fast · 60 fps</option>
+      </select>
+      <span class="rd-state" id="rdState">connecting…</span>
+      <button class="btn small" id="rdKeys" type="button">keys</button>
+      <button class="btn small" id="rdFull" type="button">full screen</button>
+      <button class="btn small danger" id="rdEnd" type="button">end</button>
+    </div>
+    <div class="rd-stage" id="rdStage" tabindex="0">
+      <video id="rdVideo" autoplay playsinline muted></video>
+    </div>
+    <div class="rd-keys" id="rdKeyPad" hidden>
+      <div class="rd-type">
+        <input id="rdText" type="text" placeholder="type here, then send" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="btn small primary" id="rdSend" type="button">send</button>
+      </div>
+      <div class="rd-row" id="rdMods">
+        <button class="btn small" data-mod="ControlLeft">ctrl</button>
+        <button class="btn small" data-mod="AltLeft">alt</button>
+        <button class="btn small" data-mod="ShiftLeft">shift</button>
+        <button class="btn small" data-mod="MetaLeft">win</button>
+      </div>
+      <div class="rd-row" id="rdSpecial">
+        <button class="btn small" data-key="Escape">esc</button>
+        <button class="btn small" data-key="Tab">tab</button>
+        <button class="btn small" data-key="Enter">enter</button>
+        <button class="btn small" data-key="Backspace">⌫</button>
+        <button class="btn small" data-key="Delete">del</button>
+        <button class="btn small" data-key="ArrowLeft">←</button>
+        <button class="btn small" data-key="ArrowUp">↑</button>
+        <button class="btn small" data-key="ArrowDown">↓</button>
+        <button class="btn small" data-key="ArrowRight">→</button>
+      </div>
+      <p class="hint">on a phone: turn it sideways (or full screen) for a bigger picture. tap to click, hold to right-click, drag to drag, two fingers to scroll. with a real keyboard, click the screen and type.</p>
+    </div>
+  </div>
+
   <!-- adding a source / changing a text -->
   <div class="modal" id="formModal" hidden>
     <form class="modal-card" id="form" autocomplete="off">

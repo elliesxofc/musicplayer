@@ -20,7 +20,7 @@ const api = async (path, body) => {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && path !== '/api/login') showLogin();
+  if (res.status === 401 && data.error === 'log in first') showLogin(); // logged out (not a wrong password typed again)
   if (!res.ok) throw new Error(data.error || `error ${res.status}`);
   return data;
 };
@@ -29,6 +29,7 @@ const act = (a, done) => api('/api/action', a).then(done || (() => {})).catch(er
 /* ───────────── log in / out ───────────── */
 function showLogin() {
   if (events) { events.close(); events = null; }
+  if (typeof rdClose === 'function') rdClose(false);
   $('#panelView').hidden = true;
   $('#loginView').hidden = false;
   setTimeout(() => $('#password').focus(), 50);
@@ -37,6 +38,7 @@ function showPanel() {
   $('#loginView').hidden = true;
   $('#panelView').hidden = false;
   listen();
+  remoteInfo();
 }
 $('#loginForm').onsubmit = async e => {
   e.preventDefault();
@@ -383,6 +385,217 @@ $('#selRemove').onclick = async () => {
   if (!it || !(await ask(`remove "${it.name}"?`, `it's taken out of the scene "${st.scene}".`, 'remove'))) return;
   act({ type: 'remove', scene: st.scene, id: it.id }, () => { selected = null; toast('removed'); });
 };
+
+/* ───────────── remote display: the PC's whole screen, mouse and keyboard ─────────────
+   The video comes straight from the stream PC over WebRTC; mouse and keyboard go back over a
+   data channel. Places are sent as 0…1 across the screen, so any size of phone works. */
+let rd = null; // { pc, dc, password, control }
+const rdStage = $('#rdStage'), rdVideo = $('#rdVideo');
+
+async function remoteInfo() {
+  const info = await api('/api/remote').catch(() => ({ view: false }));
+  $('#remoteCard').hidden = !info.view;
+  if (info.view) {
+    $('#remoteHint').textContent = info.active
+      ? `in use right now (${info.from}). opening it here takes over.`
+      : info.control && info.controlWorks ? 'see the stream PC\'s screen and use its mouse and keyboard, for OBS\'s full window.'
+        : 'see the stream PC\'s screen (watching only: mouse and keyboard are switched off on the PC).';
+  }
+  return info;
+}
+setInterval(() => { if (!$('#panelView').hidden && !rd) remoteInfo(); }, 15_000);
+
+const iceDone = pc => new Promise(resolve => {
+  if (pc.iceGatheringState === 'complete') return resolve();
+  const t = setTimeout(resolve, 2500);
+  pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); resolve(); } });
+});
+const rdState = (text, on = false) => { $('#rdState').textContent = text; $('#rdState').classList.toggle('on', on); };
+
+async function rdConnect() {
+  if (!rd) return;
+  if (rd.pc) rd.pc.close();
+  rdState('connecting…');
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  const dc = pc.createDataChannel('input', { ordered: true });
+  // the stream PC ended it (its stop button, switched off, or someone else took over)
+  dc.onmessage = m => {
+    let msg; try { msg = JSON.parse(m.data); } catch { return; }
+    if (msg.t === 'end' && rd && rd.pc === pc) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); }
+  };
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };
+  pc.onconnectionstatechange = () => {
+    if (!rd || rd.pc !== pc) return;
+    if (pc.connectionState === 'connected') rdState(rd.control ? 'connected · mouse and keyboard on' : 'connected · watching only', true);
+    if (pc.connectionState === 'failed') rdState("couldn't connect. same network (or Tailscale) as the stream PC?");
+    if (pc.connectionState === 'disconnected') rdState('connection dropped… waiting');
+  };
+  Object.assign(rd, { pc, dc });
+  await pc.setLocalDescription(await pc.createOffer());
+  await iceDone(pc);
+  try {
+    const r = await api('/api/remote/start', { password: rd.password, sdp: pc.localDescription.sdp, screen: $('#rdScreen').value, quality: $('#rdQuality').value });
+    if (!rd || rd.pc !== pc) return;
+    rd.control = !!r.control;
+    $('#rdKeys').hidden = !rd.control;
+    rdStage.classList.toggle('watch', !rd.control);
+    await pc.setRemoteDescription({ type: 'answer', sdp: r.sdp });
+  } catch (err) {
+    rdState(err.message);
+    if (/password/.test(err.message)) { rdClose(false); toast(err.message, 4000); }
+  }
+}
+
+$('#remoteOpen').onclick = async () => {
+  const info = await remoteInfo();
+  if (!info.view) return toast('the remote display was switched off on the stream PC');
+  const v = await form('open the full screen', 'type the panel password again: the remote display shows (and may control) the whole stream PC.', [
+    { name: 'password', label: 'panel password', type: 'password', required: true },
+  ], 'open');
+  if (!v) return;
+  $('#rdScreen').replaceChildren(...(info.screens || []).map(sc => { const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.name; return o; }));
+  $('#rdScreen').hidden = (info.screens || []).length < 2;
+  rd = { password: v.password, control: false };
+  $('#rd').hidden = false;
+  $('#rdKeyPad').hidden = true;
+  rdStage.focus();
+  rdConnect();
+};
+function rdClose(tell = true) {
+  if (!rd) return;
+  const was = rd;
+  rd = null;
+  if (was.pc) was.pc.close();
+  rdVideo.srcObject = null;
+  $('#rd').hidden = true;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (tell) api('/api/remote/stop', {}).catch(() => {});
+  remoteInfo();
+}
+$('#rdEnd').onclick = () => rdClose();
+$('#rdScreen').onchange = $('#rdQuality').onchange = () => rdConnect();
+$('#rdFull').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $('#rd').requestFullscreen()).catch(() => {});
+$('#rdKeys').onclick = () => { $('#rdKeyPad').hidden = !$('#rdKeyPad').hidden; };
+
+const rdSend = m => { if (rd && rd.control && rd.dc && rd.dc.readyState === 'open') rd.dc.send(JSON.stringify(m)); };
+// a place on the video → 0…1 across the PC's screen (the picture is letterboxed to fit)
+function rdAt(e) {
+  const r = rdVideo.getBoundingClientRect(), vw = rdVideo.videoWidth, vh = rdVideo.videoHeight;
+  if (!vw || !vh) return null;
+  const k = Math.min(r.width / vw, r.height / vh), w = vw * k, h = vh * k;
+  const x = (e.clientX - r.left - (r.width - w) / 2) / w, y = (e.clientY - r.top - (r.height - h) / 2) / h;
+  return x < 0 || y < 0 || x > 1 || y > 1 ? null : { x, y };
+}
+
+// mouse (and pen): like a normal mouse
+let moveQueued = null;
+const queueMove = p => {
+  if (!moveQueued) requestAnimationFrame(() => { if (moveQueued) rdSend({ t: 'm', ...moveQueued }); moveQueued = null; });
+  moveQueued = p;
+};
+// touch: tap = click, hold = right-click, drag = drag, two fingers = scroll
+const touches = new Map();
+let touch = null;
+rdStage.addEventListener('pointerdown', e => {
+  if (!rd || !rd.control) return;
+  rdStage.focus();
+  const p = rdAt(e);
+  if (e.pointerType !== 'touch') {
+    if (!p) return;
+    e.preventDefault();
+    rdSend({ t: 'b', b: e.button, d: true, ...p });
+    rdStage.setPointerCapture(e.pointerId);
+    return;
+  }
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2) { if (touch && touch.timer) clearTimeout(touch.timer); touch = { scroll: true, y: (e.clientY + [...touches.values()][0].y) / 2 }; return; }
+  if (!p) return;
+  touch = { start: p, sx: e.clientX, sy: e.clientY, dragging: false, done: false };
+  touch.timer = setTimeout(() => {
+    if (!touch || touch.dragging || touch.scroll) return;
+    touch.done = true;
+    rdSend({ t: 'b', b: 2, d: true, ...p }); rdSend({ t: 'b', b: 2, d: false, ...p });
+    if (navigator.vibrate) navigator.vibrate(15);
+  }, 550);
+});
+rdStage.addEventListener('pointermove', e => {
+  if (!rd || !rd.control) return;
+  if (e.pointerType !== 'touch') { const p = rdAt(e); if (p) queueMove(p); return; }
+  const t = touches.get(e.pointerId);
+  if (t) { t.x = e.clientX; t.y = e.clientY; }
+  if (!touch) return;
+  if (touch.scroll && touches.size >= 2) {
+    const y = [...touches.values()].reduce((a, b) => a + b.y, 0) / touches.size;
+    const dy = touch.y - y;
+    if (Math.abs(dy) > 6) { rdSend({ t: 'w', dy: dy * 4 }); touch.y = y; }
+    return;
+  }
+  if (touch.done || touch.scroll) return;
+  const p = rdAt(e);
+  if (!touch.dragging && Math.hypot(e.clientX - touch.sx, e.clientY - touch.sy) > 10) {
+    clearTimeout(touch.timer);
+    touch.dragging = true;
+    rdSend({ t: 'b', b: 0, d: true, ...touch.start });
+  }
+  if (touch.dragging && p) queueMove(p);
+});
+const pointerEnd = e => {
+  if (!rd || !rd.control) return;
+  if (e.pointerType !== 'touch') {
+    const p = rdAt(e) || {};
+    rdSend({ t: 'b', b: e.button, d: false, ...p });
+    return;
+  }
+  touches.delete(e.pointerId);
+  if (!touch) return;
+  clearTimeout(touch.timer);
+  if (touch.scroll) { if (!touches.size) touch = null; return; }
+  if (touch.dragging) rdSend({ t: 'b', b: 0, d: false, ...(rdAt(e) || {}) });
+  else if (!touch.done && e.type === 'pointerup') { rdSend({ t: 'b', b: 0, d: true, ...touch.start }); rdSend({ t: 'b', b: 0, d: false, ...touch.start }); }
+  touch = null;
+};
+rdStage.addEventListener('pointerup', pointerEnd);
+rdStage.addEventListener('pointercancel', pointerEnd);
+rdStage.addEventListener('contextmenu', e => e.preventDefault());
+rdStage.addEventListener('wheel', e => {
+  if (!rd || !rd.control) return;
+  e.preventDefault();
+  const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 400 : 1;
+  rdSend({ t: 'w', dy: e.deltaY * k, dx: e.deltaX * k });
+}, { passive: false });
+
+// a real keyboard: everything typed while the screen is focused goes to the PC
+rdStage.addEventListener('keydown', e => { if (!rd || !rd.control) return; e.preventDefault(); rdSend({ t: 'k', code: e.code, d: true }); });
+rdStage.addEventListener('keyup', e => { if (!rd || !rd.control) return; e.preventDefault(); rdSend({ t: 'k', code: e.code, d: false }); });
+rdStage.addEventListener('blur', () => { /* let go of keys the browser won't tell us about */ for (const c of ['ShiftLeft', 'ControlLeft', 'AltLeft', 'MetaLeft']) rdSend({ t: 'k', code: c, d: false }); });
+
+// phones: a text box, held-down ctrl / alt / shift / win, and the keys phones don't have
+const mods = new Set();
+$('#rdMods').onclick = e => {
+  const b = e.target.closest('[data-mod]');
+  if (!b) return;
+  const m = b.dataset.mod;
+  if (mods.has(m)) mods.delete(m); else mods.add(m);
+  b.setAttribute('aria-pressed', String(mods.has(m)));
+};
+function pressWithMods(code) {
+  for (const m of mods) rdSend({ t: 'k', code: m, d: true });
+  rdSend({ t: 'k', code, d: true }); rdSend({ t: 'k', code, d: false });
+  for (const m of mods) rdSend({ t: 'k', code: m, d: false });
+  mods.clear();
+  $('#rdMods').querySelectorAll('[data-mod]').forEach(b => b.setAttribute('aria-pressed', 'false'));
+}
+$('#rdSpecial').onclick = e => { const b = e.target.closest('[data-key]'); if (b) pressWithMods(b.dataset.key); };
+$('#rdSend').onclick = () => {
+  const text = $('#rdText').value;
+  if (!text) return;
+  // with ctrl / alt held, one letter is a shortcut (ctrl + s, alt + f, …)
+  if (mods.size && /^[a-z0-9]$/i.test(text)) pressWithMods(/\d/.test(text) ? `Digit${text}` : `Key${text.toUpperCase()}`);
+  else rdSend({ t: 'txt', s: text });
+  $('#rdText').value = '';
+};
+$('#rdText').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#rdSend').click(); } });
 
 /* ───────────── go live / end stream / record ───────────── */
 function ask(title, text, yes) {

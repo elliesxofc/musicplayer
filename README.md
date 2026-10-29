@@ -59,7 +59,8 @@ drag audio files onto the page or tap **add songs**.
 a separate little program (in [`stagelight/`](stagelight/README.md)) that runs on the stream PC and
 lets a phone, tablet or another PC control OBS in a browser, behind a password: go live, record,
 scenes, sources and audio, with the stream's health, plus a live preview where you can move and
-resize sources and add text, websites and colour boxes. works on the same Wi-Fi, or from anywhere
+resize sources and add text, websites and colour boxes, and an optional remote display of the
+whole PC (like AnyDesk or Parsec) with mouse and keyboard, off unless switched on. works on the same Wi-Fi, or from anywhere
 through Tailscale. download it from the **Actions** tab → **stagelight app**.
 
 ## desktop app (Windows / Mac / Linux)

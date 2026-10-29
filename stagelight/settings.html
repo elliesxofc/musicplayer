@@ -30,6 +30,8 @@
     ol b { color: var(--ink); font-weight: 600; }
     .log { font: 12px ui-monospace, Consolas, monospace; color: var(--muted); max-height: 140px; overflow: auto; white-space: pre-wrap; margin: 0; }
     a { color: var(--amber); }
+    .hint.warn { color: #ffc47a; }
+    .status .btn { min-height: 32px; padding: 0 12px; font-size: 13px; margin-left: auto; }
   </style>
 </head>
 <body>
@@ -80,6 +82,16 @@
         <button class="btn" id="openHere">open the panel on this PC</button>
         <button class="btn" id="logoutAll">log everyone out</button>
       </div>
+    </section>
+
+    <section class="card">
+      <h2>4 · remote display (the whole PC)</h2>
+      <p class="hint">like AnyDesk or Parsec, in the panel: see this PC's screen, and (if you allow it) use its mouse and keyboard, for when you need OBS's full window. the panel asks for its password again before it starts. while someone is connected, a bar shows at the top of this screen with a <b>stop</b> button.</p>
+      <label class="check"><input type="checkbox" id="remoteView"> allow seeing this PC's screen from the panel</label>
+      <label class="check"><input type="checkbox" id="remoteControl"> also allow mouse and keyboard</label>
+      <p class="hint warn" id="remoteWarn">with mouse and keyboard on, anyone with the panel password can use this whole PC, not just OBS. only switch it on if you trust everyone who has the password, and switch it off when you don't need it.</p>
+      <p class="hint" id="remoteNoInput" hidden>mouse and keyboard work on Windows only; here the remote display is for watching.</p>
+      <p class="status" id="remoteStatus" hidden><i class="dot" data-kind="on"></i><span id="remoteWho"></span><button class="btn" id="remoteStop">stop it</button></p>
     </section>
 
     <section class="card">

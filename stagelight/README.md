@@ -11,6 +11,19 @@ drag to move it, drag its corner to resize (it keeps its shape). Add **text**, a
 (browser source: alerts, chat, widgets, picture links) or a **colour box** to the current
 scene; edit a text's words, hide or remove a source. Changes show on stream straight away.
 
+**Remote display (the whole PC)**: like AnyDesk or Parsec, inside the panel, for when you need
+OBS's full window. Off unless you switch it on in Stagelight on the stream PC (**4 · remote
+display**): "allow seeing this PC's screen", and separately "also allow mouse and keyboard".
+In the panel, **open the PC's full screen** asks for the panel password again, then shows the
+screen live (smooth 720p, sharp 1080p or fast 60 fps; pick the screen if there are several).
+With mouse and keyboard on: a mouse works like a mouse, a real keyboard types when the
+screen is clicked; on a phone, tap to click, hold to right-click, drag to drag, two fingers to
+scroll, and **keys** opens a text box plus ctrl / alt / shift / win, esc, tab, enter and arrows.
+While someone is connected, a bar at the top of the stream PC's screen says who, with a
+**stop** button (also in the tray menu and the settings window), and Windows shows a
+notification. One person at a time. Mouse and keyboard need Windows; the video goes straight
+between the two devices (same network or Tailscale), never through anything else.
+
 Separate from moonlit: its own program, installer and settings.
 
 ## Get it
@@ -54,6 +67,12 @@ Only your devices (and people you share with) can reach the panel that way.
 - The panel can only do the things above: no OBS settings, no files, nothing else.
   Websites it adds must be `http://` or `https://` addresses (no files from the PC).
 - Going live, ending the stream and stopping a recording ask first.
+- Remote display: off by default, mouse and keyboard a second switch, the password again before
+  it starts, a visible bar with a stop button on the stream PC while it's on, and any key or
+  mouse button still held is let go when it ends. With mouse and keyboard on, anyone with the
+  panel password can use the whole PC: switch it off when you don't need it.
+- Windows doesn't let other programs click into programs running "as administrator"; if OBS
+  runs that way, run Stagelight as administrator too (or OBS normally) for mouse and keyboard.
 - On the same Wi-Fi the panel is plain `http`, so use it on networks you trust (your
   home); through Tailscale it's encrypted.
 

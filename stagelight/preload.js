@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('stagelight', {
   setPort: port => ipcRenderer.invoke('set-port', Number(port)),
   autostart: on => ipcRenderer.invoke('autostart', !!on),
   logoutAll: () => ipcRenderer.invoke('logout-all'),
+  setRemote: settings => ipcRenderer.invoke('set-remote', settings),
+  stopRemote: () => ipcRenderer.invoke('remote-stop'),
   open: url => ipcRenderer.invoke('open', String(url)),
   onStatus: cb => ipcRenderer.on('status', (_e, s) => cb(s)),
   onLog: cb => ipcRenderer.on('log', (_e, line) => cb(line)),

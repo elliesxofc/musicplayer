@@ -2,7 +2,8 @@
 
 A remote control for OBS in any browser, behind a password. It runs on the stream PC
 (in the tray, by the clock) and lets a phone, tablet or another PC go live, end the
-stream, record, switch scenes, show, hide or refresh sources (one browser source, or all of them at once) and mix audio, with the stream's
+stream, record, switch scenes, show, hide or refresh sources (one browser source, or all of them at once), change a browser
+source's web address, size, frame rate and custom CSS and mix audio, with the stream's
 health (bitrate, dropped frames, fps, CPU) live.
 
 **Preview**: the panel shows what OBS shows (refreshed about once a second; switch "live"

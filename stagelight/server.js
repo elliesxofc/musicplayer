@@ -179,6 +179,10 @@ function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: f
 
     if (p === '/api/me' && req.method === 'GET') return send(res, 200, { user: session.user, role: session.role });
     if (p === '/api/state' && req.method === 'GET') return send(res, 200, obs.snapshot());
+    if (p === '/api/browser' && req.method === 'GET') {
+      if (!atLeast(session.role, 'control')) return send(res, 403, { error: 'your account can watch, not change things' });
+      try { return send(res, 200, await obs.browserSettings(url.searchParams.get('scene') || '', url.searchParams.get('id'))); } catch (err) { return send(res, 409, { error: err.message }); }
+    }
     if (p === '/api/remote' && req.method === 'GET') {
       if (!remote || !atLeast(session.role, 'full')) return send(res, 200, { view: false, allowed: false });
       // with the web address on, the video also tries a direct way over the internet (STUN)

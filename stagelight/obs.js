@@ -345,6 +345,31 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
         await Promise.all(names.map(n => call('PressInputPropertiesButton', { inputName: n, propertyName: 'refreshnocache' }).catch(() => {})));
         break;
       }
+      // a browser source's settings, like OBS's properties window: the page, its size, its CSS
+      case 'browserSet': {
+        const it = itemOf(a);
+        if (it.kind !== 'browser_source') throw new Error("that's not a browser source");
+        const now = (await call('GetInputSettings', { inputName: it.name })).inputSettings || {};
+        const next = {
+          width: Math.round(Math.max(16, Math.min(7680, Number(a.width) || now.width || 800))),
+          height: Math.round(Math.max(16, Math.min(4320, Number(a.height) || now.height || 600))),
+          css: str(a.css).slice(0, 20_000),
+          shutdown: !!a.shutdown,
+          restart_when_active: !!a.restartWhenActive,
+        };
+        // a page on the stream PC (a local file) keeps its file: the panel only sets web addresses
+        if (!now.is_local_file || str(a.url)) {
+          let url;
+          try { url = new URL(str(a.url)); } catch { throw new Error('that is not a web address'); }
+          if (!/^https?:$/.test(url.protocol)) throw new Error('only http:// and https:// addresses');
+          next.url = url.href;
+          next.is_local_file = false;
+        }
+        const fps = Math.round(Number(a.fps));
+        if (fps >= 1 && fps <= 60) { next.fps = fps; next.fps_custom = fps !== 30; }
+        await call('SetInputSettings', { inputName: it.name, inputSettings: next, overlay: true });
+        break;
+      }
       case 'remove': {
         const it = itemOf(a);
         await call('RemoveSceneItem', { sceneName: state.scene, sceneItemId: it.id });
@@ -423,6 +448,24 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     return shot.busy;
   }
 
+  // what the panel's browser source form starts with
+  async function browserSettings(scene, id) {
+    if (!identified) throw new Error('not connected to OBS');
+    const it = state.items.find(i => i.id === Number(id));
+    if (!it || String(scene) !== state.scene) throw new Error('that source is gone');
+    if (it.kind !== 'browser_source') throw new Error("that's not a browser source");
+    const s = (await call('GetInputSettings', { inputName: it.name })).inputSettings || {};
+    return {
+      name: it.name,
+      localFile: s.is_local_file ? String(s.local_file || 'a file on the stream PC') : '',
+      url: s.is_local_file ? '' : String(s.url || ''),
+      width: Number(s.width) || 800, height: Number(s.height) || 600,
+      fps: s.fps_custom ? Number(s.fps) || 30 : 30,
+      css: typeof s.css === 'string' ? s.css : 'body { background-color: rgba(0, 0, 0, 0); margin: 0px auto; overflow: hidden; }',
+      shutdown: !!s.shutdown, restartWhenActive: !!s.restart_when_active,
+    };
+  }
+
   function snapshot() {
     return JSON.parse(JSON.stringify({ ...state, now: Date.now() }));
   }
@@ -432,6 +475,7 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     start(next) { settings = next; wanted = true; connect(); },
     stop() { close(true); setStatus('not connected to OBS'); },
     act,
+    browserSettings,
     snapshot,
     screenshot,
     shotTag: () => `"${shot.at}"`,

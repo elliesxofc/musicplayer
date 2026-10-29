@@ -200,7 +200,13 @@ function renderSources() {
         act({ type: 'refresh', scene: st.scene, id: it.id, name: it.name }, () => toast(`refreshed ${it.name} ✦`));
         setTimeout(() => r.classList.remove('spin'), 700);
       };
-      li.append(r);
+      const g = document.createElement('button');
+      g.className = 'toggle refresh needs-control';
+      g.setAttribute('aria-label', `settings for ${it.name}`);
+      g.title = 'web address, size and CSS';
+      g.innerHTML = '<svg><use href="#i-gear"/></svg>';
+      g.onclick = () => browserForm(it);
+      li.append(r, g);
     }
     li.append(b);
     list.append(li);
@@ -320,6 +326,7 @@ function renderStage() {
   if (it) {
     $('#selName').textContent = it.name;
     $('#selText').hidden = typeof it.text !== 'string';
+    $('#selBrowser').hidden = it.kind !== 'browser_source';
     $('#selHide').textContent = it.on ? 'hide' : 'show';
   }
   if (drag) return; // don't redraw under a finger
@@ -403,9 +410,12 @@ const fieldHtml = f => {
   label.className = 'field';
   const span = document.createElement('span');
   span.textContent = f.label;
-  const input = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
+  const area = f.type === 'textarea' || f.type === 'code';
+  const input = document.createElement(area ? 'textarea' : 'input');
   input.id = id;
-  if (f.type !== 'textarea') input.type = f.type || 'text';
+  if (!area) input.type = f.type || 'text';
+  if (f.type === 'code') { input.className = 'code'; input.spellcheck = false; input.setAttribute('autocapitalize', 'off'); }
+  if (f.type === 'checkbox') { label.className = 'field check'; input.checked = !!f.value; label.append(input, span); return label; }
   if (f.value != null) input.value = f.value;
   if (f.placeholder) input.placeholder = f.placeholder;
   if (f.required) input.required = true;
@@ -422,7 +432,7 @@ function form(title, text, fields, yes) {
   setTimeout(() => { const first = $('#formFields input, #formFields textarea'); if (first) first.focus(); }, 50);
   return new Promise(resolve => {
     const done = v => { $('#formModal').hidden = true; resolve(v); };
-    $('#form').onsubmit = e => { e.preventDefault(); done(Object.fromEntries(fields.map(f => [f.name, $(`#f_${f.name}`).value]))); };
+    $('#form').onsubmit = e => { e.preventDefault(); done(Object.fromEntries(fields.map(f => [f.name, f.type === 'checkbox' ? $(`#f_${f.name}`).checked : $(`#f_${f.name}`).value]))); };
     $('#formNo').onclick = () => done(null);
   });
 }
@@ -456,6 +466,22 @@ $('#selText').onclick = async () => {
   const v = await form('edit text', it.name, [{ name: 'text', label: 'the words', type: 'textarea', value: it.text || '' }], 'save');
   if (v) act({ type: 'setText', scene: st.scene, id: it.id, text: v.text }, () => toast('text changed ✦'));
 };
+// a browser source's settings: the page, its size and frame rate, and its CSS
+async function browserForm(it) {
+  let s;
+  try { s = await api(`/api/browser?scene=${encodeURIComponent(st.scene)}&id=${it.id}`); } catch (err) { return toast(err.message, 4000); }
+  const v = await form(`${s.name}`, s.localFile ? `this one shows a file on the stream PC (${s.localFile}). type a web address to show a website instead.` : 'like OBS\'s properties window. saving reloads the page on stream.', [
+    { name: 'url', label: 'web address', type: 'url', required: !s.localFile, value: s.url, placeholder: s.localFile ? 'keeps the file when empty' : 'https://' },
+    { name: 'width', label: 'width', type: 'number', value: s.width, min: 16, max: 7680 },
+    { name: 'height', label: 'height', type: 'number', value: s.height, min: 16, max: 4320 },
+    { name: 'fps', label: 'frame rate', type: 'number', value: s.fps, min: 1, max: 60 },
+    { name: 'css', label: 'custom CSS', type: 'code', value: s.css },
+    { name: 'shutdown', label: 'shut down when not visible', type: 'checkbox', value: s.shutdown },
+    { name: 'restartWhenActive', label: 'refresh when the scene becomes active', type: 'checkbox', value: s.restartWhenActive },
+  ], 'save');
+  if (v) act({ type: 'browserSet', scene: st.scene, id: it.id, name: it.name, ...v, width: Number(v.width), height: Number(v.height), fps: Number(v.fps) }, () => toast(`saved ${it.name} ✦`));
+}
+$('#selBrowser').onclick = () => { const it = st.items.find(i => i.id === selected); if (it) browserForm(it); };
 $('#selHide').onclick = () => {
   const it = st.items.find(i => i.id === selected);
   if (it) act({ type: 'source', scene: st.scene, id: it.id, on: !it.on });

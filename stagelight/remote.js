@@ -11,6 +11,7 @@ const path = require('node:path');
 const { createInput } = require('./input-win');
 
 const QUALITY = {
+  light: { width: 854, height: 480, fps: 15, bitrate: 800_000 }, // for a weak connection
   smooth: { width: 1280, height: 720, fps: 30, bitrate: 3_000_000 },
   sharp: { width: 1920, height: 1080, fps: 30, bitrate: 8_000_000 },
   fast: { width: 1280, height: 720, fps: 60, bitrate: 6_000_000 },
@@ -23,7 +24,13 @@ const LIVE = { bitrate: 1_200_000, fps: 15 };
 const STRUGGLING = { bitrate: 400_000, fps: 8 };
 const CALM_MS = 60_000;
 
-function limitFor(q, stream, guard, now = Date.now()) {
+// the most upload the stream PC lets the picture use (set in Stagelight, 0 = no limit), on top
+function limitFor(q, stream, guard, now = Date.now(), max = 0) {
+  const l = liveLimit(q, stream, guard, now);
+  if (max > 0 && max < l.bitrate) { l.bitrate = max; l.saving = true; if (l.level === 'full') l.level = 'capped'; }
+  return l;
+}
+function liveLimit(q, stream, guard, now) {
   if (!stream || !stream.active) { guard.until = 0; return { bitrate: q.bitrate, fps: q.fps, saving: false, level: 'full' }; }
   const dropped = guard.skipped != null && stream.skipped > guard.skipped && (stream.skipped - guard.skipped) >= Math.max(3, (stream.total - guard.total) * 0.005);
   guard.skipped = stream.skipped; guard.total = stream.total;
@@ -31,11 +38,15 @@ function limitFor(q, stream, guard, now = Date.now()) {
   const l = guard.until > now ? STRUGGLING : LIVE;
   return { bitrate: Math.min(q.bitrate, l.bitrate), fps: Math.min(q.fps, l.fps), saving: true, level: l === STRUGGLING ? 'low' : 'live' };
 }
+const mbps = b => `${Math.round(b / 100_000) / 10} Mbps`;
 const NOTES = {
-  full: 'the stream ended: full picture again',
+  full: (l, was) => (was === 'capped' ? 'no upload limit any more: full picture again' : 'the stream ended: full picture again'),
+  capped: l => `the stream PC lets the picture use up to ${mbps(l.bitrate)} of its upload`,
   live: "you're live: the picture is kept light so the stream keeps its upload",
   low: 'the stream is struggling: the picture is lowered to give it room',
 };
+
+const note = (l, was) => (typeof NOTES[l.level] === 'function' ? NOTES[l.level](l, was) : NOTES[l.level]);
 
 function createRemote({ root, icon, getSettings, log = () => {}, onChange = () => {} }) {
   let capture = null, bar = null, active = null, nextJob = 1, closeTimer = null, stream = null;
@@ -106,8 +117,8 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     clearTimeout(closeTimer);
     const q = QUALITY[quality] || QUALITY.smooth;
     const guard = {};
-    const limit = limitFor(q, stream, guard);
-    if (limit.level !== 'full') limit.note = NOTES[limit.level];
+    const limit = limitFor(q, stream, guard, Date.now(), s.max);
+    if (limit.level !== 'full') limit.note = note(limit);
     const id = nextJob++;
     const win = captureWindow();
     if (win.webContents.isLoading()) await new Promise(r => win.webContents.once('did-finish-load', r));
@@ -117,7 +128,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
       setTimeout(() => { if (waiting.has(id)) { waiting.delete(id); resolve({ error: 'the screen took too long to start' }); } }, 15_000);
     });
     if (result.error) throw new Error(result.error);
-    active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now(), q, guard, level: limit.level };
+    active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now(), q, guard, level: limit.level, bitrate: limit.bitrate };
     const what = active.control ? 'controlling' : 'watching';
     log(`remote display: ${from} is ${what} this PC`);
     showBar(`${from} is ${what} this PC`);
@@ -167,11 +178,12 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   function streamChanged(next) {
     stream = next;
     if (!active || !capture || capture.isDestroyed()) return;
-    const limit = limitFor(active.q, stream, active.guard);
-    if (limit.level === active.level) return;
-    if (limit.level === 'low') log('remote display: the stream is struggling, the picture is lowered');
-    active.level = limit.level;
-    capture.webContents.send('limit', { ...limit, note: NOTES[limit.level] });
+    const limit = limitFor(active.q, stream, active.guard, Date.now(), getSettings().max);
+    if (limit.level === active.level && limit.bitrate === active.bitrate) return;
+    if (limit.level === 'low' && active.level !== 'low') log('remote display: the stream is struggling, the picture is lowered');
+    const was = active.level;
+    active.level = limit.level; active.bitrate = limit.bitrate;
+    capture.webContents.send('limit', { ...limit, note: note(limit, was) });
   }
 
   return {
@@ -184,6 +196,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
       const s = getSettings();
       if (active && !s.view) end('switched off on the stream PC');
       else if (active && active.control && !s.control) { input.releaseAll(); active.control = false; showBar(`${active.from} is watching this PC`); onChange(); }
+      if (active) streamChanged(stream); // the upload limit may have changed
     },
     stop() { end('Stagelight closed'); input.stop(); hideBar(); if (capture && !capture.isDestroyed()) capture.destroy(); },
   };

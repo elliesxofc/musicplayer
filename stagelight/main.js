@@ -72,7 +72,11 @@ const winOpen = () => !!(win && !win.isDestroyed() && win.isVisible());
 const obs = createObs({ onChange: () => { remote.streamChanged(obs.snapshot().stream); server.broadcast(); if (winOpen()) sendWin('status', status()); refreshTray(); }, log });
 // OBS is asked often only while someone looks (a panel, or the settings window)
 const updateBusy = () => obs.setBusy(server.watcherCount() > 0 || winOpen() || remote.status().active);
-const remoteSettings = () => { const r = readConfig().remote || {}; return { view: !!r.view, control: !!r.view && !!r.control }; };
+const UPLOAD_LIMITS = [0, 4_000_000, 2_000_000, 1_000_000, 500_000]; // 0 = no limit
+const remoteSettings = () => {
+  const r = readConfig().remote || {};
+  return { view: !!r.view, control: !!r.view && !!r.control, max: UPLOAD_LIMITS.includes(r.max) ? r.max : 0 };
+};
 const remote = createRemote({
   root: ROOT, icon: ICON, getSettings: remoteSettings, log,
   onChange: () => { updateBusy(); sendWin('status', status()); refreshTray(); },
@@ -235,7 +239,7 @@ ipcMain.handle('autostart', (_e, on) => {
 // the remote display: watching, and mouse and keyboard (both off unless switched on here)
 ipcMain.handle('set-remote', (_e, next) => {
   const view = !!(next && next.view), control = view && !!(next && next.control);
-  writeConfig({ remote: { view, control } });
+  writeConfig({ remote: { ...(readConfig().remote || {}), view, control } });
   remote.settingsChanged();
   log(`remote display ${view ? (control ? 'on, with mouse and keyboard' : 'on, watching only') : 'off'}`);
   return remoteSettings();
@@ -249,6 +253,13 @@ ipcMain.handle('set-web', (_e, next) => {
   writeConfig({ web: { on, host } });
   log(on ? `web address on: https://${host}` : 'web address off');
   return { ok: true, status: status() };
+});
+ipcMain.handle('set-remote-max', (_e, max) => {
+  const m = UPLOAD_LIMITS.includes(Number(max)) ? Number(max) : 0;
+  writeConfig({ remote: { ...(readConfig().remote || {}), max: m } });
+  remote.settingsChanged();
+  log(`remote display upload: ${m ? `at most ${m / 1_000_000} Mbps` : 'no limit'}`);
+  return remoteSettings();
 });
 ipcMain.handle('remote-stop', () => { remote.end('stopped on the stream PC'); return status(); });
 ipcMain.handle('logout-all', () => { server.logoutAll(); log('logged everyone out of the panel'); return status(); });

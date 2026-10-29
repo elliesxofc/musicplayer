@@ -102,6 +102,8 @@ Stagelight is made to stay out of OBS's way:
 - while you're live, the remote display shares the upload with the stream and the stream comes
   first: the picture stays at 1.2 Mbps and 15 fps, and drops to 0.4 Mbps and 8 fps as soon as
   OBS drops frames, struggles to send or reconnects, until the stream has been fine for a minute
+- the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
+  Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
 
 ## Safety
 

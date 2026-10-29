@@ -45,11 +45,13 @@ function showRemote(r) {
   $('#remoteControl').checked = r.control;
   $('#remoteControl').disabled = !r.view;
   $('#remoteWarn').hidden = !r.control;
+  $('#remoteMax').value = String(r.max || 0);
 }
 async function saveRemote() {
   showRemote(await S.setRemote({ view: $('#remoteView').checked, control: $('#remoteControl').checked }));
 }
 $('#remoteView').onchange = saveRemote;
+$('#remoteMax').onchange = async () => showRemote(await S.setRemoteMax($('#remoteMax').value));
 $('#remoteControl').onchange = async () => {
   if ($('#remoteControl').checked && !confirm('allow mouse and keyboard?\n\nevery full access account can then use this whole PC (not just OBS). only do this if you trust them with your PC.')) {
     $('#remoteControl').checked = false;

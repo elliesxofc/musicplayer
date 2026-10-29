@@ -124,6 +124,15 @@
       <label class="check"><input type="checkbox" id="remoteView"> allow seeing this PC's screen from the panel</label>
       <label class="check"><input type="checkbox" id="remoteControl"> also allow mouse and keyboard</label>
       <p class="hint warn" id="remoteWarn">with mouse and keyboard on, every full access account can use this whole PC, not just OBS. only give full access to people you trust with your PC, and switch this off when you don't need it.</p>
+      <label class="field"><span>most upload it may use (the stream comes first anyway: while live it's kept to 1.2 Mbps or less)</span>
+        <select id="remoteMax">
+          <option value="0">no limit (up to 8 Mbps)</option>
+          <option value="4000000">4 Mbps</option>
+          <option value="2000000">2 Mbps</option>
+          <option value="1000000">1 Mbps</option>
+          <option value="500000">0.5 Mbps</option>
+        </select>
+      </label>
       <p class="hint" id="remoteNoInput" hidden>mouse and keyboard work on Windows only; here the remote display is for watching.</p>
       <p class="status" id="remoteStatus" hidden><i class="dot" data-kind="on"></i><span id="remoteWho"></span><button class="btn" id="remoteStop">stop it</button></p>
     </section>

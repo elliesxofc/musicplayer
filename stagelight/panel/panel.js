@@ -132,8 +132,34 @@ function tick() {
 }
 setInterval(tick, 1000);
 
+/* The lists are redrawn only when what they show changes, and never under a finger: OBS sends
+   news every couple of seconds (more while live), and a button swapped out mid-tap ignores it. */
+const drawn = {};
+let pressing = 0, pendingDraw = false;
+for (const id of ['#scenes', '#sources', '#audio']) {
+  const el = $(id);
+  el.addEventListener('pointerdown', () => { pressing++; });
+  const up = () => {
+    if (!pressing) return;
+    pressing--;
+    // after the click (or the slider's last change) has been handled
+    if (!pressing && pendingDraw) setTimeout(() => { if (!pressing && pendingDraw && st) { pendingDraw = false; renderScenes(); renderSources(); renderAudio(); } }, 450);
+  };
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+}
+window.addEventListener('pointerup', () => { if (pressing) setTimeout(() => { pressing = 0; }, 0); }, true);
+// true when the list should be left alone: unchanged, or a finger is on it right now
+function unchanged(which, key) {
+  if (drawn[which] === key) return true;
+  if (pressing) { pendingDraw = true; return true; }
+  drawn[which] = key;
+  return false;
+}
+
 function renderScenes() {
   const box = $('#scenes');
+  if (unchanged('scenes', JSON.stringify([st.scene, st.scenes]))) return;
   box.innerHTML = '';
   for (const name of st.scenes) {
     const b = document.createElement('button');
@@ -149,6 +175,7 @@ function renderScenes() {
 function renderSources() {
   $('#sceneName').textContent = st.scene || '…';
   const list = $('#sources');
+  if (unchanged('sources', JSON.stringify([st.scene, st.items.map(it => [it.id, it.name, it.on])]))) return;
   list.innerHTML = '';
   for (const it of st.items) {
     const li = document.createElement('li');
@@ -174,12 +201,24 @@ const dbText = mul => (mul <= 0 ? '-inf dB' : `${(20 * Math.log10(mul)).toFixed(
 
 function renderAudio() {
   const list = $('#audio');
-  // don't redraw under a finger that's moving a slider
-  if (dragging) {
-    const a = st.audio.find(x => x.name === dragging);
-    const row = [...list.children].find(li => li.dataset.name === dragging);
-    if (a && row) { row.classList.toggle('muted', a.muted); return; }
+  // the same sources as before: only the volumes and mutes change, in place
+  if (drawn.audioNames === JSON.stringify(st.audio.map(a => a.name))) {
+    for (const a of st.audio) {
+      const row = [...list.children].find(li => li.dataset.name === a.name);
+      if (!row) continue;
+      row.classList.toggle('muted', a.muted);
+      const b = row.querySelector('.toggle');
+      b.setAttribute('aria-label', `${a.muted ? 'unmute' : 'mute'} ${a.name}`);
+      b.querySelector('use').setAttribute('href', `#${a.muted ? 'i-mute' : 'i-vol'}`);
+      b.onclick = () => act({ type: 'mute', input: a.name, on: !a.muted });
+      if (dragging === a.name) continue; // not under a finger that's moving the slider
+      row.querySelector('input').value = toPos(a.mul);
+      row.querySelector('.db').textContent = dbText(a.mul);
+    }
+    return;
   }
+  if (pressing) { pendingDraw = true; return; }
+  drawn.audioNames = JSON.stringify(st.audio.map(a => a.name));
   list.innerHTML = '';
   for (const a of st.audio) {
     const li = document.createElement('li');
@@ -201,7 +240,11 @@ function renderAudio() {
     const db = document.createElement('span');
     db.className = 'db';
     db.textContent = dbText(a.mul);
-    let sendTimer = null;
+    let sendTimer = null, letGo = null;
+    // held from the first touch (before it moves), and for a moment after letting go
+    range.onpointerdown = () => { clearTimeout(letGo); dragging = a.name; };
+    const release = () => { clearTimeout(letGo); letGo = setTimeout(() => { if (dragging === a.name) dragging = null; }, 600); };
+    range.onpointerup = range.onpointercancel = release;
     range.oninput = () => {
       dragging = a.name;
       const mul = toMul(Number(range.value));
@@ -209,7 +252,7 @@ function renderAudio() {
       clearTimeout(sendTimer);
       sendTimer = setTimeout(() => act({ type: 'volume', input: a.name, mul }), 60);
     };
-    range.onchange = () => { setTimeout(() => { dragging = null; }, 400); };
+    range.onchange = release;
     vol.append(range, db);
     li.append(name, b, vol);
     list.append(li);

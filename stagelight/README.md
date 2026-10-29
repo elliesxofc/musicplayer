@@ -17,8 +17,10 @@ display**): "allow seeing this PC's screen", and separately "also allow mouse an
 Only **full access** accounts see it. In the panel, **open the PC's full screen** asks for that account's password again, then shows the
 screen live (smooth 720p, sharp 1080p or fast 60 fps; pick the screen if there are several).
 With mouse and keyboard on: a mouse works like a mouse, a real keyboard types when the
-screen is clicked; on a phone, tap to click, hold to right-click, drag to drag, two fingers to
-scroll, and **keys** opens a text box plus ctrl / alt / shift / win, esc, tab, enter and arrows.
+screen is clicked; on a phone, pick **direct touch** (tap to click, hold to right-click, drag to
+drag, two fingers to scroll) or **trackpad** (slide to move the cursor, tap to click, two-finger
+tap or hold to right-click, tap then touch again and slide to drag, two fingers to scroll), and
+**keys** opens a text box plus ctrl / alt / shift / win, esc, tab, enter and arrows.
 While someone is connected, a bar at the top of the stream PC's screen says who, with a
 **stop** button (also in the tray menu and the settings window), and Windows shows a
 notification. One person at a time. Mouse and keyboard need Windows; the video goes straight

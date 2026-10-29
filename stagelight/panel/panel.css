@@ -166,3 +166,8 @@ h1, h2, h3 { margin: 0; }
 body[data-role="watch"] .needs-control { display: none !important; }
 body[data-role="watch"] :is(#streamBtn, #recBtn, #recPauseBtn, .scene, .toggle, .audio-row input) { pointer-events: none; opacity: .55; }
 @media (max-width: 520px) { .conn span { display: none; } }
+
+/* trackpad mode: where the cursor is (the PC's own cursor shows in the video a moment later) */
+.rd-dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: rgba(255, 181, 71, .9); border: 2px solid #1a0f05; box-shadow: 0 0 10px rgba(255, 181, 71, .8); pointer-events: none; z-index: 2; transition: left .03s linear, top .03s linear; }
+.rd-dot[hidden] { display: none; }
+#rdTouch[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); }

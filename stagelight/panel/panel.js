@@ -451,6 +451,8 @@ async function rdConnect() {
     if (!rd || rd.pc !== pc) return;
     rd.control = !!r.control;
     $('#rdKeys').hidden = !rd.control;
+    $('#rdTouch').hidden = !rd.control || !matchMedia('(pointer: coarse)').matches;
+    dot.hidden = !rd.control || !padMode;
     rdStage.classList.toggle('watch', !rd.control);
     await pc.setRemoteDescription({ type: 'answer', sdp: r.sdp });
   } catch (err) {
@@ -471,6 +473,8 @@ $('#remoteOpen').onclick = async () => {
   rd = { password: v.password, control: false };
   $('#rd').hidden = false;
   $('#rdKeyPad').hidden = true;
+  Object.assign(cursor, { x: 0.5, y: 0.5 });
+  showPadMode();
   rdStage.focus();
   rdConnect();
 };
@@ -506,7 +510,93 @@ const queueMove = p => {
   if (!moveQueued) requestAnimationFrame(() => { if (moveQueued) rdSend({ t: 'm', ...moveQueued }); moveQueued = null; });
   moveQueued = p;
 };
-// touch: tap = click, hold = right-click, drag = drag, two fingers = scroll
+/* touch, two ways (the button in the bar switches, and the phone remembers it):
+   direct:   tap = click where you tap, hold = right-click, drag = drag, two fingers = scroll
+   trackpad: slide = move the cursor, tap = click, two-finger tap or hold = right-click,
+             tap then touch again and slide = drag, two fingers = scroll */
+let padMode = false;
+try { padMode = localStorage.getItem('stagelight:touch') === 'pad'; } catch { /* private mode */ }
+const cursor = { x: 0.5, y: 0.5 };
+const dot = document.createElement('i');
+dot.className = 'rd-dot';
+rdStage.append(dot);
+function showPadMode() {
+  $('#rdTouch').textContent = padMode ? 'trackpad' : 'direct touch';
+  $('#rdTouch').setAttribute('aria-pressed', String(padMode));
+  dot.hidden = !padMode;
+  placeDot();
+}
+function placeDot() {
+  const r = rdVideo.getBoundingClientRect(), s = rdStage.getBoundingClientRect(), vw = rdVideo.videoWidth, vh = rdVideo.videoHeight;
+  if (!vw || !vh) return;
+  const k = Math.min(r.width / vw, r.height / vh), w = vw * k, h = vh * k;
+  dot.style.left = `${r.left - s.left + (r.width - w) / 2 + cursor.x * w}px`;
+  dot.style.top = `${r.top - s.top + (r.height - h) / 2 + cursor.y * h}px`;
+}
+$('#rdTouch').onclick = () => {
+  padMode = !padMode;
+  try { localStorage.setItem('stagelight:touch', padMode ? 'pad' : 'direct'); } catch { /* fine */ }
+  showPadMode();
+  toast(padMode ? 'trackpad: slide to move, tap to click, two fingers to right-click or scroll' : 'direct touch: tap where you want to click');
+};
+rdVideo.addEventListener('resize', placeDot);
+window.addEventListener('resize', placeDot);
+
+const pad = { fingers: new Map(), start: 0, moved: 0, lastTapEnd: 0, dragging: false, scrollY: 0, two: false, timer: null, held: false };
+function padMove(dx, dy) {
+  const r = rdVideo.getBoundingClientRect(), vw = rdVideo.videoWidth, vh = rdVideo.videoHeight;
+  if (!vw) return;
+  const k = Math.min(r.width / vw, r.height / vh);
+  // quicker swipes go further (like a laptop trackpad)
+  const speed = Math.hypot(dx, dy), gain = speed > 12 ? 1.9 : speed > 5 ? 1.3 : 1;
+  cursor.x = Math.max(0, Math.min(1, cursor.x + dx * gain / (vw * k)));
+  cursor.y = Math.max(0, Math.min(1, cursor.y + dy * gain / (vh * k)));
+  placeDot();
+  queueMove({ x: cursor.x, y: cursor.y });
+}
+const padClick = b => { rdSend({ t: 'b', b, d: true, ...cursor }); rdSend({ t: 'b', b, d: false, ...cursor }); };
+function padDown(e) {
+  pad.fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pad.fingers.size === 2) {
+    clearTimeout(pad.timer);
+    pad.two = true; pad.moved = 0; pad.start = Date.now();
+    pad.scrollY = [...pad.fingers.values()].reduce((a, f) => a + f.y, 0) / 2;
+    return;
+  }
+  if (pad.fingers.size > 2) return;
+  pad.two = false; pad.moved = 0; pad.held = false; pad.start = Date.now();
+  // touching again right after a tap: hold the button down and drag
+  if (Date.now() - pad.lastTapEnd < 280) { pad.dragging = true; rdSend({ t: 'b', b: 0, d: true, ...cursor }); return; }
+  pad.timer = setTimeout(() => {
+    if (pad.moved < 8 && !pad.two) { pad.held = true; padClick(2); if (navigator.vibrate) navigator.vibrate(15); }
+  }, 600);
+}
+function padMoveEvent(e) {
+  const f = pad.fingers.get(e.pointerId);
+  if (!f) return;
+  const dx = e.clientX - f.x, dy = e.clientY - f.y;
+  f.x = e.clientX; f.y = e.clientY;
+  if (pad.two) {
+    pad.moved += Math.hypot(dx, dy);
+    const y = [...pad.fingers.values()].reduce((a, g) => a + g.y, 0) / pad.fingers.size;
+    const d = pad.scrollY - y;
+    if (Math.abs(d) > 6) { rdSend({ t: 'w', dy: d * 4 }); pad.scrollY = y; }
+    return;
+  }
+  pad.moved += Math.hypot(dx, dy);
+  if (pad.moved > 8) clearTimeout(pad.timer);
+  if (!pad.held) padMove(dx, dy);
+}
+function padUp(e) {
+  pad.fingers.delete(e.pointerId);
+  if (pad.fingers.size) return; // wait for the last finger
+  clearTimeout(pad.timer);
+  const quick = Date.now() - pad.start < 300;
+  if (pad.two) { if (quick && pad.moved < 20) padClick(2); pad.two = false; return; }
+  if (pad.dragging) { pad.dragging = false; rdSend({ t: 'b', b: 0, d: false, ...cursor }); if (pad.moved < 8) padClick(0); return; }
+  if (!pad.held && quick && pad.moved < 8 && e.type === 'pointerup') { padClick(0); pad.lastTapEnd = Date.now(); }
+}
+
 const touches = new Map();
 let touch = null;
 rdStage.addEventListener('pointerdown', e => {
@@ -520,9 +610,11 @@ rdStage.addEventListener('pointerdown', e => {
     rdStage.setPointerCapture(e.pointerId);
     return;
   }
+  if (padMode) { e.preventDefault(); padDown(e); return; }
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (touches.size === 2) { if (touch && touch.timer) clearTimeout(touch.timer); touch = { scroll: true, y: (e.clientY + [...touches.values()][0].y) / 2 }; return; }
   if (!p) return;
+  Object.assign(cursor, p);
   touch = { start: p, sx: e.clientX, sy: e.clientY, dragging: false, done: false };
   touch.timer = setTimeout(() => {
     if (!touch || touch.dragging || touch.scroll) return;
@@ -533,7 +625,8 @@ rdStage.addEventListener('pointerdown', e => {
 });
 rdStage.addEventListener('pointermove', e => {
   if (!rd || !rd.control) return;
-  if (e.pointerType !== 'touch') { const p = rdAt(e); if (p) queueMove(p); return; }
+  if (e.pointerType !== 'touch') { const p = rdAt(e); if (p) { queueMove(p); Object.assign(cursor, p); } return; }
+  if (padMode) { padMoveEvent(e); return; }
   const t = touches.get(e.pointerId);
   if (t) { t.x = e.clientX; t.y = e.clientY; }
   if (!touch) return;
@@ -559,6 +652,7 @@ const pointerEnd = e => {
     rdSend({ t: 'b', b: e.button, d: false, ...p });
     return;
   }
+  if (padMode) { padUp(e); return; }
   touches.delete(e.pointerId);
   if (!touch) return;
   clearTimeout(touch.timer);

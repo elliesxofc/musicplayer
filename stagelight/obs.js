@@ -19,6 +19,7 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
   const state = {
     connected: false, status: 'not connected to OBS', obsVersion: '',
     scenes: [], scene: '', items: [], audio: [], canvas: { w: 1920, h: 1080 },
+    others: {}, // scenes being edited in the panel while another one is on stream: name → items
     stream: { active: false, reconnecting: false, startedAt: 0, kbps: 0, skipped: 0, total: 0, congestion: 0 },
     record: { active: false, paused: false, ms: 0 },
     stats: null,
@@ -143,18 +144,35 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     await refreshItems();
   }
 
-  async function refreshItems() {
-    if (!state.scene) { state.items = []; changed(); return; }
-    const r = await call('GetSceneItemList', { sceneName: state.scene }).catch(() => ({ sceneItems: [] }));
-    state.items = (r.sceneItems || []).slice().sort((a, b) => b.sceneItemIndex - a.sceneItemIndex)
+  async function readItems(scene) {
+    const r = await call('GetSceneItemList', { sceneName: scene }).catch(() => ({ sceneItems: [] }));
+    const items = (r.sceneItems || []).slice().sort((a, b) => b.sceneItemIndex - a.sceneItemIndex)
       .map(i => ({ id: i.sceneItemId, name: i.sourceName, on: !!i.sceneItemEnabled, kind: i.inputKind || i.sourceType || '', box: boxOf(i.sceneItemTransform) }));
     // the words in text sources, so the panel can show and change them
-    await Promise.all(state.items.filter(i => TEXT_KINDS.includes(i.kind)).map(async i => {
+    await Promise.all(items.filter(i => TEXT_KINDS.includes(i.kind)).map(async i => {
       const t = await call('GetInputSettings', { inputName: i.name }).catch(() => null);
       i.text = t && t.inputSettings ? String(t.inputSettings.text || '') : '';
     }));
+    return items;
+  }
+  async function refreshItems() {
+    state.items = state.scene ? await readItems(state.scene) : [];
     changed();
   }
+
+  /* Scenes being edited without being on stream. A panel asks for one (and asks again every
+     minute while it's open); nobody asking for 3 minutes, and it's dropped. */
+  const otherWanted = new Map(); // scene → last asked
+  async function refreshOther(scene) {
+    if (!otherWanted.has(scene) || !state.scenes.includes(scene)) return;
+    state.others[scene] = await readItems(scene);
+    changed();
+  }
+  setInterval(() => {
+    for (const [scene, at] of otherWanted) if (Date.now() - at > 180_000) { otherWanted.delete(scene); delete state.others[scene]; changed(); }
+  }, 30_000).unref();
+  // the items of any scene: the one on stream, or one being edited
+  const itemsIn = scene => (scene === state.scene ? state.items : state.others[scene]);
 
   /* Where a source sits on the canvas, as a box (left, top, width, height in canvas pixels).
      OBS keeps a position for the source's alignment point (top-left, centre, …), a scale and
@@ -218,16 +236,22 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
   /* ───────────── OBS telling us things ───────────── */
   function onEvent(type, d) {
     switch (type) {
-      case 'CurrentProgramSceneChanged': state.scene = d.sceneName; changed(); refreshItems().catch(() => {}); break;
+      case 'CurrentProgramSceneChanged': {
+        state.scene = d.sceneName;
+        changed();
+        refreshItems().catch(() => {});
+        for (const s of otherWanted.keys()) refreshOther(s).catch(() => {}); // the one that left the stream
+        break;
+      }
       case 'SceneListChanged': case 'SceneNameChanged': refreshScenes().catch(() => {}); break;
       case 'SceneItemEnableStateChanged': {
-        if (d.sceneName !== state.scene) break;
-        const it = state.items.find(i => i.id === d.sceneItemId);
+        const it = (itemsIn(d.sceneName) || []).find(i => i.id === d.sceneItemId);
         if (it) { it.on = !!d.sceneItemEnabled; changed(); }
         break;
       }
       case 'SceneItemCreated': case 'SceneItemRemoved': case 'SceneItemListReindexed':
         if (!d.sceneName || d.sceneName === state.scene) refreshItems().catch(() => {});
+        if (d.sceneName && otherWanted.has(d.sceneName)) refreshOther(d.sceneName).catch(() => {});
         break;
       case 'InputMuteStateChanged': {
         const a = state.audio.find(x => x.name === d.inputName);
@@ -240,14 +264,14 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
         break;
       }
       case 'SceneItemTransformChanged': {
-        if (d.sceneName !== state.scene) break;
-        const it = state.items.find(i => i.id === d.sceneItemId);
+        const it = (itemsIn(d.sceneName) || []).find(i => i.id === d.sceneItemId);
         if (it) { it.box = boxOf(d.sceneItemTransform); changed(); }
         break;
       }
       case 'InputSettingsChanged': {
-        const it = state.items.find(i => i.name === d.inputName && TEXT_KINDS.includes(i.kind));
-        if (it && d.inputSettings && 'text' in d.inputSettings) { it.text = String(d.inputSettings.text || ''); changed(); }
+        for (const it of [state.items, ...Object.values(state.others)].flat()) {
+          if (it.name === d.inputName && TEXT_KINDS.includes(it.kind) && d.inputSettings && 'text' in d.inputSettings) { it.text = String(d.inputSettings.text || ''); changed(); }
+        }
         break;
       }
       case 'InputCreated': case 'InputRemoved': case 'InputNameChanged': refreshAudio().catch(() => {}); break;
@@ -270,23 +294,34 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     if (!identified) throw new Error('not connected to OBS');
     const str = v => (typeof v === 'string' ? v : '');
     const itemOf = x => {
-      const it = state.items.find(i => i.id === Number(x.id));
-      if (!it || str(x.scene) !== state.scene) throw new Error('that source is gone');
+      const it = (itemsIn(str(x.scene)) || []).find(i => i.id === Number(x.id));
+      if (!it) throw new Error('that source is gone');
       return it;
     };
+    // the scene a change is for: the one on stream, or one being edited
+    const sceneOf = x => (x.scene == null || x.scene === '' ? state.scene : itemsIn(str(x.scene)) ? str(x.scene) : (() => { throw new Error('that scene is gone'); })());
     switch (a.type) {
       case 'stream': await call(a.on ? 'StartStream' : 'StopStream'); break;
       case 'record': await call(a.on ? 'StartRecord' : 'StopRecord'); break;
       case 'recordPause': await call(a.on ? 'PauseRecord' : 'ResumeRecord'); break;
+      // the panel edits a scene that isn't on stream: keep its sources up to date for the panels
+      case 'editScene': {
+        const scene = str(a.scene);
+        if (!state.scenes.includes(scene)) throw new Error('that scene is gone');
+        if (scene === state.scene) break;
+        const first = !otherWanted.has(scene);
+        otherWanted.set(scene, Date.now());
+        if (first) await refreshOther(scene);
+        break;
+      }
       case 'scene': {
         if (!state.scenes.includes(str(a.name))) throw new Error('that scene is gone');
         await call('SetCurrentProgramScene', { sceneName: a.name });
         break;
       }
       case 'source': {
-        const it = state.items.find(i => i.id === Number(a.id));
-        if (!it || str(a.scene) !== state.scene) throw new Error('that source is gone');
-        await call('SetSceneItemEnabled', { sceneName: state.scene, sceneItemId: it.id, sceneItemEnabled: !!a.on });
+        const it = itemOf(a);
+        await call('SetSceneItemEnabled', { sceneName: sceneOf(a), sceneItemId: it.id, sceneItemEnabled: !!a.on });
         it.on = !!a.on;
         break;
       }
@@ -319,7 +354,7 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
           if (b.bounded) { t.boundsWidth = w; t.boundsHeight = h; }
           else if (b.srcW && b.srcH) { t.scaleX = w / b.srcW; t.scaleY = h / b.srcH; }
         }
-        await call('SetSceneItemTransform', { sceneName: state.scene, sceneItemId: it.id, sceneItemTransform: t });
+        await call('SetSceneItemTransform', { sceneName: sceneOf(a), sceneItemId: it.id, sceneItemTransform: t });
         it.box = { ...b, x, y, w, h };
         break;
       }
@@ -372,11 +407,13 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
       }
       case 'remove': {
         const it = itemOf(a);
-        await call('RemoveSceneItem', { sceneName: state.scene, sceneItemId: it.id });
+        await call('RemoveSceneItem', { sceneName: sceneOf(a), sceneItemId: it.id });
+        if (sceneOf(a) !== state.scene) await refreshOther(sceneOf(a));
         break;
       }
       case 'addText': case 'addBrowser': case 'addColor': {
-        if (!state.scene) throw new Error('no scene to add it to');
+        const into = sceneOf(a);
+        if (!into) throw new Error('no scene to add it to');
         const W = state.canvas.w, H = state.canvas.h;
         let kind, settings, base;
         if (a.type === 'addText') {
@@ -410,13 +447,13 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
         const taken = new Set((list.inputs || []).map(i => i.inputName));
         let name = str(a.name).trim().slice(0, 80) || base;
         for (let n = 2; taken.has(name); n++) name = `${str(a.name).trim().slice(0, 76) || base} ${n}`;
-        const made = await call('CreateInput', { sceneName: state.scene, inputName: name, inputKind: kind, inputSettings: settings, sceneItemEnabled: true });
+        const made = await call('CreateInput', { sceneName: into, inputName: name, inputKind: kind, inputSettings: settings, sceneItemEnabled: true });
         // new things start in the middle of the screen
         if (made && made.sceneItemId != null) {
-          await call('SetSceneItemTransform', { sceneName: state.scene, sceneItemId: made.sceneItemId,
+          await call('SetSceneItemTransform', { sceneName: into, sceneItemId: made.sceneItemId,
             sceneItemTransform: { alignment: 0, positionX: W / 2, positionY: H / 2 } }).catch(() => {});
         }
-        await refreshItems();
+        if (into === state.scene) await refreshItems(); else await refreshOther(into);
         break;
       }
       default: throw new Error('the panel asked for something Stagelight does not do');
@@ -425,34 +462,37 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     changed();
   }
 
-  /* A picture of the current scene for the panel's preview, shared by every open panel.
-     OBS draws it on its own render thread, so it's kept light: at most one a second, smaller
-     while live, and slower still whenever OBS takes long to make one (a busy PC). */
-  let shot = { at: 0, scene: '', data: null, busy: null, gap: 1000 };
-  async function screenshot() {
-    if (!identified || !state.scene) return null;
-    if (shot.data && shot.scene === state.scene && Date.now() - shot.at < shot.gap) return shot.data;
+  /* A picture of a scene for the panel's preview (the one on stream, or one being edited), shared
+     by every open panel. OBS draws it on its own render thread, so it's kept light: at most one a
+     second per scene, smaller while live, and slower still whenever OBS takes long to make one. */
+  const shots = new Map(); // scene → { at, data, busy, gap }
+  async function screenshot(scene = state.scene) {
+    if (!identified || !scene || !itemsIn(scene)) return null;
+    const shot = shots.get(scene) || { at: 0, data: null, busy: null, gap: 1000 };
+    shots.set(scene, shot);
+    if (shot.data && Date.now() - shot.at < shot.gap) return shot.data;
     if (shot.busy) return shot.busy;
     const w = Math.min(state.stream.active ? 640 : 960, state.canvas.w);
     const started = Date.now();
-    shot.busy = call('GetSourceScreenshot', { sourceName: state.scene, imageFormat: 'jpg', imageWidth: w, imageHeight: Math.round(w * state.canvas.h / state.canvas.w), imageCompressionQuality: 60 })
+    shot.busy = call('GetSourceScreenshot', { sourceName: scene, imageFormat: 'jpg', imageWidth: w, imageHeight: Math.round(w * state.canvas.h / state.canvas.w), imageCompressionQuality: 60 })
       .then(r => {
         const took = Date.now() - started;
         const m = /^data:image\/\w+;base64,(.*)$/.exec(r.imageData || '');
         // a slow answer means OBS is busy: wait longer before the next picture
-        const gap = took > 250 ? 4000 : took > 120 ? 2000 : 1000;
-        shot = { at: Date.now(), scene: state.scene, data: m ? Buffer.from(m[1], 'base64') : null, busy: null, gap };
+        Object.assign(shot, { at: Date.now(), data: m ? Buffer.from(m[1], 'base64') : null, busy: null, gap: took > 250 ? 4000 : took > 120 ? 2000 : 1000 });
         return shot.data;
       })
       .catch(() => { shot.busy = null; return null; });
+    // pictures of scenes nobody looks at any more go
+    for (const [s, x] of shots) if (s !== scene && Date.now() - x.at > 60_000 && !x.busy) shots.delete(s);
     return shot.busy;
   }
 
   // what the panel's browser source form starts with
   async function browserSettings(scene, id) {
     if (!identified) throw new Error('not connected to OBS');
-    const it = state.items.find(i => i.id === Number(id));
-    if (!it || String(scene) !== state.scene) throw new Error('that source is gone');
+    const it = (itemsIn(String(scene)) || []).find(i => i.id === Number(id));
+    if (!it) throw new Error('that source is gone');
     if (it.kind !== 'browser_source') throw new Error("that's not a browser source");
     const s = (await call('GetInputSettings', { inputName: it.name })).inputSettings || {};
     return {
@@ -478,7 +518,7 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     browserSettings,
     snapshot,
     screenshot,
-    shotTag: () => `"${shot.at}"`,
+    shotTag: (scene = state.scene) => `"${(shots.get(scene) || { at: 0 }).at}"`,
     setBusy,
     summary: () => (!state.connected ? 'OBS not connected' : state.stream.active ? 'live' : state.record.active ? 'recording' : 'OBS connected'),
   };

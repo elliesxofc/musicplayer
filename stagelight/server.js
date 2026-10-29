@@ -189,10 +189,11 @@ function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: f
       return send(res, 200, { ...remote.info(), screens: remote.settings().view ? await remote.screens() : [], ice: getWeb().on ? STUN : [] });
     }
     if (p === '/api/preview' && req.method === 'GET') {
-      const jpg = await obs.screenshot();
+      const scene = url.searchParams.get('scene') || undefined;
+      const jpg = await obs.screenshot(scene);
       if (!jpg) return send(res, 503, { error: 'no preview right now' });
       // the panel already has this picture: say so instead of sending it again
-      const tag = obs.shotTag();
+      const tag = obs.shotTag(scene);
       if (req.headers['if-none-match'] === tag) { res.writeHead(304, { ETag: tag, 'Cache-Control': 'no-cache' }); return res.end(); }
       return send(res, 200, jpg, 'image/jpeg', { ETag: tag, 'Cache-Control': 'no-cache' });
     }

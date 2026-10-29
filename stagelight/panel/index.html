@@ -71,6 +71,10 @@
         <label class="mini-check"><input type="checkbox" id="previewOn" checked> live</label>
         <label class="mini-check needs-control"><input type="checkbox" id="editOn"> edit layout</label>
       </div>
+      <div class="edit-scene needs-control" id="editSceneRow" hidden>
+        <label>editing <select id="editScene" aria-label="the scene to edit"></select></label>
+        <button class="btn small" id="goScene" hidden>show it on stream</button>
+      </div>
       <div class="stage" id="stage">
         <img id="previewImg" alt="what OBS shows right now">
         <div class="boxes" id="boxes"></div>

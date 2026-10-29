@@ -285,13 +285,37 @@ let selected = null, drag = null, lastShot = null, lastTag = null, boxesKey = nu
 const stage = $('#stage'), boxes = $('#boxes');
 const editing = () => $('#editOn').checked;
 
+/* The scene the preview and edit layout work on: the one on stream, or (while editing) another
+   one picked from the list, changed without anyone watching seeing it until it's switched to. */
+let editScene = '', editAsk = null;
+const stageScene = () => (editing() && editScene && st.scenes.includes(editScene) ? editScene : st.scene);
+const offStream = () => !!st && stageScene() !== st.scene;
+const stageItems = () => { const sc = stageScene(); return sc === st.scene ? st.items : (st.others && st.others[sc]) || null; };
+function pickScene(name) {
+  editScene = name && name !== st.scene ? name : '';
+  selected = null; boxesKey = null; lastTag = null;
+  // the other scene's picture, not the old one, while it loads
+  $('#previewImg').removeAttribute('src');
+  $('#stageMsg').textContent = 'loading the preview…';
+  clearInterval(editAsk);
+  if (editScene) {
+    // Stagelight keeps that scene's sources up to date while someone edits it
+    const ask = () => api('/api/action', { type: 'editScene', scene: editScene }).catch(err => toast(err.message, 4000));
+    ask();
+    editAsk = setInterval(() => { if (editScene && editing()) ask(); }, 60_000);
+  }
+  renderStage();
+}
+$('#editScene').onchange = () => pickScene($('#editScene').value);
+$('#goScene').onclick = () => { const name = stageScene(); act({ type: 'scene', name }, () => { toast(`"${name}" is on stream now ✦`); editScene = ''; renderStage(); }); };
+
 // the picture: about once a second while the panel is open (it pauses in the background)
 async function previewLoop() {
   let wait = 1000;
   try {
     if ($('#previewOn').checked && !$('#panelView').hidden && document.visibilityState === 'visible' && st && st.connected) {
       // asks "has it changed?": an unchanged picture isn't sent again
-      const r = await fetch('/api/preview', { credentials: 'same-origin', cache: 'no-cache' });
+      const r = await fetch(offStream() ? `/api/preview?scene=${encodeURIComponent(stageScene())}` : '/api/preview', { credentials: 'same-origin', cache: 'no-cache' });
       const tag = r.headers.get('ETag');
       if (r.status === 401) showLogin();
       else if (r.ok && tag && tag === lastTag) { /* same picture */ }
@@ -313,15 +337,32 @@ async function previewLoop() {
 }
 previewLoop();
 $('#previewOn').onchange = () => { if (!$('#previewOn').checked) $('#stageMsg').textContent = 'preview paused (saves data)'; };
-$('#editOn').onchange = () => { if (!editing()) selected = null; renderStage(); };
+$('#editOn').onchange = () => { if (!editing()) { selected = null; pickScene(''); } else renderStage(); };
 
 function renderStage() {
   if (!st) return;
   stage.style.aspectRatio = `${st.canvas.w} / ${st.canvas.h}`;
   stage.classList.toggle('editing', editing());
   $('#editHint').hidden = !editing();
-  if (selected != null && !st.items.some(i => i.id === selected)) selected = null;
-  const it = st.items.find(i => i.id === selected);
+  // which scene: the list, and whether the one shown is on stream
+  if (editScene && (!st.scenes.includes(editScene) || editScene === st.scene)) editScene = '';
+  $('#editSceneRow').hidden = !editing();
+  const opts = JSON.stringify([st.scenes, st.scene]);
+  if ($('#editScene').dataset.key !== opts) {
+    $('#editScene').dataset.key = opts;
+    $('#editScene').replaceChildren(...st.scenes.map(n => { const o = document.createElement('option'); o.value = n; o.textContent = n === st.scene ? `${n} · on stream` : n; return o; }));
+  }
+  $('#editScene').value = stageScene();
+  const off = offStream();
+  stage.classList.toggle('off-stream', off);
+  $('#goScene').hidden = !off;
+  $('#editHint').textContent = off
+    ? `tap a source to pick it, drag to move it, drag its corner to resize. "${stageScene()}" isn't on stream: nobody sees the changes until you show it.`
+    : 'tap a source to pick it, drag to move it, drag its corner to resize. changes show on stream straight away.';
+  const items = stageItems() || [];
+  if (!stageItems()) $('#stageMsg').textContent = `loading "${stageScene()}"…`;
+  if (selected != null && !items.some(i => i.id === selected)) selected = null;
+  const it = items.find(i => i.id === selected);
   $('#selBar').hidden = !it;
   if (it) {
     $('#selName').textContent = it.name;
@@ -331,13 +372,13 @@ function renderStage() {
   }
   if (drag) return; // don't redraw under a finger
   // only when something about the boxes changed (most updates are just the stream's numbers)
-  const key = editing() ? JSON.stringify([selected, st.canvas, st.items.map(i => [i.id, i.on, i.name, i.box])]) : '';
+  const key = editing() ? JSON.stringify([stageScene(), selected, st.canvas, items.map(i => [i.id, i.on, i.name, i.box])]) : '';
   if (key === boxesKey) return;
   boxesKey = key;
   boxes.replaceChildren();
   if (!editing()) return;
   // bottom of OBS's list first, so the top source ends up on top here too
-  for (const i of st.items.slice().reverse()) {
+  for (const i of items.slice().reverse()) {
     if (!i.box || i.box.w <= 0 || i.box.h <= 0) continue;
     const el = document.createElement('div');
     // near the top edge the name goes inside the box, so it isn't cut off
@@ -368,7 +409,7 @@ boxes.addEventListener('pointerdown', e => {
   if (!editing()) return;
   const el = e.target.closest('.box');
   if (!el) { selected = null; renderStage(); return; }
-  const it = st.items.find(i => i.id === Number(el.dataset.id));
+  const it = (stageItems() || []).find(i => i.id === Number(el.dataset.id));
   if (!it) return;
   e.preventDefault();
   if (selected !== it.id) { selected = it.id; renderStage(); }
@@ -400,7 +441,7 @@ function send(d, last = false) {
   const b = d.now, s = d.start;
   if (last && b.x === s.x && b.y === s.y && b.w === s.w) return;
   const a = d.resize ? { type: 'resize', x: b.x, y: b.y, w: b.w, h: b.h } : { type: 'move', x: b.x, y: b.y };
-  act({ ...a, scene: st.scene, id: d.id });
+  act({ ...a, scene: stageScene(), id: d.id });
 }
 
 // add / change / remove sources
@@ -438,11 +479,11 @@ function form(title, text, fields, yes) {
 }
 const added = name => () => { toast(`added ${name} ✦`); if (!editing()) { $('#editOn').checked = true; renderStage(); } };
 $('#addText').onclick = async () => {
-  const v = await form('add text', `shows in the middle of "${st.scene}". move it with edit layout.`, [
+  const v = await form('add text', `shows in the middle of "${stageScene()}"${offStream() ? " (not on stream)" : ''}. move it with edit layout.`, [
     { name: 'text', label: 'the words', type: 'textarea', required: true, placeholder: 'be right back ✦' },
     { name: 'name', label: 'name in OBS (optional)', placeholder: 'Text' },
   ], 'add text');
-  if (v) act({ type: 'addText', text: v.text, name: v.name }, added('the text'));
+  if (v) act({ type: 'addText', scene: stageScene(), text: v.text, name: v.name }, added('the text'));
 };
 $('#addBrowser').onclick = async () => {
   const v = await form('add a website', 'alerts, chat, widgets or a picture link, as an OBS browser source.', [
@@ -451,25 +492,26 @@ $('#addBrowser').onclick = async () => {
     { name: 'height', label: 'height', type: 'number', value: 600, min: 16, max: 4320 },
     { name: 'name', label: 'name in OBS (optional)' },
   ], 'add website');
-  if (v) act({ type: 'addBrowser', url: v.url, width: Number(v.width), height: Number(v.height), name: v.name }, added('the website'));
+  if (v) act({ type: 'addBrowser', scene: stageScene(), url: v.url, width: Number(v.width), height: Number(v.height), name: v.name }, added('the website'));
 };
 $('#addColor').onclick = async () => {
   const v = await form('add a colour box', 'a block of colour, for a frame or a background.', [
     { name: 'color', label: 'colour', type: 'color', value: '#8f7bff' },
     { name: 'name', label: 'name in OBS (optional)', placeholder: 'Colour' },
   ], 'add box');
-  if (v) act({ type: 'addColor', color: v.color, name: v.name }, added('the colour box'));
+  if (v) act({ type: 'addColor', scene: stageScene(), color: v.color, name: v.name }, added('the colour box'));
 };
+const selectedItem = () => (stageItems() || []).find(i => i.id === selected);
 $('#selText').onclick = async () => {
-  const it = st.items.find(i => i.id === selected);
+  const it = selectedItem();
   if (!it) return;
   const v = await form('edit text', it.name, [{ name: 'text', label: 'the words', type: 'textarea', value: it.text || '' }], 'save');
-  if (v) act({ type: 'setText', scene: st.scene, id: it.id, text: v.text }, () => toast('text changed ✦'));
+  if (v) act({ type: 'setText', scene: stageScene(), id: it.id, text: v.text }, () => toast('text changed ✦'));
 };
 // a browser source's settings: the page, its size and frame rate, and its CSS
-async function browserForm(it) {
+async function browserForm(it, scene = st.scene) {
   let s;
-  try { s = await api(`/api/browser?scene=${encodeURIComponent(st.scene)}&id=${it.id}`); } catch (err) { return toast(err.message, 4000); }
+  try { s = await api(`/api/browser?scene=${encodeURIComponent(scene)}&id=${it.id}`); } catch (err) { return toast(err.message, 4000); }
   const v = await form(`${s.name}`, s.localFile ? `this one shows a file on the stream PC (${s.localFile}). type a web address to show a website instead.` : 'like OBS\'s properties window. saving reloads the page on stream.', [
     { name: 'url', label: 'web address', type: 'url', required: !s.localFile, value: s.url, placeholder: s.localFile ? 'keeps the file when empty' : 'https://' },
     { name: 'width', label: 'width', type: 'number', value: s.width, min: 16, max: 7680 },
@@ -479,17 +521,17 @@ async function browserForm(it) {
     { name: 'shutdown', label: 'shut down when not visible', type: 'checkbox', value: s.shutdown },
     { name: 'restartWhenActive', label: 'refresh when the scene becomes active', type: 'checkbox', value: s.restartWhenActive },
   ], 'save');
-  if (v) act({ type: 'browserSet', scene: st.scene, id: it.id, name: it.name, ...v, width: Number(v.width), height: Number(v.height), fps: Number(v.fps) }, () => toast(`saved ${it.name} ✦`));
+  if (v) act({ type: 'browserSet', scene, id: it.id, name: it.name, ...v, width: Number(v.width), height: Number(v.height), fps: Number(v.fps) }, () => toast(`saved ${it.name} ✦`));
 }
-$('#selBrowser').onclick = () => { const it = st.items.find(i => i.id === selected); if (it) browserForm(it); };
+$('#selBrowser').onclick = () => { const it = selectedItem(); if (it) browserForm(it, stageScene()); };
 $('#selHide').onclick = () => {
-  const it = st.items.find(i => i.id === selected);
-  if (it) act({ type: 'source', scene: st.scene, id: it.id, on: !it.on });
+  const it = selectedItem();
+  if (it) act({ type: 'source', scene: stageScene(), id: it.id, on: !it.on });
 };
 $('#selRemove').onclick = async () => {
-  const it = st.items.find(i => i.id === selected);
-  if (!it || !(await ask(`remove "${it.name}"?`, `it's taken out of the scene "${st.scene}".`, 'remove'))) return;
-  act({ type: 'remove', scene: st.scene, id: it.id }, () => { selected = null; toast('removed'); });
+  const it = selectedItem();
+  if (!it || !(await ask(`remove "${it.name}"?`, `it's taken out of the scene "${stageScene()}".`, 'remove'))) return;
+  act({ type: 'remove', scene: stageScene(), id: it.id }, () => { selected = null; toast('removed'); });
 };
 
 /* ───────────── remote display: the PC's whole screen, mouse and keyboard ─────────────

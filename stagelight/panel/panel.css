@@ -123,6 +123,12 @@ h1, h2, h3 { margin: 0; }
 .mini-check input { width: 17px; height: 17px; accent-color: var(--amber); margin: 0; }
 .stage { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; background: #000; border: 1px solid var(--line); touch-action: auto; }
 .stage.editing { touch-action: none; outline: 2px solid rgba(255, 181, 71, .5); outline-offset: 2px; }
+.stage.editing.off-stream { outline: 2px dashed rgba(143, 123, 255, .8); }
+.stage.off-stream::after { content: 'not on stream'; position: absolute; right: 8px; bottom: 8px; padding: 2px 8px; border-radius: 6px; background: rgba(143, 123, 255, .9); color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .04em; pointer-events: none; z-index: 3; }
+.edit-scene { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
+.edit-scene label { display: flex; align-items: center; gap: 8px; }
+.edit-scene select { height: 36px; max-width: 220px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0, 0, 0, .25); color: var(--ink); font-size: 14px; }
+.edit-scene .btn.small { min-height: 34px; margin-left: auto; }
 .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: block; }
 .stage img:not([src]) { visibility: hidden; }
 .stage-msg { pointer-events: none; position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); font-size: 14px; text-align: center; padding: 10px; }

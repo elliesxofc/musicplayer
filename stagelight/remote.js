@@ -16,8 +16,29 @@ const QUALITY = {
   fast: { width: 1280, height: 720, fps: 60, bitrate: 6_000_000 },
 };
 
+/* While OBS is live, the picture shares the stream PC's upload with the stream, and the stream
+   comes first: the picture is kept small, and smaller still as soon as OBS has trouble sending
+   (dropped frames, congestion, reconnecting), until the stream has been fine for a minute. */
+const LIVE = { bitrate: 1_200_000, fps: 15 };
+const STRUGGLING = { bitrate: 400_000, fps: 8 };
+const CALM_MS = 60_000;
+
+function limitFor(q, stream, guard, now = Date.now()) {
+  if (!stream || !stream.active) { guard.until = 0; return { bitrate: q.bitrate, fps: q.fps, saving: false, level: 'full' }; }
+  const dropped = guard.skipped != null && stream.skipped > guard.skipped && (stream.skipped - guard.skipped) >= Math.max(3, (stream.total - guard.total) * 0.005);
+  guard.skipped = stream.skipped; guard.total = stream.total;
+  if (stream.reconnecting || stream.congestion > 0.2 || dropped) guard.until = now + CALM_MS;
+  const l = guard.until > now ? STRUGGLING : LIVE;
+  return { bitrate: Math.min(q.bitrate, l.bitrate), fps: Math.min(q.fps, l.fps), saving: true, level: l === STRUGGLING ? 'low' : 'live' };
+}
+const NOTES = {
+  full: 'the stream ended: full picture again',
+  live: "you're live: the picture is kept light so the stream keeps its upload",
+  low: 'the stream is struggling: the picture is lowered to give it room',
+};
+
 function createRemote({ root, icon, getSettings, log = () => {}, onChange = () => {} }) {
-  let capture = null, bar = null, active = null, nextJob = 1, closeTimer = null;
+  let capture = null, bar = null, active = null, nextJob = 1, closeTimer = null, stream = null;
   const waiting = new Map(); // job id → resolve
   const input = createInput({ log });
 
@@ -84,16 +105,19 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     if (active) end('someone else connected');
     clearTimeout(closeTimer);
     const q = QUALITY[quality] || QUALITY.smooth;
+    const guard = {};
+    const limit = limitFor(q, stream, guard);
+    if (limit.level !== 'full') limit.note = NOTES[limit.level];
     const id = nextJob++;
     const win = captureWindow();
     if (win.webContents.isLoading()) await new Promise(r => win.webContents.once('did-finish-load', r));
     const result = await new Promise(resolve => {
       waiting.set(id, resolve);
-      win.webContents.send('start', { id, sourceId: scr.id, offer: sdp, ice, ...q });
+      win.webContents.send('start', { id, sourceId: scr.id, offer: sdp, ice, ...q, limit });
       setTimeout(() => { if (waiting.has(id)) { waiting.delete(id); resolve({ error: 'the screen took too long to start' }); } }, 15_000);
     });
     if (result.error) throw new Error(result.error);
-    active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now() };
+    active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now(), q, guard, level: limit.level };
     const what = active.control ? 'controlling' : 'watching';
     log(`remote display: ${from} is ${what} this PC`);
     showBar(`${from} is ${what} this PC`);
@@ -139,8 +163,19 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     }
   }
 
+  // OBS's stream changed (or was checked): adjust the picture's share of the upload
+  function streamChanged(next) {
+    stream = next;
+    if (!active || !capture || capture.isDestroyed()) return;
+    const limit = limitFor(active.q, stream, active.guard);
+    if (limit.level === active.level) return;
+    if (limit.level === 'low') log('remote display: the stream is struggling, the picture is lowered');
+    active.level = limit.level;
+    capture.webContents.send('limit', { ...limit, note: NOTES[limit.level] });
+  }
+
   return {
-    start, end,
+    start, end, streamChanged,
     screens,
     status: () => ({ active: !!active, from: active ? active.from : '', control: !!(active && active.control) }),
     canControl: () => input.available(),
@@ -154,4 +189,4 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   };
 }
 
-module.exports = { createRemote, QUALITY };
+module.exports = { createRemote, QUALITY, limitFor };

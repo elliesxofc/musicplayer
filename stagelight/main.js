@@ -69,13 +69,13 @@ const log = line => {
 };
 
 const winOpen = () => !!(win && !win.isDestroyed() && win.isVisible());
-const obs = createObs({ onChange: () => { server.broadcast(); if (winOpen()) sendWin('status', status()); refreshTray(); }, log });
+const obs = createObs({ onChange: () => { remote.streamChanged(obs.snapshot().stream); server.broadcast(); if (winOpen()) sendWin('status', status()); refreshTray(); }, log });
 // OBS is asked often only while someone looks (a panel, or the settings window)
-const updateBusy = () => obs.setBusy(server.watcherCount() > 0 || winOpen());
+const updateBusy = () => obs.setBusy(server.watcherCount() > 0 || winOpen() || remote.status().active);
 const remoteSettings = () => { const r = readConfig().remote || {}; return { view: !!r.view, control: !!r.view && !!r.control }; };
 const remote = createRemote({
   root: ROOT, icon: ICON, getSettings: remoteSettings, log,
-  onChange: () => { sendWin('status', status()); refreshTray(); },
+  onChange: () => { updateBusy(); sendWin('status', status()); refreshTray(); },
 });
 remote.settings = remoteSettings;
 remote.info = () => { const r = remote.status(); return { ...remoteSettings(), controlWorks: remote.canControl(), active: r.active, from: r.from }; };

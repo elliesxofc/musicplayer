@@ -98,6 +98,9 @@ Stagelight is made to stay out of OBS's way:
 - the settings window really closes (no memory used until it's opened again)
 - the remote display's video is H.264, which most PCs encode on the graphics card, and the
   screen-sharing part closes a minute after a session ends
+- while you're live, the remote display shares the upload with the stream and the stream comes
+  first: the picture stays at 1.2 Mbps and 15 fps, and drops to 0.4 Mbps and 8 fps as soon as
+  OBS drops frames, struggles to send or reconnects, until the stream has been fine for a minute
 
 ## Safety
 

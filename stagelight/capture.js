@@ -22,6 +22,22 @@ const iceDone = p => new Promise(resolve => {
   p.addEventListener('icegatheringstatechange', () => { if (p.iceGatheringState === 'complete') { clearTimeout(t); resolve(); } });
 });
 
+// how much of the upload the picture may use (lowered while live, so the stream keeps its share)
+let limit = null;
+function applyLimit(next) {
+  if (next) limit = next;
+  if (!pc || !limit) return;
+  for (const sender of pc.getSenders()) {
+    const p = sender.getParameters();
+    p.encodings = (p.encodings && p.encodings.length ? p.encodings : [{}]).map(e => ({ ...e, maxBitrate: limit.bitrate, maxFramerate: limit.fps }));
+    // while live, fewer frames before blurry text; otherwise smooth first
+    p.degradationPreference = limit.saving ? 'maintain-resolution' : 'maintain-framerate';
+    sender.setParameters(p).catch(() => {});
+  }
+  if (limit.note && channel && channel.readyState === 'open') { try { channel.send(JSON.stringify({ t: 'note', text: limit.note })); } catch { /* fine */ } }
+}
+window.capture.onLimit(next => applyLimit(next));
+
 window.capture.onStart(async job => {
   stop();
   try {
@@ -37,6 +53,7 @@ window.capture.onStart(async job => {
     }
     pc.ondatachannel = e => {
       channel = e.channel;
+      e.channel.onopen = () => { if (limit && limit.note) try { e.channel.send(JSON.stringify({ t: 'note', text: limit.note })); } catch { /* fine */ } };
       e.channel.onmessage = m => { try { window.capture.input(JSON.parse(m.data)); } catch { /* not JSON */ } };
     };
     pc.onconnectionstatechange = () => {
@@ -60,12 +77,7 @@ window.capture.onStart(async job => {
     await pc.setLocalDescription(answer);
     await iceDone(pc);
     // a steady picture: up to the chosen bitrate, frames kept smooth before sharpness
-    for (const sender of pc.getSenders()) {
-      const p = sender.getParameters();
-      p.encodings = (p.encodings && p.encodings.length ? p.encodings : [{}]).map(e => ({ ...e, maxBitrate: job.bitrate, maxFramerate: job.fps }));
-      p.degradationPreference = 'maintain-framerate';
-      sender.setParameters(p).catch(() => {});
-    }
+    applyLimit(job.limit);
     window.capture.answer(job.id, { sdp: pc.localDescription.sdp });
   } catch (err) {
     stop();

@@ -445,6 +445,7 @@ async function rdConnect() {
   dc.onmessage = m => {
     let msg; try { msg = JSON.parse(m.data); } catch { return; }
     if (msg.t === 'end' && rd && rd.pc === pc) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); }
+    if (msg.t === 'note' && rd && rd.pc === pc && typeof msg.text === 'string') toast(msg.text.slice(0, 120), 4000);
   };
   pc.addTransceiver('video', { direction: 'recvonly' });
   pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };

@@ -106,6 +106,19 @@
     </section>
 
     <section class="card">
+      <h2>your own web address (optional)</h2>
+      <p class="hint">open the panel at your own address, like <b>https://stage.lilianax.lol</b>, from anywhere, without Tailscale. it goes through a free <b>Cloudflare Tunnel</b> on this PC (the guide has the steps). nothing is opened on your router.</p>
+      <label class="check"><input type="checkbox" id="webOn"> allow access through a web address</label>
+      <div class="grid">
+        <label class="field"><span>the web address</span><input id="webHost" spellcheck="false" autocomplete="off" placeholder="stage.lilianax.lol"></label>
+        <label class="field"><span>&nbsp;</span><button class="btn" id="webSave">save</button></label>
+      </div>
+      <p class="saved" id="webSaved"></p>
+      <p class="hint" id="webSeen"></p>
+      <p class="hint">through the web address: logins only work over HTTPS, each visitor is locked out on their own after 5 wrong tries, and 30 wrong tries from the internet in 10 minutes pause web logins for 15 minutes (the home network and Tailscale keep working). the remote display also tries a direct connection over the internet, which works on many networks but not all.</p>
+    </section>
+
+    <section class="card">
       <h2>4 · remote display (the whole PC)</h2>
       <p class="hint">like AnyDesk or Parsec, in the panel: see this PC's screen, and (if you allow it) use its mouse and keyboard, for when you need OBS's full window. only <b>full access</b> accounts can open it, and the panel asks for that account's password again before it starts. while someone is connected, a bar shows at the top of this screen with a <b>stop</b> button.</p>
       <label class="check"><input type="checkbox" id="remoteView"> allow seeing this PC's screen from the panel</label>

@@ -67,6 +67,25 @@ Don't open a port on your router for Stagelight. Use [Tailscale](https://tailsca
 
 Only your devices (and people you share with) can reach the panel that way.
 
+## From anywhere: your own web address (Cloudflare Tunnel)
+
+Instead of Tailscale, the panel can be at your own address, like `https://stage.lilianax.lol`:
+
+1. Put the domain on Cloudflare (free plan; change the nameservers where the domain was bought).
+2. Cloudflare → Zero Trust → Networks → Tunnels → create a **cloudflared** tunnel, install it on
+   the stream PC (Command Prompt as administrator), and add a public hostname: `stage` ·
+   `lilianax.lol` · type `HTTP` · URL `localhost:4850`.
+3. In Stagelight, **your own web address**: type `stage.lilianax.lol` and tick **allow access
+   through a web address**. Stagelight shows "working ✓" after the first visit.
+4. Recommended: Cloudflare Access (Zero Trust → Access → Applications → self-hosted) with a policy
+   that only allows your and your friend's email addresses.
+
+Through the web address: off unless switched on; only that address is accepted; logins only over
+HTTPS (Secure cookie, HSTS); each visitor (by Cloudflare's `CF-Connecting-IP`) is locked out on
+their own; 30 wrong tries from the internet in 10 minutes pause web logins for 15 minutes (the
+home network and Tailscale keep working). The remote display also tries a direct connection
+over the internet (STUN), which works on many networks but not all.
+
 ## Light on the stream PC
 
 Stagelight is made to stay out of OBS's way:

@@ -29,7 +29,8 @@ window.capture.onStart(async job => {
       audio: false,
       video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: job.sourceId, maxWidth: job.width, maxHeight: job.height, maxFrameRate: job.fps } },
     });
-    pc = new RTCPeerConnection({ iceServers: [] });
+    // STUN only when the web address is on (to find a direct way between the two networks)
+    pc = new RTCPeerConnection({ iceServers: (job.ice || []).map(u => ({ urls: u })) });
     for (const track of stream.getTracks()) {
       track.contentHint = 'detail'; // text stays sharp (OBS's menus and numbers)
       pc.addTrack(track, stream);

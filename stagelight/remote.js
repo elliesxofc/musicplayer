@@ -74,7 +74,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   });
 
   /* ───────────── start / end ───────────── */
-  async function start({ sdp, screenId, quality, from }) {
+  async function start({ sdp, screenId, quality, from, ice = [] }) {
     const s = getSettings();
     if (!s.view) throw new Error('the remote display is switched off in Stagelight on the stream PC');
     if (typeof sdp !== 'string' || sdp.length > 100_000 || !/^v=0/.test(sdp)) throw new Error('bad request');
@@ -89,7 +89,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     if (win.webContents.isLoading()) await new Promise(r => win.webContents.once('did-finish-load', r));
     const result = await new Promise(resolve => {
       waiting.set(id, resolve);
-      win.webContents.send('start', { id, sourceId: scr.id, offer: sdp, ...q });
+      win.webContents.send('start', { id, sourceId: scr.id, offer: sdp, ice, ...q });
       setTimeout(() => { if (waiting.has(id)) { waiting.delete(id); resolve({ error: 'the screen took too long to start' }); } }, 15_000);
     });
     if (result.error) throw new Error(result.error);

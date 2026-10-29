@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('stagelight', {
   logoutAll: () => ipcRenderer.invoke('logout-all'),
   setRemote: settings => ipcRenderer.invoke('set-remote', settings),
   stopRemote: () => ipcRenderer.invoke('remote-stop'),
+  setWeb: settings => ipcRenderer.invoke('set-web', settings),
   open: url => ipcRenderer.invoke('open', String(url)),
   onStatus: cb => ipcRenderer.on('status', (_e, s) => cb(s)),
   onLog: cb => ipcRenderer.on('log', (_e, line) => cb(line)),

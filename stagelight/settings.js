@@ -9,7 +9,7 @@ function addrRow(a) {
   const code = document.createElement('code');
   code.textContent = a.url;
   const kind = document.createElement('small');
-  kind.textContent = a.kind === 'tailscale' ? 'tailscale' : 'same Wi-Fi';
+  kind.textContent = a.kind === 'tailscale' ? 'tailscale' : a.kind === 'web' ? 'anywhere' : 'same Wi-Fi';
   const copy = document.createElement('button');
   copy.className = 'btn';
   copy.textContent = 'copy';
@@ -27,6 +27,15 @@ function showStatus(s) {
   $('#tsAddrs').replaceChildren(...ts.map(addrRow));
   $('#sessions').textContent = s.sessions ? `${s.sessions} device${s.sessions === 1 ? ' is' : 's are'} logged in to the panel.` : 'nobody is logged in to the panel right now.';
   $('#openHere').dataset.url = `http://localhost:${s.port || $('#port').value}`;
+  const w = s.web || {};
+  if (document.activeElement !== $('#webHost')) { $('#webOn').checked = w.on; if (w.host) $('#webHost').value = w.host; }
+  $('#webSeen').textContent = !w.on ? '' : w.lastVisit
+    ? `working ✓ last visit through https://${w.host}: ${new Date(w.lastVisit).toLocaleTimeString()}`
+    : `waiting for the first visit through https://${w.host || '…'} (open it on your phone to check)`;
+  if (w.on && w.host) {
+    const row = addrRow({ url: `https://${w.host}`, kind: 'web' });
+    $('#tsAddrs').append(row);
+  }
   const r = s.remote || {};
   $('#remoteStatus').hidden = !r.active;
   if (r.active) $('#remoteWho').textContent = `${r.from} is ${r.control ? 'controlling' : 'watching'} this PC right now`;
@@ -48,6 +57,15 @@ $('#remoteControl').onchange = async () => {
   }
   saveRemote();
 };
+async function saveWeb() {
+  const r = await S.setWeb({ on: $('#webOn').checked, host: $('#webHost').value });
+  $('#webSaved').classList.toggle('bad', !r.ok);
+  $('#webSaved').textContent = r.ok ? ($('#webOn').checked ? 'saved ✓ the web address is on' : 'saved ✓ the web address is off') : r.error;
+  if (!r.ok) $('#webOn').checked = false;
+  if (r.status) showStatus(r.status);
+}
+$('#webOn').onchange = saveWeb;
+$('#webSave').onclick = saveWeb;
 $('#remoteStop').onclick = async () => showStatus(await S.stopRemote());
 
 (async () => {

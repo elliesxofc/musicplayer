@@ -90,7 +90,9 @@ function accounts() {
   }
   return Array.isArray(c.accounts) ? c.accounts : [];
 }
-const server = createServer({ obs, remote, getAccounts: accounts, log, onWatchers: updateBusy });
+// your own web address through a Cloudflare Tunnel: off unless switched on here
+const webSettings = () => { const w = readConfig().web || {}; return { on: !!w.on, host: typeof w.host === 'string' ? w.host : '' }; };
+const server = createServer({ obs, remote, getAccounts: accounts, getWeb: webSettings, log, onWatchers: updateBusy });
 
 /* The stream comes first: every Stagelight process (window, screen sharing, the GPU helper)
    runs below normal priority, so when the PC is busy Windows serves OBS before Stagelight. */
@@ -101,7 +103,7 @@ function lowerPriority() {
 
 function status() {
   const s = obs.snapshot();
-  return { obs: s.status, connected: s.connected, live: s.stream.active, recording: s.record.active, sessions: server.sessionCount(), port: server.port(), addresses: addresses(), remote: remote.status() };
+  return { obs: s.status, connected: s.connected, live: s.stream.active, recording: s.record.active, sessions: server.sessionCount(), port: server.port(), addresses: addresses(), remote: remote.status(), web: { ...webSettings(), lastVisit: server.lastWebVisit() } };
 }
 
 async function startServer() {
@@ -237,6 +239,16 @@ ipcMain.handle('set-remote', (_e, next) => {
   remote.settingsChanged();
   log(`remote display ${view ? (control ? 'on, with mouse and keyboard' : 'on, watching only') : 'off'}`);
   return remoteSettings();
+});
+// "stage.lilianax.lol", "https://stage.lilianax.lol/" → stage.lilianax.lol
+ipcMain.handle('set-web', (_e, next) => {
+  const on = !!(next && next.on);
+  let host = String((next && next.host) || '').trim().toLowerCase();
+  try { if (host) host = new URL(/^[a-z]+:\/\//.test(host) ? host : `https://${host}`).hostname; } catch { host = ''; }
+  if (on && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return { ok: false, error: 'type the web address, like stage.lilianax.lol' };
+  writeConfig({ web: { on, host } });
+  log(on ? `web address on: https://${host}` : 'web address off');
+  return { ok: true, status: status() };
 });
 ipcMain.handle('remote-stop', () => { remote.end('stopped on the stream PC'); return status(); });
 ipcMain.handle('logout-all', () => { server.logoutAll(); log('logged everyone out of the panel'); return status(); });

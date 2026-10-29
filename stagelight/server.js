@@ -45,13 +45,30 @@ const ROLES = ['watch', 'control', 'full'];
 const atLeast = (role, need) => ROLES.indexOf(role) >= ROLES.indexOf(need);
 const DUMMY = hashPassword('not-an-account'); // so a wrong username takes as long as a wrong password
 
-function createServer({ obs, remote = null, getAccounts, log = () => {}, onWatchers = () => {} }) {
+/* Through a web address (Cloudflare Tunnel): the cloudflared program on this PC passes visits on
+   to Stagelight, so they arrive from this PC itself, with Cloudflare's headers saying who the
+   visitor really is. Only accepted when "allow access through a web address" is on. */
+const STUN = ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'];
+const loopback = a => /^(127\.|::1$|::ffff:127\.)/.test(String(a || ''));
+
+function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: false, host: '' }), log = () => {}, onWatchers = () => {} }) {
   const sessions = new Map(); // token → { expires, ip }
   const failures = new Map(); // ip → { count, lockedUntil, lockMs }
   const watchers = new Set(); // open event streams: { res, token }
   let server = null, port = 0;
 
-  const ipOf = req => String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  // a visit through Cloudflare: from this PC, with Cloudflare's headers
+  const viaWeb = req => loopback(req.socket.remoteAddress) && !!(req.headers['cf-connecting-ip'] || req.headers['cf-ray']);
+  // who's asking: the visitor's own address (Cloudflare's header for web visits), so one person's
+  // wrong passwords lock out that person, not everyone coming through Cloudflare
+  const ipOf = req => {
+    if (viaWeb(req)) { const ip = String(req.headers['cf-connecting-ip'] || '').trim(); if (/^[0-9a-f.:]{3,45}$/i.test(ip)) return ip; }
+    return String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  };
+  let lastWebVisit = 0;
+  // wrong passwords from the internet as a whole: lots of them (many addresses guessing) pause
+  // web logins for a while; the home network and Tailscale aren't affected
+  let webFails = [], webPausedUntil = 0;
   const send = (res, code, body, type = 'application/json; charset=utf-8', extra = {}) => {
     res.writeHead(code, {
       'Content-Type': type,
@@ -93,8 +110,9 @@ function createServer({ obs, remote = null, getAccounts, log = () => {}, onWatch
   const fromPanel = req => req.headers['x-stagelight'] === '1' && /^application\/json\b/.test(req.headers['content-type'] || '');
 
   // username + password, with the lockout: the account when they're right, otherwise { error: [status, message] }
-  function verify(ip, username, password) {
+  function verify(ip, username, password, web = false) {
     const now = Date.now();
+    if (web && webPausedUntil > now) return { error: [429, `too many wrong tries from the internet. logging in through the web address is paused for ${Math.ceil((webPausedUntil - now) / 60_000)} minutes`] };
     const f = failures.get(ip) || { count: 0, lockedUntil: 0, lockMs: 60_000 };
     if (f.lockedUntil > now) return { error: [429, `too many wrong tries. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds`] };
     if (!(getAccounts() || []).length) return { error: [403, 'no accounts yet. add one in Stagelight on the stream PC'] };
@@ -105,7 +123,12 @@ function createServer({ obs, remote = null, getAccounts, log = () => {}, onWatch
       f.count++;
       if (f.count >= 5) { f.lockedUntil = now + f.lockMs; f.lockMs = Math.min(f.lockMs * 2, 3600_000); f.count = 0; }
       failures.set(ip, f);
-      log(`wrong username or password from ${ip}`);
+      log(`wrong username or password from ${ip}${web ? ' (web address)' : ''}`);
+      if (web) {
+        webFails = webFails.filter(t => now - t < 600_000);
+        webFails.push(now);
+        if (webFails.length >= 30) { webPausedUntil = now + 15 * 60_000; webFails = []; log('30 wrong tries from the internet in 10 minutes: web address logins paused for 15 minutes'); }
+      }
       return { error: [401, f.lockedUntil > now ? `too many wrong tries. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds` : 'wrong username or password'] };
     }
     failures.delete(ip);
@@ -116,18 +139,30 @@ function createServer({ obs, remote = null, getAccounts, log = () => {}, onWatch
     const ip = ipOf(req), now = Date.now();
     let body;
     try { body = await readBody(req); } catch { return send(res, 400, { error: 'bad request' }); }
-    const account = verify(ip, body.username, body.password);
+    const web = viaWeb(req);
+    const account = verify(ip, body.username, body.password, web);
     if (account.error) return send(res, account.error[0], { error: account.error[1] });
     const token = crypto.randomBytes(32).toString('base64url');
     sessions.set(token, { expires: now + SESSION_MS, ip, user: account.name, stamp: account.stamp });
-    log(`${account.name} opened the panel from ${ip}`);
-    send(res, 200, { ok: true }, undefined, { 'Set-Cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_MS / 1000}` });
+    log(`${account.name} opened the panel from ${ip}${web ? ' (web address)' : ''}`);
+    // through the web address it's HTTPS: the cookie is only ever sent over HTTPS
+    send(res, 200, { ok: true }, undefined, { 'Set-Cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_MS / 1000}${web ? '; Secure' : ''}` });
   }
 
   async function handle(req, res) {
     let url;
     try { url = new URL(req.url, 'http://x'); } catch { return send(res, 400, 'bad request', 'text/plain'); }
     const p = url.pathname;
+
+    // web visits: only when switched on, and only for the address set in Stagelight
+    if (viaWeb(req)) {
+      const web = getWeb();
+      if (!web.on) return send(res, 403, 'the web address is switched off in Stagelight on the stream PC', 'text/plain; charset=utf-8');
+      const host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+      if (web.host && host !== web.host) return send(res, 403, 'this address is not the one set in Stagelight', 'text/plain; charset=utf-8');
+      lastWebVisit = Date.now();
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    }
 
     if (req.method === 'GET' && FILES[p]) {
       const [file, type] = FILES[p];
@@ -146,7 +181,8 @@ function createServer({ obs, remote = null, getAccounts, log = () => {}, onWatch
     if (p === '/api/state' && req.method === 'GET') return send(res, 200, obs.snapshot());
     if (p === '/api/remote' && req.method === 'GET') {
       if (!remote || !atLeast(session.role, 'full')) return send(res, 200, { view: false, allowed: false });
-      return send(res, 200, { ...remote.info(), screens: remote.settings().view ? await remote.screens() : [] });
+      // with the web address on, the video also tries a direct way over the internet (STUN)
+      return send(res, 200, { ...remote.info(), screens: remote.settings().view ? await remote.screens() : [], ice: getWeb().on ? STUN : [] });
     }
     if (p === '/api/preview' && req.method === 'GET') {
       const jpg = await obs.screenshot();
@@ -169,7 +205,7 @@ function createServer({ obs, remote = null, getAccounts, log = () => {}, onWatch
     if (p === '/api/logout') {
       sessions.delete(session.token);
       for (const w of watchers) if (w.token === session.token) w.res.end();
-      return send(res, 200, { ok: true }, undefined, { 'Set-Cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` });
+      return send(res, 200, { ok: true }, undefined, { 'Set-Cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${viaWeb(req) ? '; Secure' : ''}` });
     }
     // the remote display: the password again first (a phone left logged in isn't enough)
     if (p === '/api/remote/start' && remote) {
@@ -177,10 +213,10 @@ function createServer({ obs, remote = null, getAccounts, log = () => {}, onWatch
       let body;
       try { body = await readBody(req, 200_000); } catch { return send(res, 400, { error: 'bad request' }); }
       // the same account's password again
-      const account = verify(ipOf(req), session.user, body.password);
+      const account = verify(ipOf(req), session.user, body.password, viaWeb(req));
       if (account.error) return send(res, account.error[0], { error: account.error[1] });
       try {
-        return send(res, 200, await remote.start({ sdp: body.sdp, screenId: String(body.screen || ''), quality: String(body.quality || ''), from: `${session.user} (${ipOf(req)})` }));
+        return send(res, 200, await remote.start({ sdp: body.sdp, screenId: String(body.screen || ''), quality: String(body.quality || ''), from: `${session.user} (${ipOf(req)})`, ice: getWeb().on ? STUN : [] }));
       } catch (err) {
         return send(res, 409, { error: err.message });
       }
@@ -239,6 +275,7 @@ function createServer({ obs, remote = null, getAccounts, log = () => {}, onWatch
     },
     sessionCount: () => [...sessions.values()].filter(s => Date.now() < s.expires).length,
     watcherCount: () => watchers.size,
+    lastWebVisit: () => lastWebVisit,
   };
 }
 

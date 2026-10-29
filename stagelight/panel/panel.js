@@ -439,7 +439,7 @@ async function rdConnect() {
   if (!rd) return;
   if (rd.pc) rd.pc.close();
   rdState('connecting…');
-  const pc = new RTCPeerConnection({ iceServers: [] });
+  const pc = new RTCPeerConnection({ iceServers: (rd.ice || []).map(u => ({ urls: u })) });
   const dc = pc.createDataChannel('input', { ordered: true });
   // the stream PC ended it (its stop button, switched off, or someone else took over)
   dc.onmessage = m => {
@@ -481,7 +481,7 @@ $('#remoteOpen').onclick = async () => {
   if (!v) return;
   $('#rdScreen').replaceChildren(...(info.screens || []).map(sc => { const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.name; return o; }));
   $('#rdScreen').hidden = (info.screens || []).length < 2;
-  rd = { password: v.password, control: false };
+  rd = { password: v.password, control: false, ice: info.ice || [] };
   $('#rd').hidden = false;
   $('#rdKeyPad').hidden = true;
   Object.assign(cursor, { x: 0.5, y: 0.5 });

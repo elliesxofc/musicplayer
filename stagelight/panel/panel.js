@@ -218,7 +218,7 @@ function renderAudio() {
 }
 
 /* ───────────── preview: what OBS shows, and the layout of the scene ───────────── */
-let selected = null, drag = null, lastShot = null;
+let selected = null, drag = null, lastShot = null, lastTag = null, boxesKey = null;
 const stage = $('#stage'), boxes = $('#boxes');
 const editing = () => $('#editOn').checked;
 
@@ -227,9 +227,13 @@ async function previewLoop() {
   let wait = 1000;
   try {
     if ($('#previewOn').checked && !$('#panelView').hidden && document.visibilityState === 'visible' && st && st.connected) {
-      const r = await fetch('/api/preview', { credentials: 'same-origin', cache: 'no-store' });
+      // asks "has it changed?": an unchanged picture isn't sent again
+      const r = await fetch('/api/preview', { credentials: 'same-origin', cache: 'no-cache' });
+      const tag = r.headers.get('ETag');
       if (r.status === 401) showLogin();
+      else if (r.ok && tag && tag === lastTag) { /* same picture */ }
       else if (r.ok) {
+        lastTag = tag;
         const url = URL.createObjectURL(await r.blob());
         $('#previewImg').src = url;
         if (lastShot) URL.revokeObjectURL(lastShot);
@@ -262,6 +266,10 @@ function renderStage() {
     $('#selHide').textContent = it.on ? 'hide' : 'show';
   }
   if (drag) return; // don't redraw under a finger
+  // only when something about the boxes changed (most updates are just the stream's numbers)
+  const key = editing() ? JSON.stringify([selected, st.canvas, st.items.map(i => [i.id, i.on, i.name, i.box])]) : '';
+  if (key === boxesKey) return;
+  boxesKey = key;
   boxes.replaceChildren();
   if (!editing()) return;
   // bottom of OBS's list first, so the top source ends up on top here too
@@ -318,7 +326,7 @@ boxes.addEventListener('pointermove', e => {
   // live on stream while dragging, a few times a second
   if (Date.now() - drag.sent > 120) { drag.sent = Date.now(); send(drag); }
 });
-const endDrag = () => { if (!drag) return; const d = drag; drag = null; send(d, true); };
+const endDrag = () => { if (!drag) return; const d = drag; drag = null; boxesKey = null; send(d, true); };
 boxes.addEventListener('pointerup', endDrag);
 boxes.addEventListener('pointercancel', endDrag);
 function send(d, last = false) {

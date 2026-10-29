@@ -67,6 +67,19 @@ Don't open a port on your router for Stagelight. Use [Tailscale](https://tailsca
 
 Only your devices (and people you share with) can reach the panel that way.
 
+## Light on the stream PC
+
+Stagelight is made to stay out of OBS's way:
+
+- every Stagelight process runs at **below normal** priority, so a busy PC serves OBS first
+- with no panel open it checks OBS every 15 seconds (every 2 while someone looks); OBS tells
+  it about changes straight away either way
+- the preview is at most one picture a second, shared by every open panel, smaller while
+  you're live, slower whenever OBS takes long to make one, and not sent again when unchanged
+- the settings window really closes (no memory used until it's opened again)
+- the remote display's video is H.264, which most PCs encode on the graphics card, and the
+  screen-sharing part closes a minute after a session ends
+
 ## Safety
 
 - The OBS WebSocket password stays on the stream PC (encrypted); the panel never gets it.

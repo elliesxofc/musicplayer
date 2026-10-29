@@ -46,6 +46,15 @@ window.capture.onStart(async job => {
       }
     };
     await pc.setRemoteDescription({ type: 'offer', sdp: job.offer });
+    // H.264 first: most PCs encode it on the graphics card, which leaves the processor to OBS
+    // (otherwise the browser's own choice, usually VP8, done by the processor)
+    try {
+      const codecs = RTCRtpSender.getCapabilities('video').codecs;
+      const h264 = codecs.filter(c => /h264/i.test(c.mimeType));
+      if (h264.length) {
+        for (const t of pc.getTransceivers()) if (t.sender.track) t.setCodecPreferences([...h264, ...codecs.filter(c => !/h264/i.test(c.mimeType))]);
+      }
+    } catch { /* keep the default */ }
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     await iceDone(pc);

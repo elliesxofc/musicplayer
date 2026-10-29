@@ -25,7 +25,18 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
   };
   let lastBytes = { bytes: 0, at: 0 };
   let changeTimer = null;
-  const changed = () => { if (!changeTimer) changeTimer = setTimeout(() => { changeTimer = null; onChange(snapshot()); }, 120); };
+  // tells Stagelight something changed (it builds the full picture only when someone looks)
+  const changed = () => { if (!changeTimer) changeTimer = setTimeout(() => { changeTimer = null; onChange(); }, 120); };
+
+  /* How often OBS is asked about the stream: every 2 s while a panel (or the settings window)
+     is open, every 15 s otherwise. OBS still tells Stagelight about changes straight away. */
+  let pollMs = 15_000;
+  function setBusy(busy) {
+    const next = busy ? 2000 : 15_000;
+    if (next === pollMs) return;
+    pollMs = next;
+    if (identified) { clearInterval(poll); poll = setInterval(() => pollStatus().catch(() => {}), pollMs); if (busy) pollStatus().catch(() => {}); }
+  }
   const setStatus = text => { state.status = text; changed(); };
 
   /* ───────────── the WebSocket ───────────── */
@@ -90,7 +101,7 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
         setStatus(`connected to OBS${state.obsVersion ? ` · websocket ${state.obsVersion}` : ''}`);
         refreshAll().catch(err => log('refresh', err.message));
         clearInterval(poll);
-        poll = setInterval(() => pollStatus().catch(() => {}), 2000);
+        poll = setInterval(() => pollStatus().catch(() => {}), pollMs);
       } else if (m.op === 5) { // Event
         onEvent(m.d.eventType, m.d.eventData || {});
       } else if (m.op === 7) { // RequestResponse
@@ -375,17 +386,23 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     changed();
   }
 
-  // a picture of the current scene for the panel's preview (shared by every open panel)
-  let shot = { at: 0, scene: '', data: null, busy: null };
+  /* A picture of the current scene for the panel's preview, shared by every open panel.
+     OBS draws it on its own render thread, so it's kept light: at most one a second, smaller
+     while live, and slower still whenever OBS takes long to make one (a busy PC). */
+  let shot = { at: 0, scene: '', data: null, busy: null, gap: 1000 };
   async function screenshot() {
     if (!identified || !state.scene) return null;
-    if (shot.data && shot.scene === state.scene && Date.now() - shot.at < 450) return shot.data;
+    if (shot.data && shot.scene === state.scene && Date.now() - shot.at < shot.gap) return shot.data;
     if (shot.busy) return shot.busy;
-    const w = Math.min(960, state.canvas.w);
-    shot.busy = call('GetSourceScreenshot', { sourceName: state.scene, imageFormat: 'jpg', imageWidth: w, imageHeight: Math.round(w * state.canvas.h / state.canvas.w), imageCompressionQuality: 70 })
+    const w = Math.min(state.stream.active ? 640 : 960, state.canvas.w);
+    const started = Date.now();
+    shot.busy = call('GetSourceScreenshot', { sourceName: state.scene, imageFormat: 'jpg', imageWidth: w, imageHeight: Math.round(w * state.canvas.h / state.canvas.w), imageCompressionQuality: 60 })
       .then(r => {
+        const took = Date.now() - started;
         const m = /^data:image\/\w+;base64,(.*)$/.exec(r.imageData || '');
-        shot = { at: Date.now(), scene: state.scene, data: m ? Buffer.from(m[1], 'base64') : null, busy: null };
+        // a slow answer means OBS is busy: wait longer before the next picture
+        const gap = took > 250 ? 4000 : took > 120 ? 2000 : 1000;
+        shot = { at: Date.now(), scene: state.scene, data: m ? Buffer.from(m[1], 'base64') : null, busy: null, gap };
         return shot.data;
       })
       .catch(() => { shot.busy = null; return null; });
@@ -403,6 +420,9 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     act,
     snapshot,
     screenshot,
+    shotTag: () => `"${shot.at}"`,
+    setBusy,
+    summary: () => (!state.connected ? 'OBS not connected' : state.stream.active ? 'live' : state.record.active ? 'recording' : 'OBS connected'),
   };
 }
 

@@ -45,7 +45,7 @@ const ROLES = ['watch', 'control', 'full'];
 const atLeast = (role, need) => ROLES.indexOf(role) >= ROLES.indexOf(need);
 const DUMMY = hashPassword('not-an-account'); // so a wrong username takes as long as a wrong password
 
-function createServer({ obs, remote = null, getAccounts, log = () => {} }) {
+function createServer({ obs, remote = null, getAccounts, log = () => {}, onWatchers = () => {} }) {
   const sessions = new Map(); // token → { expires, ip }
   const failures = new Map(); // ip → { count, lockedUntil, lockMs }
   const watchers = new Set(); // open event streams: { res, token }
@@ -150,14 +150,19 @@ function createServer({ obs, remote = null, getAccounts, log = () => {} }) {
     }
     if (p === '/api/preview' && req.method === 'GET') {
       const jpg = await obs.screenshot();
-      return jpg ? send(res, 200, jpg, 'image/jpeg') : send(res, 503, { error: 'no preview right now' });
+      if (!jpg) return send(res, 503, { error: 'no preview right now' });
+      // the panel already has this picture: say so instead of sending it again
+      const tag = obs.shotTag();
+      if (req.headers['if-none-match'] === tag) { res.writeHead(304, { ETag: tag, 'Cache-Control': 'no-cache' }); return res.end(); }
+      return send(res, 200, jpg, 'image/jpeg', { ETag: tag, 'Cache-Control': 'no-cache' });
     }
     if (p === '/api/events' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Content-Type-Options': 'nosniff' });
       res.write(`retry: 2000\ndata: ${JSON.stringify(obs.snapshot())}\n\n`);
       const w = { res, token: session.token };
       watchers.add(w);
-      req.on('close', () => watchers.delete(w));
+      onWatchers(watchers.size);
+      req.on('close', () => { watchers.delete(w); onWatchers(watchers.size); });
       return;
     }
     if (req.method !== 'POST' || !fromPanel(req)) return send(res, 403, { error: 'not from the panel' });
@@ -200,8 +205,9 @@ function createServer({ obs, remote = null, getAccounts, log = () => {} }) {
   }
 
   // OBS changed: tell every open panel (and close the ones whose login ran out)
-  function broadcast(snap) {
-    const msg = `data: ${JSON.stringify(snap)}\n\n`;
+  function broadcast() {
+    if (!watchers.size) return; // nobody looking: nothing to build or send
+    const msg = `data: ${JSON.stringify(obs.snapshot())}\n\n`;
     for (const w of watchers) {
       const s = sessions.get(w.token);
       if (!s || Date.now() > s.expires) { w.res.end(); watchers.delete(w); continue; }
@@ -232,6 +238,7 @@ function createServer({ obs, remote = null, getAccounts, log = () => {} }) {
       for (const w of watchers) if (!sessions.has(w.token)) { w.res.end(); watchers.delete(w); }
     },
     sessionCount: () => [...sessions.values()].filter(s => Date.now() < s.expires).length,
+    watcherCount: () => watchers.size,
   };
 }
 

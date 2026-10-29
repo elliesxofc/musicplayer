@@ -68,7 +68,10 @@ const log = line => {
   sendWin('log', entry);
 };
 
-const obs = createObs({ onChange: snap => { server.broadcast(snap); sendWin('status', status()); refreshTray(); }, log });
+const winOpen = () => !!(win && !win.isDestroyed() && win.isVisible());
+const obs = createObs({ onChange: () => { server.broadcast(); if (winOpen()) sendWin('status', status()); refreshTray(); }, log });
+// OBS is asked often only while someone looks (a panel, or the settings window)
+const updateBusy = () => obs.setBusy(server.watcherCount() > 0 || winOpen());
 const remoteSettings = () => { const r = readConfig().remote || {}; return { view: !!r.view, control: !!r.view && !!r.control }; };
 const remote = createRemote({
   root: ROOT, icon: ICON, getSettings: remoteSettings, log,
@@ -87,7 +90,14 @@ function accounts() {
   }
   return Array.isArray(c.accounts) ? c.accounts : [];
 }
-const server = createServer({ obs, remote, getAccounts: accounts, log });
+const server = createServer({ obs, remote, getAccounts: accounts, log, onWatchers: updateBusy });
+
+/* The stream comes first: every Stagelight process (window, screen sharing, the GPU helper)
+   runs below normal priority, so when the PC is busy Windows serves OBS before Stagelight. */
+function lowerPriority() {
+  const below = os.constants.priority.PRIORITY_BELOW_NORMAL;
+  for (const m of app.getAppMetrics()) { try { os.setPriority(m.pid, below); } catch { /* gone, or not allowed */ } }
+}
 
 function status() {
   const s = obs.snapshot();
@@ -116,14 +126,21 @@ function showWindow() {
   win.once('ready-to-show', () => { if (!process.argv.includes('--hidden')) win.show(); });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', e => e.preventDefault());
-  // closing the window keeps Stagelight running in the tray (the panel keeps working)
-  win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide(); } });
+  // closing the window keeps Stagelight running in the tray (the panel keeps working); the window
+  // itself is really closed, so it takes no memory until it's opened again
+  win.on('show', updateBusy);
+  win.on('hide', updateBusy);
+  win.on('closed', () => { win = null; updateBusy(); });
+  win.webContents.on('did-finish-load', () => setTimeout(lowerPriority, 500));
 }
 
-function refreshTray() {
+let trayWas = '';
+function refreshTray(force = false) {
   if (!tray) return;
-  const s = obs.snapshot();
-  const what = !s.connected ? 'OBS not connected' : s.stream.active ? 'live' : s.record.active ? 'recording' : 'OBS connected';
+  const what = obs.summary();
+  const key = `${what}|${remote.status().active}|${remote.status().from}`;
+  if (key === trayWas && !force) return; // nothing new to show: leave the tray menu alone
+  trayWas = key;
   tray.setToolTip(`Stagelight · ${what}`);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: `Stagelight · ${what}`, enabled: false },
@@ -147,6 +164,8 @@ app.whenReady().then(async () => {
   refreshTray();
   showWindow();
   await startServer();
+  lowerPriority();
+  setInterval(lowerPriority, 30_000).unref(); // new helpers (screen sharing) get it too
   if (readConfig().obs) obs.start(obsSettings());
   else log('add OBS\'s WebSocket details to connect');
 });

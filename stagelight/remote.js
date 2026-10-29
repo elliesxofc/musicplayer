@@ -17,7 +17,7 @@ const QUALITY = {
 };
 
 function createRemote({ root, icon, getSettings, log = () => {}, onChange = () => {} }) {
-  let capture = null, bar = null, active = null, nextJob = 1;
+  let capture = null, bar = null, active = null, nextJob = 1, closeTimer = null;
   const waiting = new Map(); // job id → resolve
   const input = createInput({ log });
 
@@ -82,6 +82,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     const scr = list.find(x => x.id === screenId) || list[0];
     if (!scr) throw new Error("couldn't find a screen to share");
     if (active) end('someone else connected');
+    clearTimeout(closeTimer);
     const q = QUALITY[quality] || QUALITY.smooth;
     const id = nextJob++;
     const win = captureWindow();
@@ -109,6 +110,9 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     active = null;
     hideBar();
     onChange();
+    // the hidden screen-sharing window goes too (a minute later, in case of a reconnect)
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(() => { if (!active && capture && !capture.isDestroyed()) capture.destroy(); }, 60_000);
   }
 
   /* ───────────── mouse and keyboard from the panel ───────────── */

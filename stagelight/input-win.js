@@ -98,6 +98,8 @@ function createInput({ log = () => {} } = {}) {
       : spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
         Buffer.from(SCRIPT, 'utf16le').toString('base64')], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
     child.stdout.on('data', d => { const s = String(d); if (/error/.test(s)) log(`mouse/keyboard: ${s.trim().slice(0, 200)}`); });
+    // below normal priority, like the rest of Stagelight: OBS comes first
+    try { require('node:os').setPriority(child.pid, require('node:os').constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* fine */ }
     child.on('exit', () => { child = null; });
     child.on('error', err => { log(`mouse/keyboard helper failed: ${err.message}`); child = null; });
     return child;

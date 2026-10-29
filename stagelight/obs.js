@@ -331,6 +331,20 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
         it.text = text;
         break;
       }
+      // browser sources (alerts, chat, widgets): reload the page, like OBS's "Refresh cache of current page"
+      case 'refresh': {
+        const it = itemOf(a);
+        if (it.kind !== 'browser_source') throw new Error("that's not a browser source");
+        await call('PressInputPropertiesButton', { inputName: it.name, propertyName: 'refreshnocache' });
+        break;
+      }
+      case 'refreshAll': {
+        const list = await call('GetInputList', { inputKind: 'browser_source' });
+        const names = (list.inputs || []).map(i => i.inputName);
+        if (!names.length) throw new Error('there are no browser sources in OBS');
+        await Promise.all(names.map(n => call('PressInputPropertiesButton', { inputName: n, propertyName: 'refreshnocache' }).catch(() => {})));
+        break;
+      }
       case 'remove': {
         const it = itemOf(a);
         await call('RemoveSceneItem', { sceneName: state.scene, sceneItemId: it.id });

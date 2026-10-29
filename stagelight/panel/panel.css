@@ -91,6 +91,11 @@ h1, h2, h3 { margin: 0; }
 .list .empty { color: var(--muted); font-size: 14px; }
 .toggle { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; color: var(--amber); }
 .toggle.off { color: var(--muted); }
+.toggle.refresh { color: var(--muted); }
+.toggle.refresh:hover { color: var(--amber); }
+.toggle.refresh.spin svg { animation: spin .7s ease; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#refreshAll { min-height: 32px; padding: 0 12px; font-size: 12.5px; }
 .audio-row { flex-wrap: wrap; }
 .audio-row .vol { display: flex; align-items: center; gap: 10px; width: 100%; padding-right: 8px; }
 .audio-row input[type="range"] { flex: 1; accent-color: var(--amber); height: 30px; }

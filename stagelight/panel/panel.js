@@ -175,7 +175,7 @@ function renderScenes() {
 function renderSources() {
   $('#sceneName').textContent = st.scene || '…';
   const list = $('#sources');
-  if (unchanged('sources', JSON.stringify([st.scene, st.items.map(it => [it.id, it.name, it.on])]))) return;
+  if (unchanged('sources', JSON.stringify([st.scene, st.items.map(it => [it.id, it.name, it.on, it.kind])]))) return;
   list.innerHTML = '';
   for (const it of st.items) {
     const li = document.createElement('li');
@@ -188,7 +188,21 @@ function renderSources() {
     b.setAttribute('aria-label', `${it.on ? 'hide' : 'show'} ${it.name}`);
     b.innerHTML = `<svg><use href="#${it.on ? 'i-eye' : 'i-eye-off'}"/></svg>`;
     b.onclick = () => act({ type: 'source', scene: st.scene, id: it.id, on: !it.on });
-    li.append(name, b);
+    li.append(name);
+    if (it.kind === 'browser_source') {
+      const r = document.createElement('button');
+      r.className = 'toggle refresh needs-control';
+      r.setAttribute('aria-label', `refresh ${it.name}`);
+      r.title = 'refresh (reload the page)';
+      r.innerHTML = '<svg><use href="#i-refresh"/></svg>';
+      r.onclick = () => {
+        r.classList.add('spin');
+        act({ type: 'refresh', scene: st.scene, id: it.id, name: it.name }, () => toast(`refreshed ${it.name} ✦`));
+        setTimeout(() => r.classList.remove('spin'), 700);
+      };
+      li.append(r);
+    }
+    li.append(b);
     list.append(li);
   }
   if (!st.items.length) list.innerHTML = '<li class="empty">no sources in this scene</li>';
@@ -781,6 +795,7 @@ $('#recBtn').onclick = async () => {
   if (st.record.active && !(await ask('stop recording?', 'the recording is saved where OBS saves recordings.', 'stop'))) return;
   act({ type: 'record', on: !st.record.active });
 };
+$('#refreshAll').onclick = () => act({ type: 'refreshAll' }, () => toast('refreshed every browser source ✦'));
 $('#recPauseBtn').onclick = () => st && act({ type: 'recordPause', on: !st.record.paused });
 
 /* ───────────── start ───────────── */

@@ -231,7 +231,7 @@ function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: f
       try { body = await readBody(req); } catch { return send(res, 400, { error: 'bad request' }); }
       try {
         await obs.act(body);
-        if (!['move', 'resize', 'volume'].includes(body.type)) log(`${session.user}: ${body.type}${body.name ? ` "${body.name}"` : ''}`);
+        if (!['move', 'resize', 'volume'].includes(body.type)) log(`${session.user}: ${body.type}${body.name ? ` "${String(body.name).slice(0, 80)}"` : ''}`);
         return send(res, 200, { ok: true });
       } catch (err) {
         return send(res, 409, { error: err.message || 'OBS said no' });

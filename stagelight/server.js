@@ -3,7 +3,10 @@
 /* Stagelight's web server: the remote panel for any browser on the same network (or through
    Tailscale), behind a password.
 
-   - the password is stored only as a scrypt hash; logging in gives a session cookie
+   - everyone has their own username and password (stored only as scrypt hashes) and an access
+     level: "full" (everything, and the remote display of the whole PC), "control" (the stream:
+     going live, scenes, sources, audio, layout) or "watch" (see it all, change nothing)
+   - logging in gives a session cookie
      (HttpOnly, SameSite=Strict) that lasts 12 hours
    - wrong passwords lock that address out: 5 tries, then 1 minute, doubling each time (to 1 hour)
    - every change goes through POST with a custom header, so other websites can't send them
@@ -38,7 +41,11 @@ function checkPassword(password, stored) {
   return crypto.timingSafeEqual(want, got);
 }
 
-function createServer({ obs, remote = null, getPassword, log = () => {} }) {
+const ROLES = ['watch', 'control', 'full'];
+const atLeast = (role, need) => ROLES.indexOf(role) >= ROLES.indexOf(need);
+const DUMMY = hashPassword('not-an-account'); // so a wrong username takes as long as a wrong password
+
+function createServer({ obs, remote = null, getAccounts, log = () => {} }) {
   const sessions = new Map(); // token → { expires, ip }
   const failures = new Map(); // ip → { count, lockedUntil, lockMs }
   const watchers = new Set(); // open event streams: { res, token }
@@ -58,13 +65,18 @@ function createServer({ obs, remote = null, getPassword, log = () => {} }) {
     res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
   };
 
+  const findAccount = name => (getAccounts() || []).find(a => a.name.toLowerCase() === String(name || '').trim().toLowerCase()) || null;
+
   function sessionOf(req) {
     const m = new RegExp(`(?:^|;\\s*)${COOKIE}=([A-Za-z0-9_-]{20,100})`).exec(req.headers.cookie || '');
     if (!m) return null;
     const s = sessions.get(m[1]);
     if (!s) return null;
     if (Date.now() > s.expires) { sessions.delete(m[1]); return null; }
-    return { token: m[1], ...s };
+    // the account may have been removed (or its access changed) since logging in
+    const account = findAccount(s.user);
+    if (!account || account.stamp !== s.stamp) { sessions.delete(m[1]); return null; }
+    return { token: m[1], ...s, role: account.role };
   }
 
   function readBody(req, max = 10_000) {
@@ -80,34 +92,35 @@ function createServer({ obs, remote = null, getPassword, log = () => {} }) {
   // without asking first, and Stagelight never says yes) and JSON
   const fromPanel = req => req.headers['x-stagelight'] === '1' && /^application\/json\b/.test(req.headers['content-type'] || '');
 
-  // the password, with the lockout: null when it's right, otherwise [status, message]
-  function verify(ip, password) {
+  // username + password, with the lockout: the account when they're right, otherwise { error: [status, message] }
+  function verify(ip, username, password) {
     const now = Date.now();
     const f = failures.get(ip) || { count: 0, lockedUntil: 0, lockMs: 60_000 };
-    if (f.lockedUntil > now) return [429, `too many wrong passwords. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds`];
-    const stored = getPassword();
-    if (!stored) return [403, "the panel password isn't set yet. set it in Stagelight on the stream PC"];
-    const ok = typeof password === 'string' && password.length <= 200 && checkPassword(password, stored);
+    if (f.lockedUntil > now) return { error: [429, `too many wrong tries. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds`] };
+    if (!(getAccounts() || []).length) return { error: [403, 'no accounts yet. add one in Stagelight on the stream PC'] };
+    const account = typeof username === 'string' && username.length <= 64 ? findAccount(username) : null;
+    const pw = typeof password === 'string' && password.length <= 200 ? password : '';
+    const ok = checkPassword(pw, account || DUMMY) && !!account;
     if (!ok) {
       f.count++;
       if (f.count >= 5) { f.lockedUntil = now + f.lockMs; f.lockMs = Math.min(f.lockMs * 2, 3600_000); f.count = 0; }
       failures.set(ip, f);
-      log(`wrong panel password from ${ip}`);
-      return [401, f.lockedUntil > now ? `too many wrong passwords. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds` : 'wrong password'];
+      log(`wrong username or password from ${ip}`);
+      return { error: [401, f.lockedUntil > now ? `too many wrong tries. try again in ${Math.ceil((f.lockedUntil - now) / 1000)} seconds` : 'wrong username or password'] };
     }
     failures.delete(ip);
-    return null;
+    return account;
   }
 
   async function login(req, res) {
     const ip = ipOf(req), now = Date.now();
     let body;
     try { body = await readBody(req); } catch { return send(res, 400, { error: 'bad request' }); }
-    const bad = verify(ip, body.password);
-    if (bad) return send(res, bad[0], { error: bad[1] });
+    const account = verify(ip, body.username, body.password);
+    if (account.error) return send(res, account.error[0], { error: account.error[1] });
     const token = crypto.randomBytes(32).toString('base64url');
-    sessions.set(token, { expires: now + SESSION_MS, ip });
-    log(`panel opened from ${ip}`);
+    sessions.set(token, { expires: now + SESSION_MS, ip, user: account.name, stamp: account.stamp });
+    log(`${account.name} opened the panel from ${ip}`);
     send(res, 200, { ok: true }, undefined, { 'Set-Cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_MS / 1000}` });
   }
 
@@ -129,9 +142,10 @@ function createServer({ obs, remote = null, getPassword, log = () => {} }) {
     const session = sessionOf(req);
     if (!session) return send(res, 401, { error: 'log in first' });
 
+    if (p === '/api/me' && req.method === 'GET') return send(res, 200, { user: session.user, role: session.role });
     if (p === '/api/state' && req.method === 'GET') return send(res, 200, obs.snapshot());
     if (p === '/api/remote' && req.method === 'GET') {
-      if (!remote) return send(res, 200, { view: false });
+      if (!remote || !atLeast(session.role, 'full')) return send(res, 200, { view: false, allowed: false });
       return send(res, 200, { ...remote.info(), screens: remote.settings().view ? await remote.screens() : [] });
     }
     if (p === '/api/preview' && req.method === 'GET') {
@@ -154,23 +168,29 @@ function createServer({ obs, remote = null, getPassword, log = () => {} }) {
     }
     // the remote display: the password again first (a phone left logged in isn't enough)
     if (p === '/api/remote/start' && remote) {
+      if (!atLeast(session.role, 'full')) return send(res, 403, { error: 'your account has no access to the remote display' });
       let body;
       try { body = await readBody(req, 200_000); } catch { return send(res, 400, { error: 'bad request' }); }
-      const bad = verify(ipOf(req), body.password);
-      if (bad) return send(res, bad[0], { error: bad[1] });
+      // the same account's password again
+      const account = verify(ipOf(req), session.user, body.password);
+      if (account.error) return send(res, account.error[0], { error: account.error[1] });
       try {
-        return send(res, 200, await remote.start({ sdp: body.sdp, screenId: String(body.screen || ''), quality: String(body.quality || ''), from: ipOf(req) }));
+        return send(res, 200, await remote.start({ sdp: body.sdp, screenId: String(body.screen || ''), quality: String(body.quality || ''), from: `${session.user} (${ipOf(req)})` }));
       } catch (err) {
         return send(res, 409, { error: err.message });
       }
     }
-    if (p === '/api/remote/stop' && remote) { remote.end('ended from the panel'); return send(res, 200, { ok: true }); }
+    if (p === '/api/remote/stop' && remote) {
+      if (atLeast(session.role, 'full')) remote.end('ended from the panel');
+      return send(res, 200, { ok: true });
+    }
     if (p === '/api/action') {
+      if (!atLeast(session.role, 'control')) return send(res, 403, { error: 'your account can watch, not change things' });
       let body;
       try { body = await readBody(req); } catch { return send(res, 400, { error: 'bad request' }); }
       try {
         await obs.act(body);
-        if (!['move', 'resize', 'volume'].includes(body.type)) log(`${body.type}${body.name ? ` "${body.name}"` : ''} from ${ipOf(req)}`);
+        if (!['move', 'resize', 'volume'].includes(body.type)) log(`${session.user}: ${body.type}${body.name ? ` "${body.name}"` : ''}`);
         return send(res, 200, { ok: true });
       } catch (err) {
         return send(res, 409, { error: err.message || 'OBS said no' });
@@ -205,8 +225,14 @@ function createServer({ obs, remote = null, getPassword, log = () => {} }) {
     broadcast,
     // a new password: everyone has to log in again
     logoutAll() { sessions.clear(); for (const w of watchers) w.res.end(); watchers.clear(); },
+    // one account removed or changed: only its logins end
+    logoutUser(name) {
+      const n = String(name).toLowerCase();
+      for (const [t, s] of sessions) if (s.user.toLowerCase() === n) sessions.delete(t);
+      for (const w of watchers) if (!sessions.has(w.token)) { w.res.end(); watchers.delete(w); }
+    },
     sessionCount: () => [...sessions.values()].filter(s => Date.now() < s.expires).length,
   };
 }
 
-module.exports = { createServer, hashPassword, checkPassword };
+module.exports = { createServer, hashPassword, checkPassword, ROLES };

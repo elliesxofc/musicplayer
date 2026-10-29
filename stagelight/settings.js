@@ -42,7 +42,7 @@ async function saveRemote() {
 }
 $('#remoteView').onchange = saveRemote;
 $('#remoteControl').onchange = async () => {
-  if ($('#remoteControl').checked && !confirm('allow mouse and keyboard?\n\nanyone with the panel password can then use this whole PC (not just OBS). only do this if you trust everyone who has the password.')) {
+  if ($('#remoteControl').checked && !confirm('allow mouse and keyboard?\n\nevery full access account can then use this whole PC (not just OBS). only do this if you trust them with your PC.')) {
     $('#remoteControl').checked = false;
     return;
   }
@@ -55,7 +55,7 @@ $('#remoteStop').onclick = async () => showStatus(await S.stopRemote());
   $('#obsHost').value = c.obs.host;
   $('#obsPort').value = c.obs.port;
   if (c.obs.hasPassword) $('#obsPass').placeholder = 'saved ✓ (type a new one to replace it)';
-  $('#panelPassLabel').textContent = c.hasPanelPassword ? 'panel password (saved ✓, type a new one to change it)' : 'panel password (not set yet: the panel stays locked until you set one)';
+  showAccounts(c.accounts);
   $('#port').value = c.port;
   $('#autostart').checked = c.autostart;
   $('#log').textContent = c.log.join('\n');
@@ -73,11 +73,47 @@ $('#obsSave').onclick = async () => {
   showStatus(await S.setObs(next));
   if ($('#obsPass').value) { $('#obsPass').value = ''; $('#obsPass').placeholder = 'saved ✓ (type a new one to replace it)'; }
 };
-$('#panelPassSave').onclick = async () => {
-  const r = await S.setPanelPassword($('#panelPass').value);
-  $('#panelPassSaved').classList.toggle('bad', !r.ok);
-  $('#panelPassSaved').textContent = r.ok ? 'saved ✓ everyone logged in before has to log in again' : r.error;
-  if (r.ok) { $('#panelPass').value = ''; $('#panelPassLabel').textContent = 'panel password (saved ✓, type a new one to change it)'; }
+// accounts: who can open the panel, and what they can do
+const ROLE_NAMES = { full: 'full access', control: 'stream control', watch: 'watch only' };
+function showAccounts(list) {
+  const ul = $('#accountList');
+  ul.replaceChildren(...list.map(a => {
+    const li = document.createElement('li');
+    const name = document.createElement('b');
+    name.textContent = a.name;
+    const role = document.createElement('small');
+    role.textContent = ROLE_NAMES[a.role] || a.role;
+    role.className = a.role;
+    const edit = document.createElement('button');
+    edit.className = 'btn'; edit.textContent = 'change';
+    edit.onclick = () => {
+      $('#accName').value = a.name; $('#accRole').value = a.role; $('#accPass').value = '';
+      $('#accPassLabel').textContent = `new password for ${a.name} (leave empty to keep it)`;
+      $('#accSave').textContent = 'save the changes';
+      $('#accPass').focus();
+    };
+    const del = document.createElement('button');
+    del.className = 'btn'; del.textContent = 'remove';
+    del.onclick = async () => {
+      if (!confirm(`remove the account "${a.name}"? they're logged out right away.`)) return;
+      showAccounts(await S.removeAccount(a.name));
+    };
+    li.append(name, role, edit, del);
+    return li;
+  }));
+  if (!list.length) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'no accounts yet: the panel stays locked until you add one.'; ul.append(li); }
+}
+const resetAccountForm = () => {
+  $('#accName').value = ''; $('#accPass').value = ''; $('#accRole').value = 'control';
+  $('#accPassLabel').textContent = 'password'; $('#accSave').textContent = 'add the account';
+};
+$('#accName').oninput = () => { $('#accPassLabel').textContent = 'password'; $('#accSave').textContent = 'add the account (or change it, if it exists)'; };
+$('#accSave').onclick = async () => {
+  if ($('#accRole').value === 'full' && !confirm(`give "${$('#accName').value.trim()}" full access?\n\nwith the remote display switched on, full access can use this whole PC.`)) return;
+  const r = await S.saveAccount({ name: $('#accName').value, password: $('#accPass').value, role: $('#accRole').value });
+  $('#accSaved').classList.toggle('bad', !r.ok);
+  $('#accSaved').textContent = r.ok ? `saved ✓ ${$('#accName').value.trim()} can log in` : r.error;
+  if (r.ok) { showAccounts(r.accounts); resetAccountForm(); }
 };
 $('#portSave').onclick = async () => {
   const r = await S.setPort($('#port').value);

@@ -158,3 +158,11 @@ h1, h2, h3 { margin: 0; }
 .rd-row .btn { min-height: 38px; padding: 0 12px; }
 .rd-row .btn[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); background: rgba(255, 181, 71, .12); }
 .rd-keys .hint { margin: 0; }
+
+/* who's signed in, and what a watch-only account can't touch */
+.who { font-size: 12.5px; color: var(--muted); white-space: nowrap; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
+.who b { color: var(--ink); font-weight: 600; }
+.watch-note { margin: 0; padding: 10px 14px; border-radius: 14px; background: rgba(143, 123, 255, .12); border: 1px solid rgba(143, 123, 255, .35); font-size: 13.5px; }
+body[data-role="watch"] .needs-control { display: none !important; }
+body[data-role="watch"] :is(#streamBtn, #recBtn, #recPauseBtn, .scene, .toggle, .audio-row input) { pointer-events: none; opacity: .55; }
+@media (max-width: 520px) { .conn span { display: none; } }

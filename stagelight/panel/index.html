@@ -27,9 +27,11 @@
       <img class="logo-big" src="icon.svg" alt="">
       <h1>Stagelight</h1>
       <p class="muted">your stream's remote control</p>
-      <input type="text" name="username" value="stagelight" autocomplete="username" hidden>
-      <label class="field"><span>panel password</span>
-        <input type="password" id="password" autocomplete="current-password" required maxlength="200" autofocus>
+      <label class="field"><span>username</span>
+        <input type="text" id="username" autocomplete="username" autocapitalize="off" spellcheck="false" required maxlength="64" autofocus>
+      </label>
+      <label class="field"><span>password</span>
+        <input type="password" id="password" autocomplete="current-password" required maxlength="200">
       </label>
       <button class="btn primary wide" id="loginBtn" type="submit">open the panel</button>
       <p class="error" id="loginError" role="alert"></p>
@@ -41,9 +43,11 @@
     <header class="top">
       <div class="brand"><img src="icon.svg" alt=""><b>Stagelight</b></div>
       <div class="conn"><i class="dot" id="connDot" data-kind="off"></i><span id="connText">…</span></div>
+      <span class="who" id="who"></span>
       <button class="icon-btn" id="logoutBtn" aria-label="log out" title="log out"><svg><use href="#i-out"/></svg></button>
     </header>
 
+    <p class="watch-note" id="watchNote" hidden>you're signed in as <b>watch only</b>: you can see everything, but not change it.</p>
     <section class="card onair" id="onAir">
       <div class="onair-head">
         <span class="badge" id="liveBadge">offline</span>
@@ -63,7 +67,7 @@
       <div class="card-head">
         <h2>preview</h2>
         <label class="mini-check"><input type="checkbox" id="previewOn" checked> live</label>
-        <label class="mini-check"><input type="checkbox" id="editOn"> edit layout</label>
+        <label class="mini-check needs-control"><input type="checkbox" id="editOn"> edit layout</label>
       </div>
       <div class="stage" id="stage">
         <img id="previewImg" alt="what OBS shows right now">
@@ -77,7 +81,7 @@
         <button class="btn small" id="selHide">hide</button>
         <button class="btn small danger" id="selRemove">remove</button>
       </div>
-      <div class="row add-row">
+      <div class="row add-row needs-control">
         <button class="btn small" id="addText">+ text</button>
         <button class="btn small" id="addBrowser">+ website</button>
         <button class="btn small" id="addColor">+ colour box</button>

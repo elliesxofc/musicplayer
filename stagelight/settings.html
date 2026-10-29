@@ -15,6 +15,15 @@
     .card p.hint { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.55; }
     .card p.hint b { color: var(--ink); font-weight: 600; }
     .grid { display: grid; grid-template-columns: 1fr 110px; gap: 10px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 160px; gap: 10px; }
+    .field select { height: 42px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--line); background: rgba(0, 0, 0, .25); color: var(--ink); font-size: 14.5px; }
+    .accounts { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .accounts li { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border-radius: 12px; background: rgba(0, 0, 0, .22); border: 1px solid var(--line); }
+    .accounts b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .accounts small { color: var(--muted); font-size: 12px; }
+    .accounts small.full { color: var(--amber); }
+    .accounts .btn { min-height: 32px; padding: 0 10px; font-size: 12.5px; }
+    .accounts .empty { color: #ffc47a; font-size: 13px; background: none; border: 0; padding: 0; }
     .field input { height: 42px; font-size: 14.5px; }
     .status { display: flex; align-items: center; gap: 9px; font-size: 14px; margin: 0 0 4px; }
     .addr { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgba(0, 0, 0, .25); border: 1px solid var(--line); margin-bottom: 8px; }
@@ -54,11 +63,23 @@
     </section>
 
     <section class="card">
-      <h2>2 · the panel's password</h2>
-      <p class="hint">anyone who opens the panel needs this. pick a <b>new</b> one (not your OBS or email password), at least 8 characters, and only share it with people you trust to run your stream.</p>
-      <label class="field"><span id="panelPassLabel">panel password</span><input id="panelPass" type="password" autocomplete="new-password" minlength="8" maxlength="200"></label>
-      <button class="btn primary wide" id="panelPassSave">save the password</button>
-      <p class="saved" id="panelPassSaved"></p>
+      <h2>2 · accounts</h2>
+      <p class="hint">everyone who opens the panel logs in with their own username and password. pick <b>new</b> passwords (not your OBS or email one), at least 10 characters.</p>
+      <ul class="accounts" id="accountList"></ul>
+      <div class="grid3">
+        <label class="field"><span>username</span><input id="accName" autocomplete="off" spellcheck="false" maxlength="32" placeholder="liliana"></label>
+        <label class="field"><span>access</span>
+          <select id="accRole">
+            <option value="full">full access</option>
+            <option value="control" selected>stream control</option>
+            <option value="watch">watch only</option>
+          </select>
+        </label>
+      </div>
+      <label class="field"><span id="accPassLabel">password</span><input id="accPass" type="password" autocomplete="new-password" maxlength="200"></label>
+      <button class="btn primary wide" id="accSave">add the account</button>
+      <p class="saved" id="accSaved"></p>
+      <p class="hint"><b>full access</b>: everything, and the remote display of this whole PC (when it's switched on below). <b>stream control</b>: going live, recording, scenes, sources, audio and the layout. <b>watch only</b>: sees everything, changes nothing.</p>
     </section>
 
     <section class="card">
@@ -86,10 +107,10 @@
 
     <section class="card">
       <h2>4 · remote display (the whole PC)</h2>
-      <p class="hint">like AnyDesk or Parsec, in the panel: see this PC's screen, and (if you allow it) use its mouse and keyboard, for when you need OBS's full window. the panel asks for its password again before it starts. while someone is connected, a bar shows at the top of this screen with a <b>stop</b> button.</p>
+      <p class="hint">like AnyDesk or Parsec, in the panel: see this PC's screen, and (if you allow it) use its mouse and keyboard, for when you need OBS's full window. only <b>full access</b> accounts can open it, and the panel asks for that account's password again before it starts. while someone is connected, a bar shows at the top of this screen with a <b>stop</b> button.</p>
       <label class="check"><input type="checkbox" id="remoteView"> allow seeing this PC's screen from the panel</label>
       <label class="check"><input type="checkbox" id="remoteControl"> also allow mouse and keyboard</label>
-      <p class="hint warn" id="remoteWarn">with mouse and keyboard on, anyone with the panel password can use this whole PC, not just OBS. only switch it on if you trust everyone who has the password, and switch it off when you don't need it.</p>
+      <p class="hint warn" id="remoteWarn">with mouse and keyboard on, every full access account can use this whole PC, not just OBS. only give full access to people you trust with your PC, and switch this off when you don't need it.</p>
       <p class="hint" id="remoteNoInput" hidden>mouse and keyboard work on Windows only; here the remote display is for watching.</p>
       <p class="status" id="remoteStatus" hidden><i class="dot" data-kind="on"></i><span id="remoteWho"></span><button class="btn" id="remoteStop">stop it</button></p>
     </section>

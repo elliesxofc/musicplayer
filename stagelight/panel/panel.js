@@ -32,20 +32,32 @@ function showLogin() {
   if (typeof rdClose === 'function') rdClose(false);
   $('#panelView').hidden = true;
   $('#loginView').hidden = false;
-  setTimeout(() => $('#password').focus(), 50);
+  setTimeout(() => ($('#username').value ? $('#password') : $('#username')).focus(), 50);
 }
+const ROLE_NAMES = { full: 'full access', control: 'stream control', watch: 'watch only' };
+let me = { user: '', role: 'watch' };
 function showPanel() {
   $('#loginView').hidden = true;
   $('#panelView').hidden = false;
   listen();
-  remoteInfo();
+  // who's signed in decides what the panel offers (Stagelight checks it again for everything)
+  api('/api/me').then(m => {
+    me = m;
+    document.body.dataset.role = m.role;
+    $('#who').innerHTML = '';
+    const b = document.createElement('b'); b.textContent = m.user;
+    $('#who').append(b, ` · ${ROLE_NAMES[m.role] || m.role}`);
+    $('#watchNote').hidden = m.role !== 'watch';
+    if (m.role === 'watch') { $('#editOn').checked = false; renderStage(); }
+    remoteInfo();
+  }).catch(() => {});
 }
 $('#loginForm').onsubmit = async e => {
   e.preventDefault();
   $('#loginBtn').disabled = true;
   $('#loginError').textContent = '';
   try {
-    await api('/api/login', { password: $('#password').value });
+    await api('/api/login', { username: $('#username').value.trim(), password: $('#password').value });
     $('#password').value = '';
     showPanel();
   } catch (err) {
@@ -443,15 +455,15 @@ async function rdConnect() {
     await pc.setRemoteDescription({ type: 'answer', sdp: r.sdp });
   } catch (err) {
     rdState(err.message);
-    if (/password/.test(err.message)) { rdClose(false); toast(err.message, 4000); }
+    if (/password|tries|access/.test(err.message)) { rdClose(false); toast(err.message, 4000); }
   }
 }
 
 $('#remoteOpen').onclick = async () => {
   const info = await remoteInfo();
   if (!info.view) return toast('the remote display was switched off on the stream PC');
-  const v = await form('open the full screen', 'type the panel password again: the remote display shows (and may control) the whole stream PC.', [
-    { name: 'password', label: 'panel password', type: 'password', required: true },
+  const v = await form('open the full screen', `type your password again (${me.user}): the remote display shows (and may control) the whole stream PC.`, [
+    { name: 'password', label: 'your password', type: 'password', required: true },
   ], 'open');
   if (!v) return;
   $('#rdScreen').replaceChildren(...(info.screens || []).map(sc => { const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.name; return o; }));

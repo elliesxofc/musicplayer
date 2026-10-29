@@ -6,7 +6,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('stagelight', {
   get: () => ipcRenderer.invoke('get'),
   setObs: settings => ipcRenderer.invoke('set-obs', settings),
-  setPanelPassword: password => ipcRenderer.invoke('set-panel-password', String(password)),
+  accounts: () => ipcRenderer.invoke('accounts'),
+  saveAccount: account => ipcRenderer.invoke('save-account', account),
+  removeAccount: name => ipcRenderer.invoke('remove-account', String(name)),
   setPort: port => ipcRenderer.invoke('set-port', Number(port)),
   autostart: on => ipcRenderer.invoke('autostart', !!on),
   logoutAll: () => ipcRenderer.invoke('logout-all'),

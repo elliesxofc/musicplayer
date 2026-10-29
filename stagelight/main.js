@@ -9,8 +9,9 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, safeStorage
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const crypto = require('node:crypto');
 const { createObs } = require('./obs');
-const { createServer, hashPassword } = require('./server');
+const { createServer, hashPassword, ROLES } = require('./server');
 const { createRemote } = require('./remote');
 
 // the remote display's video goes straight between the PCs: real addresses (not hidden ones)
@@ -75,7 +76,18 @@ const remote = createRemote({
 });
 remote.settings = remoteSettings;
 remote.info = () => ({ ...remoteSettings(), controlWorks: remote.canControl(), ...remote.status() });
-const server = createServer({ obs, remote, getPassword: () => readConfig().panelPassword || null, log });
+/* ───────────── accounts: who can open the panel, and what they can do ───────────── */
+function accounts() {
+  const c = readConfig();
+  // before accounts there was one shared panel password: it becomes the account "stagelight"
+  if (!c.accounts && c.panelPassword) {
+    const moved = [{ name: 'stagelight', role: 'full', ...c.panelPassword, stamp: crypto.randomUUID() }];
+    writeConfig({ accounts: moved, panelPassword: undefined });
+    return moved;
+  }
+  return Array.isArray(c.accounts) ? c.accounts : [];
+}
+const server = createServer({ obs, remote, getAccounts: accounts, log });
 
 function status() {
   const s = obs.snapshot();
@@ -145,7 +157,7 @@ ipcMain.handle('get', () => {
   const o = obsSettings();
   return {
     obs: { host: o.host, port: o.port, hasPassword: !!o.password },
-    hasPanelPassword: !!c.panelPassword,
+    accounts: accounts().map(a => ({ name: a.name, role: a.role })),
     port: panelPort(),
     autostart: app.getLoginItemSettings().openAtLogin,
     remote: { ...remoteSettings(), controlWorks: remote.canControl() },
@@ -163,14 +175,30 @@ ipcMain.handle('set-obs', (_e, next) => {
   obs.start(obsSettings());
   return status();
 });
-ipcMain.handle('set-panel-password', (_e, password) => {
-  password = String(password || '');
-  if (password.length < 8) return { ok: false, error: 'use at least 8 characters' };
-  if (password.length > 200) return { ok: false, error: 'that is too long' };
-  writeConfig({ panelPassword: hashPassword(password) });
-  server.logoutAll(); // everyone logs in again with the new one
-  log('panel password changed: everyone has to log in again');
-  return { ok: true };
+ipcMain.handle('accounts', () => accounts().map(a => ({ name: a.name, role: a.role })));
+// add an account, or change one's password or access (a new password logs that account out)
+ipcMain.handle('save-account', (_e, next) => {
+  const name = String((next && next.name) || '').trim();
+  const role = ROLES.includes(next && next.role) ? next.role : 'control';
+  const password = typeof (next && next.password) === 'string' ? next.password : '';
+  if (!/^[\w.@-]{2,32}$/.test(name)) return { ok: false, error: 'a username is 2 to 32 letters, numbers, dots, dashes or underscores (no spaces)' };
+  const list = accounts();
+  const old = list.find(a => a.name.toLowerCase() === name.toLowerCase());
+  if (!old && !password) return { ok: false, error: 'a new account needs a password' };
+  if (password && password.length < 10) return { ok: false, error: 'use at least 10 characters for the password' };
+  if (password.length > 200) return { ok: false, error: 'that password is too long' };
+  const account = { name: old ? old.name : name, role, ...(password ? hashPassword(password) : { salt: old.salt, hash: old.hash }), stamp: crypto.randomUUID() };
+  writeConfig({ accounts: old ? list.map(a => (a === old ? account : a)) : [...list, account] });
+  server.logoutUser(account.name);
+  log(old ? `account ${account.name} changed (${role})` : `account ${account.name} added (${role})`);
+  return { ok: true, accounts: accounts().map(a => ({ name: a.name, role: a.role })) };
+});
+ipcMain.handle('remove-account', (_e, name) => {
+  const list = accounts().filter(a => a.name.toLowerCase() !== String(name).toLowerCase());
+  writeConfig({ accounts: list });
+  server.logoutUser(String(name));
+  log(`account ${name} removed`);
+  return list.map(a => ({ name: a.name, role: a.role }));
 });
 ipcMain.handle('set-port', async (_e, port) => {
   port = Number(port);

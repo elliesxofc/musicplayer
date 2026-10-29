@@ -14,7 +14,7 @@ scene; edit a text's words, hide or remove a source. Changes show on stream stra
 **Remote display (the whole PC)**: like AnyDesk or Parsec, inside the panel, for when you need
 OBS's full window. Off unless you switch it on in Stagelight on the stream PC (**4 · remote
 display**): "allow seeing this PC's screen", and separately "also allow mouse and keyboard".
-In the panel, **open the PC's full screen** asks for the panel password again, then shows the
+Only **full access** accounts see it. In the panel, **open the PC's full screen** asks for that account's password again, then shows the
 screen live (smooth 720p, sharp 1080p or fast 60 fps; pick the screen if there are several).
 With mouse and keyboard on: a mouse works like a mouse, a real keyboard types when the
 screen is clicked; on a phone, tap to click, hold to right-click, drag to drag, two fingers to
@@ -36,10 +36,17 @@ Repo's **Actions** tab → **stagelight app** → the latest run → download
 
 1. **OBS**: Tools → WebSocket Server Settings → tick **Enable WebSocket Server** →
    **Show Connect Info**. Copy the port and password into Stagelight → **connect to OBS**.
-2. **Panel password**: pick a new one (at least 8 characters), only for people you
-   trust to run your stream.
+2. **Accounts**: add one for everyone who'll use the panel, each with their own username,
+   password (new ones, at least 10 characters) and access:
+   - **full access**: everything, and the remote display of the whole PC (when it's on)
+   - **stream control**: going live, recording, scenes, sources, audio and the layout
+   - **watch only**: sees everything (status, preview), changes nothing
+
+   Changing someone's password or access, or removing them, logs them out right away.
+   (Updating from 1.2 or older: the old panel password becomes the account `stagelight`
+   with full access. Add your own accounts, then remove it.)
 3. **Open the panel**: Stagelight shows the address, like `http://192.168.1.20:4850`.
-   Open it on a phone or PC on the same Wi-Fi and log in. The first time, Windows asks
+   Open it on a phone or PC on the same Wi-Fi and log in with a username and password. The first time, Windows asks
    whether Stagelight may use the network: allow **private networks**.
 
 Closing the window keeps Stagelight running in the tray, so the panel keeps working.
@@ -61,16 +68,19 @@ Only your devices (and people you share with) can reach the panel that way.
 ## Safety
 
 - The OBS WebSocket password stays on the stream PC (encrypted); the panel never gets it.
-- The panel password is stored only as a scrypt hash. Logging in lasts 12 hours.
-- 5 wrong passwords lock that device out for a minute, doubling each time (up to an hour).
-- Changing the password, or **log everyone out**, ends every login.
+- Every account has its own password, stored only as a scrypt hash. Logging in lasts 12 hours.
+- What an account may do is checked by Stagelight for every single request, not just hidden
+  in the panel.
+- 5 wrong tries lock that device out for a minute, doubling each time (up to an hour); a wrong
+  username and a wrong password look the same.
+- Changing an account, removing it, or **log everyone out** ends those logins right away.
 - The panel can only do the things above: no OBS settings, no files, nothing else.
   Websites it adds must be `http://` or `https://` addresses (no files from the PC).
 - Going live, ending the stream and stopping a recording ask first.
-- Remote display: off by default, mouse and keyboard a second switch, the password again before
+- Remote display: off by default, full access accounts only, mouse and keyboard a second switch, the account's password again before
   it starts, a visible bar with a stop button on the stream PC while it's on, and any key or
-  mouse button still held is let go when it ends. With mouse and keyboard on, anyone with the
-  panel password can use the whole PC: switch it off when you don't need it.
+  mouse button still held is let go when it ends. With mouse and keyboard on, every full access
+  account can use the whole PC: switch it off when you don't need it.
 - Windows doesn't let other programs click into programs running "as administrator"; if OBS
   runs that way, run Stagelight as administrator too (or OBS normally) for mouse and keyboard.
 - On the same Wi-Fi the panel is plain `http`, so use it on networks you trust (your

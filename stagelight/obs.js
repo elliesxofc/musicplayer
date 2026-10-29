@@ -6,9 +6,11 @@
    things the panel is allowed to ask for. The OBS password never leaves this PC. */
 
 const crypto = require('node:crypto');
+const path = require('node:path');
 
-// general, scenes, inputs, outputs, scene items, and sources being moved or resized in OBS
-const SUBSCRIPTIONS = 1 | 4 | 8 | 64 | 128 | (1 << 19);
+// general, profiles and scene collections, scenes, inputs, outputs, scene items, and sources being
+// moved or resized in OBS
+const SUBSCRIPTIONS = 1 | 2 | 4 | 8 | 64 | 128 | (1 << 19);
 const TEXT_KINDS = ['text_gdiplus_v3', 'text_gdiplus_v2', 'text_gdiplus', 'text_ft2_source_v2', 'text_ft2_source'];
 const sha256 = text => crypto.createHash('sha256').update(text).digest('base64');
 
@@ -284,6 +286,11 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
         break;
       case 'RecordStateChanged': state.record.active = !!d.outputActive; changed(); pollStatus().catch(() => {}); break;
       case 'ExitStarted': setStatus('OBS is closing…'); break;
+      // another scene collection or profile: everything may be different
+      case 'CurrentSceneCollectionChanged': case 'CurrentProfileChanged': case 'VideoSettingsChanged':
+        state.others = {}; otherWanted.clear();
+        refreshAll().catch(() => {});
+        break;
       default: break;
     }
   }
@@ -442,18 +449,7 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
           settings = { color: abgr, width: Math.round(W / 4), height: Math.round(H / 4) };
           base = 'Colour';
         }
-        // a name of its own (OBS needs every source's name to be different)
-        const list = await call('GetInputList');
-        const taken = new Set((list.inputs || []).map(i => i.inputName));
-        let name = str(a.name).trim().slice(0, 80) || base;
-        for (let n = 2; taken.has(name); n++) name = `${str(a.name).trim().slice(0, 76) || base} ${n}`;
-        const made = await call('CreateInput', { sceneName: into, inputName: name, inputKind: kind, inputSettings: settings, sceneItemEnabled: true });
-        // new things start in the middle of the screen
-        if (made && made.sceneItemId != null) {
-          await call('SetSceneItemTransform', { sceneName: into, sceneItemId: made.sceneItemId,
-            sceneItemTransform: { alignment: 0, positionX: W / 2, positionY: H / 2 } }).catch(() => {});
-        }
-        if (into === state.scene) await refreshItems(); else await refreshOther(into);
+        await createSource(into, kind, settings, base, str(a.name));
         break;
       }
       default: throw new Error('the panel asked for something Stagelight does not do');
@@ -488,6 +484,134 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     return shot.busy;
   }
 
+  // a new source in a scene, with a name of its own (OBS needs every source's name to be different),
+  // in the middle of the screen
+  async function createSource(into, kind, settings, base, wanted = '') {
+    const W = state.canvas.w, H = state.canvas.h;
+    const list = await call('GetInputList');
+    const taken = new Set((list.inputs || []).map(i => i.inputName));
+    const own = String(wanted || '').trim();
+    let name = own.slice(0, 80) || base;
+    for (let n = 2; taken.has(name); n++) name = `${own.slice(0, 76) || base.slice(0, 76)} ${n}`;
+    const made = await call('CreateInput', { sceneName: into, inputName: name, inputKind: kind, inputSettings: settings, sceneItemEnabled: true });
+    if (made && made.sceneItemId != null) {
+      await call('SetSceneItemTransform', { sceneName: into, sceneItemId: made.sceneItemId,
+        sceneItemTransform: { alignment: 0, positionX: W / 2, positionY: H / 2 } }).catch(() => {});
+    }
+    if (into === state.scene) await refreshItems(); else await refreshOther(into);
+    return name;
+  }
+
+  /* A file uploaded from the panel (saved by Stagelight in its own media folder): a picture
+     becomes an image source, a video or a sound a media source. Not reachable through act():
+     the panel never names a file on this PC. */
+  async function addMedia({ scene, file, type, name }) {
+    if (!identified) throw new Error('not connected to OBS');
+    const into = scene && itemsIn(String(scene)) ? String(scene) : state.scene;
+    if (!into) throw new Error('no scene to add it to');
+    const base = path.basename(file).replace(/^\d+-/, '').replace(/\.[^.]+$/, '').slice(0, 60) || 'File';
+    if (type === 'image') return createSource(into, 'image_source', { file }, base, name);
+    return createSource(into, 'ffmpeg_source', { local_file: file, is_local_file: true, looping: type === 'video', restart_on_activate: true }, base, name);
+  }
+
+  /* ───────────── OBS's own settings (full access only) ─────────────
+     What OBS lets other programs change: the video size and frame rate, the stream service and
+     key, the bitrate (in OBS's simple output mode), the recording folder, and which profile and
+     scene collection are used. The stream key is never sent to the panel: it can only be replaced. */
+  const busyOut = () => state.stream.active || state.record.active;
+  async function obsSettings() {
+    if (!identified) throw new Error('not connected to OBS');
+    const [v, svc, mode, vb, ab, rec, prof, coll] = await Promise.all([
+      call('GetVideoSettings').catch(() => null),
+      call('GetStreamServiceSettings').catch(() => null),
+      call('GetProfileParameter', { parameterCategory: 'Output', parameterName: 'Mode' }).catch(() => null),
+      call('GetProfileParameter', { parameterCategory: 'SimpleOutput', parameterName: 'VBitrate' }).catch(() => null),
+      call('GetProfileParameter', { parameterCategory: 'SimpleOutput', parameterName: 'ABitrate' }).catch(() => null),
+      call('GetRecordDirectory').catch(() => null),
+      call('GetProfileList').catch(() => null),
+      call('GetSceneCollectionList').catch(() => null),
+    ]);
+    const ss = (svc && svc.streamServiceSettings) || {};
+    const val = x => (x && x.parameterValue != null ? x.parameterValue : '');
+    return {
+      busy: busyOut(),
+      video: v ? { baseW: v.baseWidth, baseH: v.baseHeight, outW: v.outputWidth, outH: v.outputHeight, fps: Math.round(v.fpsNumerator / v.fpsDenominator * 100) / 100 } : null,
+      stream: svc ? { type: svc.streamServiceType, service: String(ss.service || ''), server: String(ss.server || ''), keySet: !!ss.key } : null,
+      output: { mode: String(val(mode) || 'Simple'), vbitrate: Number(val(vb)) || 0, abitrate: Number(val(ab)) || 0 },
+      recordDir: rec ? String(rec.recordDirectory || '') : null,
+      profile: prof ? { now: prof.currentProfileName, all: prof.profiles || [] } : null,
+      collection: coll ? { now: coll.currentSceneCollectionName, all: coll.sceneCollections || [] } : null,
+    };
+  }
+  const FPS = { 24: [24, 1], 25: [25, 1], 29.97: [30000, 1001], 30: [30, 1], 48: [48, 1], 50: [50, 1], 59.94: [60000, 1001], 60: [60, 1], 120: [120, 1] };
+  async function setObsSettings(a) {
+    if (!a || typeof a !== 'object') throw new Error('nothing to change');
+    if (!identified) throw new Error('not connected to OBS');
+    const str = v => (typeof v === 'string' ? v : '');
+    const int = (v, lo, hi, what) => { const n = Math.round(Number(v)); if (!Number.isFinite(n) || n < lo || n > hi) throw new Error(`${what}: ${lo} to ${hi}`); return n; };
+    const notBusy = what => { if (busyOut()) throw new Error(`stop the stream and the recording first: OBS can't change ${what} while they run`); };
+    switch (a.group) {
+      case 'video': {
+        notBusy('the video settings');
+        const fps = FPS[Number(a.fps)];
+        if (!fps) throw new Error('pick a frame rate');
+        await call('SetVideoSettings', {
+          baseWidth: int(a.baseW, 32, 7680, 'canvas width'), baseHeight: int(a.baseH, 32, 4320, 'canvas height'),
+          outputWidth: int(a.outW, 32, 7680, 'output width'), outputHeight: int(a.outH, 32, 4320, 'output height'),
+          fpsNumerator: fps[0], fpsDenominator: fps[1],
+        });
+        return 'video settings';
+      }
+      case 'output': {
+        const mode = await call('GetProfileParameter', { parameterCategory: 'Output', parameterName: 'Mode' }).catch(() => null);
+        if (mode && mode.parameterValue === 'Advanced') throw new Error('OBS is in advanced output mode: the bitrate is set in OBS itself (Settings → Output)');
+        await call('SetProfileParameter', { parameterCategory: 'SimpleOutput', parameterName: 'VBitrate', parameterValue: String(int(a.vbitrate, 200, 100_000, 'video bitrate')) });
+        if (a.abitrate != null && a.abitrate !== '') {
+          const ab = int(a.abitrate, 32, 320, 'audio bitrate');
+          if (![64, 96, 128, 160, 192, 224, 256, 288, 320].includes(ab)) throw new Error('audio bitrate: 64, 96, 128, 160, 192, 256 or 320');
+          await call('SetProfileParameter', { parameterCategory: 'SimpleOutput', parameterName: 'ABitrate', parameterValue: String(ab) });
+        }
+        return 'bitrate';
+      }
+      case 'stream': {
+        notBusy('the stream settings');
+        const now = await call('GetStreamServiceSettings');
+        const settings = { ...(now.streamServiceSettings || {}) };
+        const server = str(a.server).trim();
+        if (server) {
+          if (now.streamServiceType === 'rtmp_custom' && !/^(rtmps?|srt|rist):\/\/\S+$/i.test(server)) throw new Error('the server is an rtmp://, rtmps://, srt:// or rist:// address');
+          if (server.length > 500) throw new Error('that server is too long');
+          settings.server = server;
+        }
+        const key = str(a.key).trim();
+        if (key) { if (key.length > 500 || /\s/.test(key)) throw new Error("that doesn't look like a stream key"); settings.key = key; }
+        await call('SetStreamServiceSettings', { streamServiceType: now.streamServiceType, streamServiceSettings: settings });
+        return key ? 'stream server and key' : 'stream server';
+      }
+      case 'recordDir': {
+        const dir = str(a.dir).trim();
+        if (!/^([a-z]:[\\/]|\/|\\\\)/i.test(dir) || dir.length > 400) throw new Error('a full folder path, like C:\\Users\\you\\Videos');
+        await call('SetRecordDirectory', { recordDirectory: dir });
+        return 'recording folder';
+      }
+      case 'profile': {
+        notBusy('the profile');
+        const list = await call('GetProfileList');
+        if (!(list.profiles || []).includes(str(a.name))) throw new Error('that profile is gone');
+        await call('SetCurrentProfile', { profileName: a.name });
+        return `profile "${a.name}"`;
+      }
+      case 'collection': {
+        notBusy('the scene collection');
+        const list = await call('GetSceneCollectionList');
+        if (!(list.sceneCollections || []).includes(str(a.name))) throw new Error('that scene collection is gone');
+        await call('SetCurrentSceneCollection', { sceneCollectionName: a.name });
+        return `scene collection "${a.name}"`;
+      }
+      default: throw new Error('the panel asked for something Stagelight does not do');
+    }
+  }
+
   // what the panel's browser source form starts with
   async function browserSettings(scene, id) {
     if (!identified) throw new Error('not connected to OBS');
@@ -515,6 +639,9 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     start(next) { settings = next; wanted = true; connect(); },
     stop() { close(true); setStatus('not connected to OBS'); },
     act,
+    addMedia,
+    obsSettings,
+    setObsSettings,
     browserSettings,
     snapshot,
     screenshot,

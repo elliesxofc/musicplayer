@@ -49,9 +49,33 @@ const DUMMY = hashPassword('not-an-account'); // so a wrong username takes as lo
    to Stagelight, so they arrive from this PC itself, with Cloudflare's headers saying who the
    visitor really is. Only accepted when "allow access through a web address" is on. */
 const STUN = ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'];
+/* Files uploaded from the panel for the layout: only pictures, videos and sounds, recognised by
+   their first bytes (not by their name), up to 200 MB, saved in Stagelight's own media folder
+   under a name Stagelight picks. */
+const UPLOAD_MAX = 200 * 1024 * 1024;
+function mediaType(head) {
+  const s = (a, b) => head.subarray(a, b).toString('latin1');
+  if (head[0] === 0x89 && s(1, 4) === 'PNG') return ['image', 'png'];
+  if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return ['image', 'jpg'];
+  if (s(0, 4) === 'GIF8') return ['image', 'gif'];
+  if (s(0, 4) === 'RIFF' && s(8, 12) === 'WEBP') return ['image', 'webp'];
+  if (s(0, 2) === 'BM') return ['image', 'bmp'];
+  if (s(0, 4) === 'RIFF' && s(8, 12) === 'WAVE') return ['audio', 'wav'];
+  if (s(0, 4) === 'OggS') return ['audio', 'ogg'];
+  if (s(0, 3) === 'ID3' || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0)) return ['audio', 'mp3'];
+  if (s(0, 4) === 'fLaC') return ['audio', 'flac'];
+  if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) return ['video', 'webm'];
+  if (s(4, 8) === 'ftyp') {
+    const brand = s(8, 12);
+    if (/^M4A/.test(brand)) return ['audio', 'm4a'];
+    return ['video', /^qt/.test(brand) ? 'mov' : 'mp4'];
+  }
+  return null;
+}
+
 const loopback = a => /^(127\.|::1$|::ffff:127\.)/.test(String(a || ''));
 
-function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: false, host: '' }), log = () => {}, onWatchers = () => {} }) {
+function createServer({ obs, remote = null, mediaDir = '', getAccounts, getWeb = () => ({ on: false, host: '' }), log = () => {}, onWatchers = () => {} }) {
   const sessions = new Map(); // token → { expires, ip }
   const failures = new Map(); // ip → { count, lockedUntil, lockMs }
   const watchers = new Set(); // open event streams: { res, token }
@@ -179,6 +203,10 @@ function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: f
 
     if (p === '/api/me' && req.method === 'GET') return send(res, 200, { user: session.user, role: session.role });
     if (p === '/api/state' && req.method === 'GET') return send(res, 200, obs.snapshot());
+    if (p === '/api/obs-settings' && req.method === 'GET') {
+      if (!atLeast(session.role, 'full')) return send(res, 403, { error: "only full access accounts can see OBS's settings" });
+      try { return send(res, 200, await obs.obsSettings()); } catch (err) { return send(res, 409, { error: err.message }); }
+    }
     if (p === '/api/browser' && req.method === 'GET') {
       if (!atLeast(session.role, 'control')) return send(res, 403, { error: 'your account can watch, not change things' });
       try { return send(res, 200, await obs.browserSettings(url.searchParams.get('scene') || '', url.searchParams.get('id'))); } catch (err) { return send(res, 409, { error: err.message }); }
@@ -206,7 +234,8 @@ function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: f
       req.on('close', () => { watchers.delete(w); onWatchers(watchers.size); });
       return;
     }
-    if (req.method !== 'POST' || !fromPanel(req)) return send(res, 403, { error: 'not from the panel' });
+    const isUpload = p === '/api/upload' && req.method === 'POST' && req.headers['x-stagelight'] === '1' && /^application\/octet-stream\b/.test(req.headers['content-type'] || '');
+    if (!isUpload && (req.method !== 'POST' || !fromPanel(req))) return send(res, 403, { error: 'not from the panel' });
     if (p === '/api/logout') {
       sessions.delete(session.token);
       for (const w of watchers) if (w.token === session.token) w.res.end();
@@ -230,6 +259,25 @@ function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: f
       if (atLeast(session.role, 'full')) remote.end('ended from the panel');
       return send(res, 200, { ok: true });
     }
+    // OBS's own settings: full access only, and every change is noted (never the stream key)
+    if (p === '/api/obs-settings') {
+      if (!atLeast(session.role, 'full')) return send(res, 403, { error: "only full access accounts can change OBS's settings" });
+      let body;
+      try { body = await readBody(req); } catch { return send(res, 400, { error: 'bad request' }); }
+      try {
+        const what = await obs.setObsSettings(body);
+        log(`${session.user} changed OBS's ${what}`);
+        return send(res, 200, { ok: true, what });
+      } catch (err) {
+        return send(res, 409, { error: err.message || 'OBS said no' });
+      }
+    }
+    // a picture, video or sound from the panel, straight into a scene
+    if (p === '/api/upload') {
+      if (!atLeast(session.role, 'control')) return send(res, 403, { error: 'your account can watch, not change things' });
+      if (!mediaDir) return send(res, 404, { error: 'not found' });
+      return upload(req, res, url, session);
+    }
     if (p === '/api/action') {
       if (!atLeast(session.role, 'control')) return send(res, 403, { error: 'your account can watch, not change things' });
       let body;
@@ -243,6 +291,49 @@ function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: f
       }
     }
     return send(res, 404, { error: 'not found' });
+  }
+
+  function upload(req, res, url, session) {
+    const size = Number(req.headers['content-length']);
+    if (!Number.isFinite(size) || size <= 0) return send(res, 411, { error: 'the file is empty' });
+    if (size > UPLOAD_MAX) { req.resume(); return send(res, 413, { error: 'that file is too big (200 MB at most)' }); }
+    // a name for it: the time, and the letters of the original name that are safe in a file name
+    const given = String(url.searchParams.get('file') || 'file').replace(/\.[^.]*$/, '').replace(/[^\w .-]+/g, '').replace(/^[.\s]+/, '').trim().slice(0, 40) || 'file';
+    fs.mkdirSync(mediaDir, { recursive: true });
+    const tmp = path.join(mediaDir, `.upload-${crypto.randomBytes(8).toString('hex')}`);
+    const out = fs.createWriteStream(tmp, { flags: 'wx' });
+    let got = 0, head = Buffer.alloc(0), kind = null, failed = null;
+    const fail = (code, msg) => {
+      if (failed) return;
+      failed = [code, msg];
+      req.unpipe(out); req.resume(); out.destroy();
+      fs.rm(tmp, { force: true }, () => {});
+      send(res, code, { error: msg });
+    };
+    req.on('data', chunk => {
+      got += chunk.length;
+      if (got > UPLOAD_MAX || got > size) return fail(413, 'that file is too big (200 MB at most)');
+      if (!kind && head.length < 16) {
+        head = Buffer.concat([head, chunk]).subarray(0, 16);
+        if (head.length >= 12) { kind = mediaType(head); if (!kind) fail(415, 'only pictures (png, jpg, gif, webp), videos (mp4, mov, webm, mkv) and sounds (mp3, wav, ogg, m4a, flac)'); }
+      }
+    });
+    req.on('aborted', () => fail(400, 'the upload stopped'));
+    req.pipe(out);
+    out.on('error', () => fail(500, "couldn't save the file on the stream PC"));
+    out.on('finish', async () => {
+      if (failed) return;
+      if (!kind || got !== size) return fail(400, 'the upload stopped');
+      const file = path.join(mediaDir, `${Date.now()}-${given}.${kind[1]}`);
+      try { fs.renameSync(tmp, file); } catch { return fail(500, "couldn't save the file on the stream PC"); }
+      try {
+        const name = await obs.addMedia({ scene: url.searchParams.get('scene') || '', file, type: kind[0], name: url.searchParams.get('name') || '' });
+        log(`${session.user}: uploaded ${kind[0]} "${name}" (${Math.round(got / 1024)} KB)`);
+        send(res, 200, { ok: true, name, type: kind[0] });
+      } catch (err) {
+        send(res, 409, { error: err.message || 'OBS said no' });
+      }
+    });
   }
 
   // OBS changed: tell every open panel (and close the ones whose login ran out)
@@ -284,4 +375,4 @@ function createServer({ obs, remote = null, getAccounts, getWeb = () => ({ on: f
   };
 }
 
-module.exports = { createServer, hashPassword, checkPassword, ROLES };
+module.exports = { createServer, hashPassword, checkPassword, ROLES, mediaType };

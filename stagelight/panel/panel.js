@@ -342,6 +342,7 @@ $('#editOn').onchange = () => { if (!editing()) { selected = null; pickScene('')
 function renderStage() {
   if (!st) return;
   stage.style.aspectRatio = `${st.canvas.w} / ${st.canvas.h}`;
+  stage.style.setProperty('--ar', st.canvas.w / st.canvas.h);
   stage.classList.toggle('editing', editing());
   $('#editHint').hidden = !editing();
   // which scene: the list, and whether the one shown is on stream
@@ -501,6 +502,51 @@ $('#addColor').onclick = async () => {
   ], 'add box');
   if (v) act({ type: 'addColor', scene: stageScene(), color: v.color, name: v.name }, added('the colour box'));
 };
+// a picture, video or sound from this device, uploaded to the stream PC and put in the scene
+$('#addFile').onclick = () => { $('#fileInput').value = ''; $('#fileInput').click(); };
+$('#fileInput').onchange = () => {
+  const f = $('#fileInput').files[0];
+  if (!f) return;
+  if (f.size > 200 * 1024 * 1024) return toast('that file is too big (200 MB at most)', 4000);
+  const scene = stageScene();
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `/api/upload?scene=${encodeURIComponent(scene)}&file=${encodeURIComponent(f.name)}`);
+  xhr.setRequestHeader('X-Stagelight', '1');
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  $('#addFile').disabled = true;
+  xhr.upload.onprogress = e => { if (e.lengthComputable) toast(`uploading ${f.name}… ${Math.round(e.loaded / e.total * 100)}%`, 60_000); };
+  const done = msg => { $('#addFile').disabled = false; toast(msg, 4000); };
+  xhr.onload = () => {
+    let r = {}; try { r = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+    if (xhr.status === 401) { done('log in first'); return showLogin(); }
+    if (xhr.status !== 200) return done(r.error || (xhr.status === 413 ? 'that file is too big for this connection' : `upload failed (${xhr.status})`));
+    done(`added ${r.name} ✦`);
+    if (!editing()) { $('#editOn').checked = true; renderStage(); }
+  };
+  xhr.onerror = () => done("the upload didn't get through");
+  xhr.send(f);
+};
+
+/* The preview filling the screen, for laying things out: the browser's own full screen where it
+   has one, and the whole page otherwise (iPhones). */
+const fsOn = () => $('#previewCard').classList.contains('fs');
+function setFull(on) {
+  $('#previewCard').classList.toggle('fs', on);
+  document.body.classList.toggle('fs-open', on);
+  $('#fsText').textContent = on ? 'close' : 'full screen';
+  $('#fsBtn').setAttribute('aria-label', on ? 'close full screen' : 'full screen');
+  if (on) {
+    const el = $('#previewCard');
+    if (el.requestFullscreen && !document.fullscreenElement) el.requestFullscreen().catch(() => {});
+    if (!editing()) { $('#editOn').checked = true; $('#editOn').onchange(); }
+  } else if (document.fullscreenElement === $('#previewCard')) document.exitFullscreen().catch(() => {});
+  boxesKey = null;
+  renderStage();
+}
+$('#fsBtn').onclick = () => setFull(!fsOn());
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && fsOn()) setFull(false); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && fsOn() && !document.fullscreenElement) setFull(false); });
+
 const selectedItem = () => (stageItems() || []).find(i => i.id === selected);
 $('#selText').onclick = async () => {
   const it = selectedItem();
@@ -863,6 +909,83 @@ $('#recBtn').onclick = async () => {
   if (st.record.active && !(await ask('stop recording?', 'the recording is saved where OBS saves recordings.', 'stop'))) return;
   act({ type: 'record', on: !st.record.active });
 };
+/* ───────────── OBS's own settings (full access only) ───────────── */
+function obsField(label, input) {
+  const l = document.createElement('label'); l.className = 'field';
+  const sp = document.createElement('span'); sp.textContent = label;
+  l.append(sp, input); return l;
+}
+function obsInput(type, value, attrs = {}) {
+  const i = document.createElement('input'); i.type = type; if (value != null) i.value = value;
+  for (const [k, v] of Object.entries(attrs)) i.setAttribute(k, v);
+  return i;
+}
+function obsSelect(options, value) {
+  const s = document.createElement('select');
+  for (const o of options) { const e = document.createElement('option'); e.value = String(o[0]); e.textContent = o[1]; s.append(e); }
+  s.value = String(value); return s;
+}
+function obsSection(title, notes, fields, button, save) {
+  const sec = document.createElement('section'); sec.className = 'obs-sec';
+  const h = document.createElement('h4'); h.textContent = title; sec.append(h);
+  for (const [text, warn] of notes) { if (!text) continue; const p = document.createElement('p'); p.className = `note${warn ? ' warn' : ''}`; p.textContent = text; sec.append(p); }
+  sec.append(...fields);
+  if (button) {
+    const b = document.createElement('button'); b.className = 'btn primary'; b.type = 'button'; b.textContent = button;
+    b.onclick = async () => {
+      b.disabled = true;
+      try { const r = await api('/api/obs-settings', save()); toast(`saved: ${r.what} ✦`); await openObs(); } catch (err) { toast(err.message, 5000); } finally { b.disabled = false; }
+    };
+    sec.append(b);
+  }
+  return sec;
+}
+async function openObs() {
+  let s;
+  try { s = await api('/api/obs-settings'); } catch (err) { return toast(err.message, 4000); }
+  $('#obsModal').hidden = false;
+  $('#obsNote').textContent = s.busy ? "you're live or recording: the stream, video, profile and scene collection can only be changed once both are stopped." : 'changes go straight to OBS on the stream PC.';
+  const secs = [];
+  if (s.stream) {
+    const custom = s.stream.type === 'rtmp_custom';
+    const server = obsInput('text', s.stream.server, { spellcheck: 'false', autocomplete: 'off', placeholder: custom ? 'rtmp://' : 'auto' });
+    const key = obsInput('password', '', { autocomplete: 'new-password', spellcheck: 'false', placeholder: s.stream.keySet ? 'saved ✓ (type a new one to replace it)' : 'not set' });
+    secs.push(obsSection('stream', [[custom ? 'custom server' : `service: ${s.stream.service || s.stream.type}`], ['the key is never shown here: you can only replace it.']],
+      [obsField('server', server), obsField('stream key', key)], 'save stream', () => ({ group: 'stream', server: server.value, key: key.value })));
+  }
+  {
+    const simple = s.output.mode !== 'Advanced';
+    const vb = obsInput('number', s.output.vbitrate || 6000, { min: 200, max: 100000, step: 100 });
+    const ab = obsSelect([64, 96, 128, 160, 192, 256, 320].map(n => [n, `${n} kbps`]), s.output.abitrate || 160);
+    secs.push(simple
+      ? obsSection('output', [['used from the next time you go live or record.']], [Object.assign(document.createElement('div'), { className: 'two' })], 'save bitrate', () => ({ group: 'output', vbitrate: Number(vb.value), abitrate: Number(ab.value) }))
+      : obsSection('output', [["OBS is in advanced output mode: the bitrate and encoder are set in OBS itself (Settings → Output).", true]], [], null));
+    if (simple) secs.at(-1).querySelector('.two').append(obsField('video bitrate (kbps)', vb), obsField('audio bitrate', ab));
+  }
+  if (s.video) {
+    const two = () => Object.assign(document.createElement('div'), { className: 'two' });
+    const bw = obsInput('number', s.video.baseW, { min: 32, max: 7680 }), bh = obsInput('number', s.video.baseH, { min: 32, max: 4320 });
+    const ow = obsInput('number', s.video.outW, { min: 32, max: 7680 }), oh = obsInput('number', s.video.outH, { min: 32, max: 4320 });
+    const fps = obsSelect([24, 25, 29.97, 30, 48, 50, 59.94, 60, 120].map(n => [n, `${n} fps`]), s.video.fps);
+    const r1 = two(); r1.append(obsField('canvas width', bw), obsField('canvas height', bh));
+    const r2 = two(); r2.append(obsField('output width', ow), obsField('output height', oh));
+    secs.push(obsSection('video', [['the canvas is what you lay out; the output is what viewers get.'], s.busy ? ['stop the stream and the recording to change this.', true] : ['']],
+      [r1, r2, obsField('frame rate', fps)], 'save video', () => ({ group: 'video', baseW: bw.value, baseH: bh.value, outW: ow.value, outH: oh.value, fps: fps.value })));
+  }
+  if (s.recordDir != null) {
+    const dir = obsInput('text', s.recordDir, { spellcheck: 'false' });
+    secs.push(obsSection('recording', [['the folder on the stream PC where OBS saves recordings.']], [obsField('folder', dir)], 'save folder', () => ({ group: 'recordDir', dir: dir.value })));
+  }
+  for (const [g, title, info] of [['profile', 'profile', s.profile], ['collection', 'scene collection', s.collection]]) {
+    if (!info || info.all.length < 2) continue;
+    const sel = obsSelect(info.all.map(n => [n, n]), info.now);
+    secs.push(obsSection(title, [[g === 'collection' ? 'switching swaps every scene and source for that collection’s.' : 'a profile holds its own stream, output and video settings.']], [obsField(title, sel)], `switch ${title}`, () => ({ group: g, name: sel.value })));
+  }
+  $('#obsBody').replaceChildren(...secs);
+}
+$('#obsOpen').onclick = openObs;
+$('#obsClose').onclick = () => { $('#obsModal').hidden = true; $('#obsBody').replaceChildren(); };
+
 $('#refreshAll').onclick = () => act({ type: 'refreshAll' }, () => toast('refreshed every browser source ✦'));
 $('#recPauseBtn').onclick = () => st && act({ type: 'recordPause', on: !st.record.paused });
 

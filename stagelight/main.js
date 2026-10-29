@@ -96,7 +96,8 @@ function accounts() {
 }
 // your own web address through a Cloudflare Tunnel: off unless switched on here
 const webSettings = () => { const w = readConfig().web || {}; return { on: !!w.on, host: typeof w.host === 'string' ? w.host : '' }; };
-const server = createServer({ obs, remote, getAccounts: accounts, getWeb: webSettings, log, onWatchers: updateBusy });
+const mediaDir = () => path.join(app.getPath('userData'), 'media');
+const server = createServer({ obs, remote, mediaDir: mediaDir(), getAccounts: accounts, getWeb: webSettings, log, onWatchers: updateBusy });
 
 /* The stream comes first: every Stagelight process (window, screen sharing, the GPU helper)
    runs below normal priority, so when the PC is busy Windows serves OBS before Stagelight. */
@@ -261,6 +262,8 @@ ipcMain.handle('set-remote-max', (_e, max) => {
   log(`remote display upload: ${m ? `at most ${m / 1_000_000} Mbps` : 'no limit'}`);
   return remoteSettings();
 });
+// the files uploaded from the panel for the layout
+ipcMain.handle('open-media', () => { fs.mkdirSync(mediaDir(), { recursive: true }); return shell.openPath(mediaDir()); });
 ipcMain.handle('remote-stop', () => { remote.end('stopped on the stream PC'); return status(); });
 ipcMain.handle('logout-all', () => { server.logoutAll(); log('logged everyone out of the panel'); return status(); });
 ipcMain.handle('open', (_e, url) => {

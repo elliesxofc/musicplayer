@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('stagelight', {
   stopRemote: () => ipcRenderer.invoke('remote-stop'),
   setWeb: settings => ipcRenderer.invoke('set-web', settings),
   open: url => ipcRenderer.invoke('open', String(url)),
+  openMedia: () => ipcRenderer.invoke('open-media'),
   onStatus: cb => ipcRenderer.on('status', (_e, s) => cb(s)),
   onLog: cb => ipcRenderer.on('log', (_e, line) => cb(line)),
 });

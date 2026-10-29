@@ -141,5 +141,6 @@ $('#portSave').onclick = async () => {
   if (!r.ok) alert(r.error || "that port didn't work (another program may use it). see \"what happened\" below.");
 };
 $('#autostart').onchange = async () => { $('#autostart').checked = await S.autostart($('#autostart').checked); };
+$('#openMedia').onclick = () => S.openMedia();
 $('#openHere').onclick = () => S.open($('#openHere').dataset.url);
 $('#logoutAll').onclick = async () => showStatus(await S.logoutAll());

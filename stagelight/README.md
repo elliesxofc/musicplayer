@@ -4,7 +4,12 @@ A remote control for OBS in any browser, behind a password. It runs on the strea
 (in the tray, by the clock) and lets a phone, tablet or another PC go live, end the
 stream, record, switch scenes, show, hide or refresh sources (one browser source, or all of them at once), change a browser
 source's web address, size, frame rate and custom CSS, and edit the layout of any scene (also one
-that isn't on stream, without viewers seeing it, then switch to it when it's ready) and mix audio, with the stream's
+that isn't on stream, without viewers seeing it, then switch to it when it's ready),
+with the preview on the whole screen; upload pictures, videos and sounds from the phone straight
+into a scene (checked by their contents, 200 MB at most, kept in Stagelight's uploads folder); and,
+with full access, OBS's own settings: stream server and key (the key is never shown, only
+replaced), bitrate (simple output mode), canvas and output size, frame rate, recording folder,
+profile and scene collection and mix audio, with the stream's
 health (bitrate, dropped frames, fps, CPU) live.
 
 **Preview**: the panel shows what OBS shows (refreshed about once a second; switch "live"

@@ -277,7 +277,10 @@ function renderStage() {
     if (!i.box || i.box.w <= 0 || i.box.h <= 0) continue;
     const el = document.createElement('div');
     // near the top edge the name goes inside the box, so it isn't cut off
-    el.className = `box${i.on ? '' : ' off'}${i.id === selected ? ' sel' : ''}${i.box.y < st.canvas.h * 0.06 ? ' tag-in' : ''}`;
+    // a source that fills the screen (a game, a background) has its name at the bottom, out of the
+    // way of the others; near the top edge the name goes inside the box, so it isn't cut off
+    const full = i.box.w >= st.canvas.w * 0.9 && i.box.h >= st.canvas.h * 0.9;
+    el.className = `box${i.on ? '' : ' off'}${i.id === selected ? ' sel' : ''}${full ? ' tag-bottom' : i.box.y < st.canvas.h * 0.06 ? ' tag-in' : ''}`;
     el.dataset.id = i.id;
     place(el, i.box);
     const tag = document.createElement('span');

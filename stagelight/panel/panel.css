@@ -127,6 +127,7 @@ h1, h2, h3 { margin: 0; }
 .box.sel { border: 2px solid var(--amber); box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 0 18px rgba(255, 181, 71, .35); z-index: 2; }
 .box .tag { position: absolute; left: -1px; top: -1px; transform: translateY(-100%); max-width: 200px; padding: 1px 6px; font-size: 11px; background: rgba(0, 0, 0, .75); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 4px 4px 0 0; pointer-events: none; }
 .box.tag-in .tag { transform: none; border-radius: 0 0 4px 0; }
+.box.tag-bottom .tag { top: auto; bottom: 0; transform: none; border-radius: 0 4px 0 0; }
 .box.sel .tag { background: var(--amber); color: #1a0f05; }
 .box .grip { position: absolute; right: -11px; bottom: -11px; width: 22px; height: 22px; border-radius: 50%; background: var(--amber); border: 2px solid #1a0f05; display: none; cursor: nwse-resize; }
 .box.sel .grip { display: block; }
@@ -171,3 +172,15 @@ body[data-role="watch"] :is(#streamBtn, #recBtn, #recPauseBtn, .scene, .toggle, 
 .rd-dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: rgba(255, 181, 71, .9); border: 2px solid #1a0f05; box-shadow: 0 0 10px rgba(255, 181, 71, .8); pointer-events: none; z-index: 2; transition: left .03s linear, top .03s linear; }
 .rd-dot[hidden] { display: none; }
 #rdTouch[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); }
+
+/* a phone held sideways: the keys take one scrolling row, so the PC's screen stays big */
+@media (max-height: 520px) {
+  .rd-bar { padding: 4px 8px; gap: 6px; }
+  .rd-bar .btn.small, .rd-bar select { min-height: 34px; height: 34px; }
+  .rd-keys { flex-direction: row; align-items: center; overflow-x: auto; padding-block: 6px; }
+  .rd-keys .hint { display: none; }
+  .rd-type { flex: none; width: 260px; }
+  .rd-type input { height: 36px; }
+  .rd-row { flex-wrap: nowrap; flex: none; }
+  .rd-row .btn { min-height: 36px; }
+}

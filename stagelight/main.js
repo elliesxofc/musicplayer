@@ -78,7 +78,7 @@ const remote = createRemote({
   onChange: () => { sendWin('status', status()); refreshTray(); },
 });
 remote.settings = remoteSettings;
-remote.info = () => ({ ...remoteSettings(), controlWorks: remote.canControl(), ...remote.status() });
+remote.info = () => { const r = remote.status(); return { ...remoteSettings(), controlWorks: remote.canControl(), active: r.active, from: r.from }; };
 /* ───────────── accounts: who can open the panel, and what they can do ───────────── */
 function accounts() {
   const c = readConfig();

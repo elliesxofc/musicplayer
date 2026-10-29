@@ -52,7 +52,7 @@ function createServer({ obs, getPassword, log = () => {} }) {
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
       'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': "default-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      'Content-Security-Policy': "default-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       ...extra,
     });
     res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -122,6 +122,10 @@ function createServer({ obs, getPassword, log = () => {} }) {
     if (!session) return send(res, 401, { error: 'log in first' });
 
     if (p === '/api/state' && req.method === 'GET') return send(res, 200, obs.snapshot());
+    if (p === '/api/preview' && req.method === 'GET') {
+      const jpg = await obs.screenshot();
+      return jpg ? send(res, 200, jpg, 'image/jpeg') : send(res, 503, { error: 'no preview right now' });
+    }
     if (p === '/api/events' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Content-Type-Options': 'nosniff' });
       res.write(`retry: 2000\ndata: ${JSON.stringify(obs.snapshot())}\n\n`);
@@ -141,7 +145,7 @@ function createServer({ obs, getPassword, log = () => {} }) {
       try { body = await readBody(req); } catch { return send(res, 400, { error: 'bad request' }); }
       try {
         await obs.act(body);
-        log(`${body.type}${body.name ? ` "${body.name}"` : ''} from ${ipOf(req)}`);
+        if (!['move', 'resize', 'volume'].includes(body.type)) log(`${body.type}${body.name ? ` "${body.name}"` : ''} from ${ipOf(req)}`);
         return send(res, 200, { ok: true });
       } catch (err) {
         return send(res, 409, { error: err.message || 'OBS said no' });

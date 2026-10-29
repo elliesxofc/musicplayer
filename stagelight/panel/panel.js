@@ -80,6 +80,7 @@ function apply(next) {
   clockOffset = (next.now || Date.now()) - Date.now(); // the stream PC's clock vs this device's
   setConn(st.status, st.connected ? 'on' : 'wait');
   renderOnAir();
+  renderStage();
   renderScenes();
   renderSources();
   renderAudio();
@@ -201,6 +202,187 @@ function renderAudio() {
   }
   if (!st.audio.length) list.innerHTML = '<li class="empty">no audio sources</li>';
 }
+
+/* ───────────── preview: what OBS shows, and the layout of the scene ───────────── */
+let selected = null, drag = null, lastShot = null;
+const stage = $('#stage'), boxes = $('#boxes');
+const editing = () => $('#editOn').checked;
+
+// the picture: about once a second while the panel is open (it pauses in the background)
+async function previewLoop() {
+  let wait = 1000;
+  try {
+    if ($('#previewOn').checked && !$('#panelView').hidden && document.visibilityState === 'visible' && st && st.connected) {
+      const r = await fetch('/api/preview', { credentials: 'same-origin', cache: 'no-store' });
+      if (r.status === 401) showLogin();
+      else if (r.ok) {
+        const url = URL.createObjectURL(await r.blob());
+        $('#previewImg').src = url;
+        if (lastShot) URL.revokeObjectURL(lastShot);
+        lastShot = url;
+        $('#stageMsg').textContent = '';
+      } else wait = 2500;
+    } else if (st && !st.connected) {
+      $('#stageMsg').textContent = 'OBS is not connected';
+    } else if (!$('#previewOn').checked) {
+      $('#stageMsg').textContent = lastShot ? '' : 'preview paused';
+    }
+  } catch { wait = 2500; }
+  setTimeout(previewLoop, wait);
+}
+previewLoop();
+$('#previewOn').onchange = () => { if (!$('#previewOn').checked) $('#stageMsg').textContent = 'preview paused (saves data)'; };
+$('#editOn').onchange = () => { if (!editing()) selected = null; renderStage(); };
+
+function renderStage() {
+  if (!st) return;
+  stage.style.aspectRatio = `${st.canvas.w} / ${st.canvas.h}`;
+  stage.classList.toggle('editing', editing());
+  $('#editHint').hidden = !editing();
+  if (selected != null && !st.items.some(i => i.id === selected)) selected = null;
+  const it = st.items.find(i => i.id === selected);
+  $('#selBar').hidden = !it;
+  if (it) {
+    $('#selName').textContent = it.name;
+    $('#selText').hidden = typeof it.text !== 'string';
+    $('#selHide').textContent = it.on ? 'hide' : 'show';
+  }
+  if (drag) return; // don't redraw under a finger
+  boxes.replaceChildren();
+  if (!editing()) return;
+  // bottom of OBS's list first, so the top source ends up on top here too
+  for (const i of st.items.slice().reverse()) {
+    if (!i.box || i.box.w <= 0 || i.box.h <= 0) continue;
+    const el = document.createElement('div');
+    // near the top edge the name goes inside the box, so it isn't cut off
+    el.className = `box${i.on ? '' : ' off'}${i.id === selected ? ' sel' : ''}${i.box.y < st.canvas.h * 0.06 ? ' tag-in' : ''}`;
+    el.dataset.id = i.id;
+    place(el, i.box);
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = i.name;
+    const grip = document.createElement('span');
+    grip.className = 'grip';
+    el.append(tag, grip);
+    boxes.append(el);
+  }
+}
+function place(el, b) {
+  el.style.left = `${b.x / st.canvas.w * 100}%`;
+  el.style.top = `${b.y / st.canvas.h * 100}%`;
+  el.style.width = `${b.w / st.canvas.w * 100}%`;
+  el.style.height = `${b.h / st.canvas.h * 100}%`;
+}
+
+// pick, move and resize with a finger or the mouse
+boxes.addEventListener('pointerdown', e => {
+  if (!editing()) return;
+  const el = e.target.closest('.box');
+  if (!el) { selected = null; renderStage(); return; }
+  const it = st.items.find(i => i.id === Number(el.dataset.id));
+  if (!it) return;
+  e.preventDefault();
+  if (selected !== it.id) { selected = it.id; renderStage(); }
+  const target = boxes.querySelector(`.box[data-id="${it.id}"]`);
+  const rect = stage.getBoundingClientRect();
+  drag = { id: it.id, el: target, resize: !!e.target.closest('.grip'), sx: e.clientX, sy: e.clientY, start: { ...it.box }, now: { ...it.box },
+    k: st.canvas.w / rect.width, sent: 0, timer: null };
+  target.setPointerCapture(e.pointerId);
+});
+boxes.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = (e.clientX - drag.sx) * drag.k, dy = (e.clientY - drag.sy) * drag.k, b = drag.start;
+  if (drag.resize) {
+    // keeps its shape: the corner follows the finger along the source's own proportions
+    const ratio = b.h / b.w;
+    const w = Math.max(8, b.w + Math.max(dx, dy / ratio));
+    drag.now = { ...b, w, h: w * ratio };
+  } else {
+    drag.now = { ...b, x: b.x + dx, y: b.y + dy };
+  }
+  place(drag.el, drag.now);
+  // live on stream while dragging, a few times a second
+  if (Date.now() - drag.sent > 120) { drag.sent = Date.now(); send(drag); }
+});
+const endDrag = () => { if (!drag) return; const d = drag; drag = null; send(d, true); };
+boxes.addEventListener('pointerup', endDrag);
+boxes.addEventListener('pointercancel', endDrag);
+function send(d, last = false) {
+  const b = d.now, s = d.start;
+  if (last && b.x === s.x && b.y === s.y && b.w === s.w) return;
+  const a = d.resize ? { type: 'resize', x: b.x, y: b.y, w: b.w, h: b.h } : { type: 'move', x: b.x, y: b.y };
+  act({ ...a, scene: st.scene, id: d.id });
+}
+
+// add / change / remove sources
+const fieldHtml = f => {
+  const id = `f_${f.name}`;
+  const label = document.createElement('label');
+  label.className = 'field';
+  const span = document.createElement('span');
+  span.textContent = f.label;
+  const input = document.createElement(f.type === 'textarea' ? 'textarea' : 'input');
+  input.id = id;
+  if (f.type !== 'textarea') input.type = f.type || 'text';
+  if (f.value != null) input.value = f.value;
+  if (f.placeholder) input.placeholder = f.placeholder;
+  if (f.required) input.required = true;
+  if (f.min != null) { input.min = f.min; input.max = f.max; }
+  label.append(span, input);
+  return label;
+};
+function form(title, text, fields, yes) {
+  $('#formTitle').textContent = title;
+  $('#formText').textContent = text;
+  $('#formFields').replaceChildren(...fields.map(fieldHtml));
+  $('#formYes').textContent = yes;
+  $('#formModal').hidden = false;
+  setTimeout(() => { const first = $('#formFields input, #formFields textarea'); if (first) first.focus(); }, 50);
+  return new Promise(resolve => {
+    const done = v => { $('#formModal').hidden = true; resolve(v); };
+    $('#form').onsubmit = e => { e.preventDefault(); done(Object.fromEntries(fields.map(f => [f.name, $(`#f_${f.name}`).value]))); };
+    $('#formNo').onclick = () => done(null);
+  });
+}
+const added = name => () => { toast(`added ${name} ✦`); if (!editing()) { $('#editOn').checked = true; renderStage(); } };
+$('#addText').onclick = async () => {
+  const v = await form('add text', `shows in the middle of "${st.scene}". move it with edit layout.`, [
+    { name: 'text', label: 'the words', type: 'textarea', required: true, placeholder: 'be right back ✦' },
+    { name: 'name', label: 'name in OBS (optional)', placeholder: 'Text' },
+  ], 'add text');
+  if (v) act({ type: 'addText', text: v.text, name: v.name }, added('the text'));
+};
+$('#addBrowser').onclick = async () => {
+  const v = await form('add a website', 'alerts, chat, widgets or a picture link, as an OBS browser source.', [
+    { name: 'url', label: 'web address', type: 'url', required: true, placeholder: 'https://' },
+    { name: 'width', label: 'width', type: 'number', value: 800, min: 16, max: 7680 },
+    { name: 'height', label: 'height', type: 'number', value: 600, min: 16, max: 4320 },
+    { name: 'name', label: 'name in OBS (optional)' },
+  ], 'add website');
+  if (v) act({ type: 'addBrowser', url: v.url, width: Number(v.width), height: Number(v.height), name: v.name }, added('the website'));
+};
+$('#addColor').onclick = async () => {
+  const v = await form('add a colour box', 'a block of colour, for a frame or a background.', [
+    { name: 'color', label: 'colour', type: 'color', value: '#8f7bff' },
+    { name: 'name', label: 'name in OBS (optional)', placeholder: 'Colour' },
+  ], 'add box');
+  if (v) act({ type: 'addColor', color: v.color, name: v.name }, added('the colour box'));
+};
+$('#selText').onclick = async () => {
+  const it = st.items.find(i => i.id === selected);
+  if (!it) return;
+  const v = await form('edit text', it.name, [{ name: 'text', label: 'the words', type: 'textarea', value: it.text || '' }], 'save');
+  if (v) act({ type: 'setText', scene: st.scene, id: it.id, text: v.text }, () => toast('text changed ✦'));
+};
+$('#selHide').onclick = () => {
+  const it = st.items.find(i => i.id === selected);
+  if (it) act({ type: 'source', scene: st.scene, id: it.id, on: !it.on });
+};
+$('#selRemove').onclick = async () => {
+  const it = st.items.find(i => i.id === selected);
+  if (!it || !(await ask(`remove "${it.name}"?`, `it's taken out of the scene "${st.scene}".`, 'remove'))) return;
+  act({ type: 'remove', scene: st.scene, id: it.id }, () => { selected = null; toast('removed'); });
+};
 
 /* ───────────── go live / end stream / record ───────────── */
 function ask(title, text, yes) {

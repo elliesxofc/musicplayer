@@ -5,6 +5,12 @@ A remote control for OBS in any browser, behind a password. It runs on the strea
 stream, record, switch scenes, show or hide sources and mix audio, with the stream's
 health (bitrate, dropped frames, fps, CPU) live.
 
+**Preview**: the panel shows what OBS shows (refreshed about once a second; switch "live"
+off to save mobile data). Turn on **edit layout** to see every source's box: tap one to pick it,
+drag to move it, drag its corner to resize (it keeps its shape). Add **text**, a **website**
+(browser source: alerts, chat, widgets, picture links) or a **colour box** to the current
+scene; edit a text's words, hide or remove a source. Changes show on stream straight away.
+
 Separate from moonlit: its own program, installer and settings.
 
 ## Get it
@@ -46,6 +52,7 @@ Only your devices (and people you share with) can reach the panel that way.
 - 5 wrong passwords lock that device out for a minute, doubling each time (up to an hour).
 - Changing the password, or **log everyone out**, ends every login.
 - The panel can only do the things above: no OBS settings, no files, nothing else.
+  Websites it adds must be `http://` or `https://` addresses (no files from the PC).
 - Going live, ending the stream and stopping a recording ask first.
 - On the same Wi-Fi the panel is plain `http`, so use it on networks you trust (your
   home); through Tailscale it's encrypted.

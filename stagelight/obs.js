@@ -7,7 +7,9 @@
 
 const crypto = require('node:crypto');
 
-const SUBSCRIPTIONS = 1 | 4 | 8 | 64 | 128; // general, scenes, inputs, outputs, scene items
+// general, scenes, inputs, outputs, scene items, and sources being moved or resized in OBS
+const SUBSCRIPTIONS = 1 | 4 | 8 | 64 | 128 | (1 << 19);
+const TEXT_KINDS = ['text_gdiplus_v3', 'text_gdiplus_v2', 'text_gdiplus', 'text_ft2_source_v2', 'text_ft2_source'];
 const sha256 = text => crypto.createHash('sha256').update(text).digest('base64');
 
 function createObs({ onChange = () => {}, log = () => {} } = {}) {
@@ -16,7 +18,7 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
 
   const state = {
     connected: false, status: 'not connected to OBS', obsVersion: '',
-    scenes: [], scene: '', items: [], audio: [],
+    scenes: [], scene: '', items: [], audio: [], canvas: { w: 1920, h: 1080 },
     stream: { active: false, reconnecting: false, startedAt: 0, kbps: 0, skipped: 0, total: 0, congestion: 0 },
     record: { active: false, paused: false, ms: 0 },
     stats: null,
@@ -113,7 +115,11 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
   }
 
   /* ───────────── reading OBS ───────────── */
+  let kinds = [];
   async function refreshAll() {
+    const [v, k] = await Promise.all([call('GetVideoSettings').catch(() => null), call('GetInputKindList').catch(() => null)]);
+    if (v && v.baseWidth) state.canvas = { w: v.baseWidth, h: v.baseHeight };
+    if (k) kinds = k.inputKinds || [];
     await Promise.all([refreshScenes(), refreshAudio(), pollStatus()]);
   }
 
@@ -130,8 +136,27 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     if (!state.scene) { state.items = []; changed(); return; }
     const r = await call('GetSceneItemList', { sceneName: state.scene }).catch(() => ({ sceneItems: [] }));
     state.items = (r.sceneItems || []).slice().sort((a, b) => b.sceneItemIndex - a.sceneItemIndex)
-      .map(i => ({ id: i.sceneItemId, name: i.sourceName, on: !!i.sceneItemEnabled }));
+      .map(i => ({ id: i.sceneItemId, name: i.sourceName, on: !!i.sceneItemEnabled, kind: i.inputKind || i.sourceType || '', box: boxOf(i.sceneItemTransform) }));
+    // the words in text sources, so the panel can show and change them
+    await Promise.all(state.items.filter(i => TEXT_KINDS.includes(i.kind)).map(async i => {
+      const t = await call('GetInputSettings', { inputName: i.name }).catch(() => null);
+      i.text = t && t.inputSettings ? String(t.inputSettings.text || '') : '';
+    }));
     changed();
+  }
+
+  /* Where a source sits on the canvas, as a box (left, top, width, height in canvas pixels).
+     OBS keeps a position for the source's alignment point (top-left, centre, …), a scale and
+     maybe a bounding box; rotation is left out (the box is the unrotated one). */
+  function boxOf(t) {
+    if (!t) return null;
+    const bounded = t.boundsType && t.boundsType !== 'OBS_BOUNDS_NONE';
+    const w = bounded ? t.boundsWidth : t.width, h = bounded ? t.boundsHeight : t.height;
+    const a = t.alignment ?? 5; // 1 left, 2 right, 4 top, 8 bottom (0 = centre)
+    const left = t.positionX - (a & 1 ? 0 : a & 2 ? w : w / 2);
+    const top = t.positionY - (a & 4 ? 0 : a & 8 ? h : h / 2);
+    return { x: left, y: top, w, h, align: a, bounded, rot: t.rotation || 0,
+      srcW: t.sourceWidth || 0, srcH: t.sourceHeight || 0, scaleX: t.scaleX || 1, scaleY: t.scaleY || 1 };
   }
 
   async function refreshAudio() {
@@ -203,6 +228,17 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
         if (a) { a.mul = d.inputVolumeMul; a.db = d.inputVolumeDb; changed(); }
         break;
       }
+      case 'SceneItemTransformChanged': {
+        if (d.sceneName !== state.scene) break;
+        const it = state.items.find(i => i.id === d.sceneItemId);
+        if (it) { it.box = boxOf(d.sceneItemTransform); changed(); }
+        break;
+      }
+      case 'InputSettingsChanged': {
+        const it = state.items.find(i => i.name === d.inputName && TEXT_KINDS.includes(i.kind));
+        if (it && d.inputSettings && 'text' in d.inputSettings) { it.text = String(d.inputSettings.text || ''); changed(); }
+        break;
+      }
       case 'InputCreated': case 'InputRemoved': case 'InputNameChanged': refreshAudio().catch(() => {}); break;
       case 'StreamStateChanged':
         if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STARTED') state.stream.startedAt = Date.now();
@@ -222,6 +258,11 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     if (!a || typeof a !== 'object') throw new Error('nothing to do');
     if (!identified) throw new Error('not connected to OBS');
     const str = v => (typeof v === 'string' ? v : '');
+    const itemOf = x => {
+      const it = state.items.find(i => i.id === Number(x.id));
+      if (!it || str(x.scene) !== state.scene) throw new Error('that source is gone');
+      return it;
+    };
     switch (a.type) {
       case 'stream': await call(a.on ? 'StartStream' : 'StopStream'); break;
       case 'record': await call(a.on ? 'StartRecord' : 'StopRecord'); break;
@@ -250,10 +291,105 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
         await call('SetInputVolume', { inputName: a.input, inputVolumeMul: mul });
         break;
       }
+      case 'move': case 'resize': {
+        const it = itemOf(a);
+        const b = it.box;
+        if (!b) throw new Error("that source can't be moved");
+        const num = (v, lo, hi) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error('that is not a number'); return Math.max(lo, Math.min(hi, n)); };
+        const W = state.canvas.w, H = state.canvas.h;
+        const x = num(a.x, -W * 4, W * 5), y = num(a.y, -H * 4, H * 5);
+        const w = a.type === 'resize' ? num(a.w, 2, W * 8) : b.w, h = a.type === 'resize' ? num(a.h, 2, H * 8) : b.h;
+        // back from the box to OBS's alignment point
+        const t = {
+          positionX: x + (b.align & 1 ? 0 : b.align & 2 ? w : w / 2),
+          positionY: y + (b.align & 4 ? 0 : b.align & 8 ? h : h / 2),
+        };
+        if (a.type === 'resize') {
+          if (b.bounded) { t.boundsWidth = w; t.boundsHeight = h; }
+          else if (b.srcW && b.srcH) { t.scaleX = w / b.srcW; t.scaleY = h / b.srcH; }
+        }
+        await call('SetSceneItemTransform', { sceneName: state.scene, sceneItemId: it.id, sceneItemTransform: t });
+        it.box = { ...b, x, y, w, h };
+        break;
+      }
+      case 'setText': {
+        const it = itemOf(a);
+        if (!TEXT_KINDS.includes(it.kind)) throw new Error("that source isn't text");
+        const text = str(a.text).slice(0, 2000);
+        await call('SetInputSettings', { inputName: it.name, inputSettings: { text }, overlay: true });
+        it.text = text;
+        break;
+      }
+      case 'remove': {
+        const it = itemOf(a);
+        await call('RemoveSceneItem', { sceneName: state.scene, sceneItemId: it.id });
+        break;
+      }
+      case 'addText': case 'addBrowser': case 'addColor': {
+        if (!state.scene) throw new Error('no scene to add it to');
+        const W = state.canvas.w, H = state.canvas.h;
+        let kind, settings, base;
+        if (a.type === 'addText') {
+          kind = TEXT_KINDS.find(k => kinds.includes(k));
+          if (!kind) throw new Error("this OBS has no text source");
+          const text = str(a.text).slice(0, 2000) || 'text';
+          settings = { text, font: { face: kind.startsWith('text_gdiplus') ? 'Arial' : 'Sans Serif', size: 96, style: 'Bold', flags: 1 } };
+          base = 'Text';
+        } else if (a.type === 'addBrowser') {
+          let url;
+          try { url = new URL(str(a.url)); } catch { throw new Error('that is not a web address'); }
+          if (!/^https?:$/.test(url.protocol)) throw new Error('only http:// and https:// addresses');
+          const w = Math.round(Math.max(16, Math.min(7680, Number(a.width) || 800)));
+          const h = Math.round(Math.max(16, Math.min(4320, Number(a.height) || 600)));
+          kind = 'browser_source';
+          if (kinds.length && !kinds.includes(kind)) throw new Error('this OBS has no browser source');
+          settings = { url: url.href, width: w, height: h };
+          base = url.hostname.replace(/^www\./, '') || 'Browser';
+        } else {
+          const m = /^#?([0-9a-f]{6})$/i.exec(str(a.color));
+          if (!m) throw new Error('pick a colour');
+          const n = parseInt(m[1], 16);
+          // OBS keeps colours as ABGR
+          const abgr = (0xff000000 | ((n & 0xff) << 16) | (n & 0xff00) | ((n >> 16) & 0xff)) >>> 0;
+          kind = kinds.find(k => /^color_source/.test(k)) || 'color_source_v3';
+          settings = { color: abgr, width: Math.round(W / 4), height: Math.round(H / 4) };
+          base = 'Colour';
+        }
+        // a name of its own (OBS needs every source's name to be different)
+        const list = await call('GetInputList');
+        const taken = new Set((list.inputs || []).map(i => i.inputName));
+        let name = str(a.name).trim().slice(0, 80) || base;
+        for (let n = 2; taken.has(name); n++) name = `${str(a.name).trim().slice(0, 76) || base} ${n}`;
+        const made = await call('CreateInput', { sceneName: state.scene, inputName: name, inputKind: kind, inputSettings: settings, sceneItemEnabled: true });
+        // new things start in the middle of the screen
+        if (made && made.sceneItemId != null) {
+          await call('SetSceneItemTransform', { sceneName: state.scene, sceneItemId: made.sceneItemId,
+            sceneItemTransform: { alignment: 0, positionX: W / 2, positionY: H / 2 } }).catch(() => {});
+        }
+        await refreshItems();
+        break;
+      }
       default: throw new Error('the panel asked for something Stagelight does not do');
     }
     setTimeout(() => pollStatus().catch(() => {}), 300);
     changed();
+  }
+
+  // a picture of the current scene for the panel's preview (shared by every open panel)
+  let shot = { at: 0, scene: '', data: null, busy: null };
+  async function screenshot() {
+    if (!identified || !state.scene) return null;
+    if (shot.data && shot.scene === state.scene && Date.now() - shot.at < 450) return shot.data;
+    if (shot.busy) return shot.busy;
+    const w = Math.min(960, state.canvas.w);
+    shot.busy = call('GetSourceScreenshot', { sourceName: state.scene, imageFormat: 'jpg', imageWidth: w, imageHeight: Math.round(w * state.canvas.h / state.canvas.w), imageCompressionQuality: 70 })
+      .then(r => {
+        const m = /^data:image\/\w+;base64,(.*)$/.exec(r.imageData || '');
+        shot = { at: Date.now(), scene: state.scene, data: m ? Buffer.from(m[1], 'base64') : null, busy: null };
+        return shot.data;
+      })
+      .catch(() => { shot.busy = null; return null; });
+    return shot.busy;
   }
 
   function snapshot() {
@@ -266,6 +402,7 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     stop() { close(true); setStatus('not connected to OBS'); },
     act,
     snapshot,
+    screenshot,
   };
 }
 

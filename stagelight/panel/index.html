@@ -60,6 +60,31 @@
     </section>
 
     <section class="card">
+      <div class="card-head">
+        <h2>preview</h2>
+        <label class="mini-check"><input type="checkbox" id="previewOn" checked> live</label>
+        <label class="mini-check"><input type="checkbox" id="editOn"> edit layout</label>
+      </div>
+      <div class="stage" id="stage">
+        <img id="previewImg" alt="what OBS shows right now">
+        <div class="boxes" id="boxes"></div>
+        <p class="stage-msg" id="stageMsg">loading the preview…</p>
+      </div>
+      <p class="hint" id="editHint" hidden>tap a source to pick it, drag to move it, drag its corner to resize. changes show on stream straight away.</p>
+      <div class="sel" id="selBar" hidden>
+        <b id="selName"></b>
+        <button class="btn small" id="selText">edit text</button>
+        <button class="btn small" id="selHide">hide</button>
+        <button class="btn small danger" id="selRemove">remove</button>
+      </div>
+      <div class="row add-row">
+        <button class="btn small" id="addText">+ text</button>
+        <button class="btn small" id="addBrowser">+ website</button>
+        <button class="btn small" id="addColor">+ colour box</button>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>scenes</h2>
       <div class="scenes" id="scenes"></div>
     </section>
@@ -87,6 +112,18 @@
         <button class="btn primary" id="confirmYes">yes</button>
       </div>
     </div>
+  </div>
+  <!-- adding a source / changing a text -->
+  <div class="modal" id="formModal" hidden>
+    <form class="modal-card" id="form" autocomplete="off">
+      <h3 id="formTitle"></h3>
+      <p class="muted" id="formText"></p>
+      <div id="formFields"></div>
+      <div class="row">
+        <button class="btn" type="button" id="formNo">cancel</button>
+        <button class="btn primary" type="submit" id="formYes">add</button>
+      </div>
+    </form>
   </div>
   <div class="toast" id="toast" role="status"></div>
   <script src="panel.js"></script>

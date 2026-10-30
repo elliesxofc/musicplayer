@@ -162,10 +162,10 @@ h1, h2, h3 { margin: 0; }
 .rd-bar select { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0, 0, 0, .3); color: var(--ink); padding: 0 10px; font: inherit; font-size: 14px; max-width: 46vw; }
 .rd-state { flex: 1; min-width: 90px; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rd-state.on { color: var(--ok); }
-.rd-stage { flex: 1; min-height: 0; position: relative; outline: none; touch-action: none; user-select: none; -webkit-user-select: none; }
-.rd-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.rd-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; outline: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+.rd-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; transform-origin: 0 0; }
 .rd-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--amber); }
-.rd-stage.watch { touch-action: auto; }
+.rd-stage.watch { touch-action: none; } /* pinch zooms the picture, not the page */
 .rd-keys { padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); background: var(--bg2); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .rd-type { display: flex; gap: 8px; }
 .rd-type input { flex: 1; min-width: 0; height: 42px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0, 0, 0, .3); color: var(--ink); font-size: 16px; outline: none; }

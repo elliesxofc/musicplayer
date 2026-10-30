@@ -113,6 +113,10 @@ Stagelight is made to stay out of OBS's way:
   up to 4 GB), upload files or whole folders into the open folder, and make folders, after typing
   their password again (good for 30 minutes of use). Nothing can be deleted, renamed or
   overwritten (a taken name gets " (2)"); every transfer is logged and shows a notification
+- remote display on a phone: pinch to zoom in (up to 5×) like AnyDesk, move both fingers to look
+  around, "reset" in the bar to zoom back out (ctrl + wheel on a laptop); two fingers sliding
+  together still scroll the PC, and in trackpad mode the view follows the pointer. The bar shows
+  the stream PC's name once connected
 - the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
   Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
 

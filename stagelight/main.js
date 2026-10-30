@@ -82,7 +82,7 @@ const remote = createRemote({
   onChange: () => { updateBusy(); sendWin('status', status()); refreshTray(); },
 });
 remote.settings = remoteSettings;
-remote.info = () => { const r = remote.status(); return { ...remoteSettings(), controlWorks: remote.canControl(), active: r.active, from: r.from }; };
+remote.info = () => { const r = remote.status(); return { ...remoteSettings(), controlWorks: remote.canControl(), active: r.active, from: r.from, pcName: os.hostname() }; };
 /* ───────────── accounts: who can open the panel, and what they can do ───────────── */
 function accounts() {
   const c = readConfig();

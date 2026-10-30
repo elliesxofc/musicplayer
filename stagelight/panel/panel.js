@@ -596,7 +596,7 @@ async function remoteInfo() {
   if (info.view) {
     $('#remoteHint').textContent = info.active
       ? `in use right now (${info.from}). opening it here takes over.`
-      : info.control && info.controlWorks ? 'see the stream PC\'s screen and use its mouse and keyboard, for OBS\'s full window.'
+      : info.control && info.controlWorks ? `see ${info.pcName ? `${info.pcName}'s` : 'the stream PC\'s'} screen and use its mouse and keyboard, for OBS's full window.`
         : 'see the stream PC\'s screen (watching only: mouse and keyboard are switched off on the PC).';
   }
   return info;
@@ -613,7 +613,8 @@ const rdState = (text, on = false) => { $('#rdState').textContent = text; $('#rd
 async function rdConnect() {
   if (!rd) return;
   if (rd.pc) rd.pc.close();
-  rdState('connecting…');
+  rdState(rd.pcName ? `connecting to ${rd.pcName}…` : 'connecting…');
+  zoomReset();
   const pc = new RTCPeerConnection({ iceServers: (rd.ice || []).map(u => ({ urls: u })) });
   const dc = pc.createDataChannel('input', { ordered: true });
   // the stream PC ended it (its stop button, switched off, or someone else took over)
@@ -626,7 +627,11 @@ async function rdConnect() {
   pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };
   pc.onconnectionstatechange = () => {
     if (!rd || rd.pc !== pc) return;
-    if (pc.connectionState === 'connected') rdState(rd.control ? 'connected · mouse and keyboard on' : 'connected · watching only', true);
+    if (pc.connectionState === 'connected') {
+      // the PC's name first: it's what stays visible on a narrow phone
+      rdState(rd.pcName ? `${rd.pcName} · ${rd.control ? 'in control' : 'watching'}` : (rd.control ? 'connected · mouse and keyboard on' : 'connected · watching only'), true);
+      $('#rdState').title = `connected${rd.pcName ? ` to ${rd.pcName}` : ''} · ${rd.control ? 'mouse and keyboard on' : 'watching only'}`;
+    }
     if (pc.connectionState === 'failed') rdState("couldn't connect. same network (or Tailscale) as the stream PC?");
     if (pc.connectionState === 'disconnected') rdState('connection dropped… waiting');
   };
@@ -657,7 +662,7 @@ $('#remoteOpen').onclick = async () => {
   if (!v) return;
   $('#rdScreen').replaceChildren(...(info.screens || []).map(sc => { const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.name; return o; }));
   $('#rdScreen').hidden = (info.screens || []).length < 2;
-  rd = { password: v.password, control: false, ice: info.ice || [] };
+  rd = { password: v.password, control: false, ice: info.ice || [], pcName: String(info.pcName || '').slice(0, 64) };
   $('#rd').hidden = false;
   $('#rdKeyPad').hidden = true;
   Object.assign(cursor, { x: 0.5, y: 0.5 });
@@ -671,6 +676,7 @@ function rdClose(tell = true) {
   rd = null;
   if (was.pc) was.pc.close();
   rdVideo.srcObject = null;
+  zoomReset();
   $('#rd').hidden = true;
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (tell) api('/api/remote/stop', {}).catch(() => {});
@@ -727,7 +733,7 @@ $('#rdTouch').onclick = () => {
   toast(padMode ? 'trackpad: slide to move, tap to click, two fingers to right-click or scroll' : 'direct touch: tap where you want to click');
 };
 rdVideo.addEventListener('resize', placeDot);
-window.addEventListener('resize', placeDot);
+window.addEventListener('resize', () => zoomApply());
 
 const pad = { fingers: new Map(), start: 0, moved: 0, lastTapEnd: 0, dragging: false, scrollY: 0, two: false, timer: null, held: false };
 function padMove(dx, dy) {
@@ -739,6 +745,7 @@ function padMove(dx, dy) {
   cursor.x = Math.max(0, Math.min(1, cursor.x + dx * gain / (vw * k)));
   cursor.y = Math.max(0, Math.min(1, cursor.y + dy * gain / (vh * k)));
   placeDot();
+  zoomFollow();
   queueMove({ x: cursor.x, y: cursor.y });
 }
 const padClick = b => { rdSend({ t: 'b', b, d: true, ...cursor }); rdSend({ t: 'b', b, d: false, ...cursor }); };
@@ -767,7 +774,7 @@ function padMoveEvent(e) {
     pad.moved += Math.hypot(dx, dy);
     const y = [...pad.fingers.values()].reduce((a, g) => a + g.y, 0) / pad.fingers.size;
     const d = pad.scrollY - y;
-    if (Math.abs(d) > 6) { rdSend({ t: 'w', dy: d * 4 }); pad.scrollY = y; }
+    if (Math.abs(d) > 6 && !zoomBusy()) { rdSend({ t: 'w', dy: d * 4 }); pad.scrollY = y; }
     return;
   }
   pad.moved += Math.hypot(dx, dy);
@@ -784,9 +791,92 @@ function padUp(e) {
   if (!pad.held && quick && pad.moved < 8 && e.type === 'pointerup') { padClick(0); pad.lastTapEnd = Date.now(); }
 }
 
+/* Zoom, like AnyDesk on a phone: pinch to zoom in (up to 5×) on the spot between the fingers,
+   and move both fingers to look around while zoomed. Two fingers sliding together (without
+   pinching) still scroll the PC. ctrl + wheel (or a laptop's trackpad pinch) zooms too. Watching
+   only, one finger moves around a zoomed picture. Places sent to the PC take the zoom into
+   account (they're measured on the picture as it's shown). */
+const zoom = { k: 1, x: 0, y: 0 };
+const zf = new Map();   // every finger on the picture
+let zg = null;          // a two-finger gesture: { d0, m0, k0, x0, y0, mode: null | 'zoom' | 'scroll' }
+function zoomApply() {
+  const s = rdStage.getBoundingClientRect();
+  zoom.k = Math.max(1, Math.min(5, zoom.k));
+  // the picture always covers the screen: no empty space past its edges
+  zoom.x = Math.min(0, Math.max(s.width * (1 - zoom.k), zoom.x));
+  zoom.y = Math.min(0, Math.max(s.height * (1 - zoom.k), zoom.y));
+  if (zoom.k < 1.02) Object.assign(zoom, { k: 1, x: 0, y: 0 });
+  rdVideo.style.transform = zoom.k === 1 ? '' : `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.k})`;
+  $('#rdZoom').hidden = zoom.k === 1;
+  $('#rdZoom').textContent = `${zoom.k.toFixed(1)}× · reset`;
+  placeDot();
+}
+function zoomReset() { Object.assign(zoom, { k: 1, x: 0, y: 0 }); zg = null; zf.clear(); zoomApply(); }
+// zoom to k, keeping the point (px, py) on the screen where it is
+function zoomAt(k, px, py) {
+  const s = rdStage.getBoundingClientRect(), ux = (px - s.left - zoom.x) / zoom.k, uy = (py - s.top - zoom.y) / zoom.k;
+  zoom.k = Math.max(1, Math.min(5, k));
+  zoom.x = px - s.left - ux * zoom.k; zoom.y = py - s.top - uy * zoom.k;
+  zoomApply();
+}
+$('#rdZoom').onclick = () => { zoomReset(); rdStage.focus(); };
+// in trackpad mode the view follows the pointer when it gets near an edge
+function zoomFollow() {
+  if (zoom.k === 1 || dot.hidden) return;
+  const s = rdStage.getBoundingClientRect(), x = parseFloat(dot.style.left), y = parseFloat(dot.style.top), m = 40;
+  let dx = 0, dy = 0;
+  if (x < m) dx = m - x; else if (x > s.width - m) dx = s.width - m - x;
+  if (y < m) dy = m - y; else if (y > s.height - m) dy = s.height - m - y;
+  if (dx || dy) { zoom.x += dx; zoom.y += dy; zoomApply(); }
+}
+const mid = () => { const f = [...zf.values()]; return { x: (f[0].x + f[1].x) / 2, y: (f[0].y + f[1].y) / 2, d: Math.hypot(f[0].x - f[1].x, f[0].y - f[1].y) }; };
+// true when the zoom gesture takes this event (the PC doesn't get it)
+function zoomDown(e) {
+  if (e.pointerType !== 'touch' || !rd) return false;
+  zf.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
+  if (zf.size === 2) { const m = mid(); zg = { d0: m.d, m0: m, k0: zoom.k, x0: zoom.x, y0: zoom.y, mode: null }; }
+  return !rd.control;
+}
+function zoomMove(e) {
+  if (e.pointerType !== 'touch' || !rd) return false;
+  const f = zf.get(e.pointerId);
+  if (!f) return false;
+  const px = f.x, py = f.y;
+  f.x = e.clientX; f.y = e.clientY;
+  if (zg && zf.size >= 2) {
+    const m = mid();
+    if (!zg.mode) {
+      if (Math.abs(m.d - zg.d0) > 22) zg.mode = 'zoom';
+      else if (Math.hypot(m.x - zg.m0.x, m.y - zg.m0.y) > 14) zg.mode = rd.control ? 'scroll' : 'zoom';
+    }
+    if (zg.mode === 'zoom') {
+      const s = rdStage.getBoundingClientRect();
+      const ux = (zg.m0.x - s.left - zg.x0) / zg.k0, uy = (zg.m0.y - s.top - zg.y0) / zg.k0;
+      zoom.k = Math.max(1, Math.min(5, zg.k0 * m.d / Math.max(1, zg.d0)));
+      zoom.x = m.x - s.left - ux * zoom.k; zoom.y = m.y - s.top - uy * zoom.k;
+      zoomApply();
+      return true;
+    }
+    return zg.mode !== 'scroll'; // not decided yet: wait before scrolling
+  }
+  // watching only: one finger looks around a zoomed picture
+  if (!rd.control && zoom.k > 1 && zf.size === 1) { zoom.x += e.clientX - px; zoom.y += e.clientY - py; zoomApply(); return true; }
+  return !rd.control;
+}
+function zoomUp(e) {
+  if (e.pointerType !== 'touch' || !rd) return false;
+  const was = zg && zg.mode === 'zoom';
+  zf.delete(e.pointerId);
+  if (zf.size < 2) zg = was ? { done: true, mode: 'zoom' } : null;
+  if (!zf.size && zg && zg.done) { zg = null; return true; }
+  return was || !rd.control;
+}
+const zoomBusy = () => !!(zg && zg.mode === 'zoom');
+
 const touches = new Map();
 let touch = null;
 rdStage.addEventListener('pointerdown', e => {
+  if (zoomDown(e)) { e.preventDefault(); return; }
   if (!rd || !rd.control) return;
   rdStage.focus();
   const p = rdAt(e);
@@ -811,6 +901,15 @@ rdStage.addEventListener('pointerdown', e => {
   }, 550);
 });
 rdStage.addEventListener('pointermove', e => {
+  if (zoomMove(e)) {
+    // a pinch cancels what one finger had started (a click or a hold)
+    if (zoomBusy()) {
+      if (touch && touch.timer) clearTimeout(touch.timer);
+      if (touch) touch.done = true;
+      clearTimeout(pad.timer); pad.moved = 99;
+    }
+    return;
+  }
   if (!rd || !rd.control) return;
   if (e.pointerType !== 'touch') { const p = rdAt(e); if (p) { queueMove(p); Object.assign(cursor, p); } return; }
   if (padMode) { padMoveEvent(e); return; }
@@ -820,7 +919,7 @@ rdStage.addEventListener('pointermove', e => {
   if (touch.scroll && touches.size >= 2) {
     const y = [...touches.values()].reduce((a, b) => a + b.y, 0) / touches.size;
     const dy = touch.y - y;
-    if (Math.abs(dy) > 6) { rdSend({ t: 'w', dy: dy * 4 }); touch.y = y; }
+    if (Math.abs(dy) > 6 && !zoomBusy()) { rdSend({ t: 'w', dy: dy * 4 }); touch.y = y; }
     return;
   }
   if (touch.done || touch.scroll) return;
@@ -833,6 +932,14 @@ rdStage.addEventListener('pointermove', e => {
   if (touch.dragging && p) queueMove(p);
 });
 const pointerEnd = e => {
+  const zoomed = zoomUp(e);
+  if (zoomed) {
+    // the fingers of a pinch are forgotten, without a click
+    touches.delete(e.pointerId); pad.fingers.delete(e.pointerId);
+    if (!touches.size) touch = null;
+    if (!pad.fingers.size) { pad.two = false; pad.dragging = false; }
+    return;
+  }
   if (!rd || !rd.control) return;
   if (e.pointerType !== 'touch') {
     const p = rdAt(e) || {};
@@ -852,6 +959,7 @@ rdStage.addEventListener('pointerup', pointerEnd);
 rdStage.addEventListener('pointercancel', pointerEnd);
 rdStage.addEventListener('contextmenu', e => e.preventDefault());
 rdStage.addEventListener('wheel', e => {
+  if (rd && e.ctrlKey) { e.preventDefault(); zoomAt(zoom.k * Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.0025)), e.clientX, e.clientY); return; }
   if (!rd || !rd.control) return;
   e.preventDefault();
   const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 400 : 1;

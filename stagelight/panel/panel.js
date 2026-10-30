@@ -847,7 +847,12 @@ $('#rdTouch').onclick = () => {
 rdVideo.addEventListener('resize', placeDot);
 window.addEventListener('resize', () => zoomApply());
 
-const pad = { fingers: new Map(), start: 0, moved: 0, lastTapEnd: 0, dragging: false, scrollY: 0, two: false, timer: null, held: false };
+const pad = { fingers: new Map(), start: 0, moved: 0, lastTapEnd: 0, dragging: false, scrollY: 0, two: false, timer: null, held: false, sx: 0, sy: 0, from: null };
+/* A tap, like on a laptop trackpad: short (under 400 ms) and ending close to where it started
+   (22 px), however much the finger wobbled on the way. The click goes where the pointer was
+   before the wobble. */
+const TAP_MS = 400, TAP_PX = 22;
+const padNet = e => Math.hypot(e.clientX - pad.sx, e.clientY - pad.sy);
 function padMove(dx, dy) {
   const v = rdView(), r = v.el.getBoundingClientRect(), vw = v.w, vh = v.h;
   if (!vw || vw < 2) return;
@@ -871,11 +876,13 @@ function padDown(e) {
   }
   if (pad.fingers.size > 2) return;
   pad.two = false; pad.moved = 0; pad.held = false; pad.start = Date.now();
+  pad.sx = e.clientX; pad.sy = e.clientY; pad.from = { x: cursor.x, y: cursor.y };
   // touching again right after a tap: hold the button down and drag
   if (Date.now() - pad.lastTapEnd < 280) { pad.dragging = true; rdSend({ t: 'b', b: 0, d: true, ...cursor }); return; }
   pad.timer = setTimeout(() => {
-    if (pad.moved < 8 && !pad.two) { pad.held = true; padClick(2); if (navigator.vibrate) navigator.vibrate(15); }
+    if (pad.net < TAP_PX && !pad.two) { pad.held = true; padClick(2); if (navigator.vibrate) navigator.vibrate(15); }
   }, 600);
+  pad.net = 0;
 }
 function padMoveEvent(e) {
   const f = pad.fingers.get(e.pointerId);
@@ -890,17 +897,23 @@ function padMoveEvent(e) {
     return;
   }
   pad.moved += Math.hypot(dx, dy);
-  if (pad.moved > 8) clearTimeout(pad.timer);
+  pad.net = padNet(e);
+  if (pad.net >= TAP_PX) clearTimeout(pad.timer);
   if (!pad.held) padMove(dx, dy);
 }
 function padUp(e) {
   pad.fingers.delete(e.pointerId);
   if (pad.fingers.size) return; // wait for the last finger
   clearTimeout(pad.timer);
-  const quick = Date.now() - pad.start < 300;
-  if (pad.two) { if (quick && pad.moved < 20) padClick(2); pad.two = false; return; }
-  if (pad.dragging) { pad.dragging = false; rdSend({ t: 'b', b: 0, d: false, ...cursor }); if (pad.moved < 8) padClick(0); return; }
-  if (!pad.held && quick && pad.moved < 8 && e.type === 'pointerup') { padClick(0); pad.lastTapEnd = Date.now(); }
+  const quick = Date.now() - pad.start < TAP_MS, small = padNet(e) < TAP_PX;
+  if (pad.two) { if (quick && pad.moved < 40) padClick(2); pad.two = false; return; }
+  if (pad.dragging) { pad.dragging = false; rdSend({ t: 'b', b: 0, d: false, ...cursor }); if (quick && small) padClick(0); return; }
+  if (!pad.held && quick && small && e.type === 'pointerup') {
+    // the wobble isn't a move: back to where the pointer was, then the click
+    if (pad.from) { Object.assign(cursor, pad.from); placeDot(); rdSend({ t: 'm', x: cursor.x, y: cursor.y, f: 1 }); }
+    padClick(0);
+    pad.lastTapEnd = Date.now();
+  }
 }
 
 /* Zoom, like AnyDesk on a phone: pinch to zoom in (up to 5×) on the spot between the fingers,

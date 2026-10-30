@@ -585,7 +585,9 @@ $('#selRemove').onclick = async () => {
    The video comes straight from the stream PC over WebRTC; mouse and keyboard go back over a
    data channel. Places are sent as 0…1 across the screen, so any size of phone works. */
 let rd = null; // { pc, dc, password, control }
-const rdStage = $('#rdStage'), rdVideo = $('#rdVideo');
+const rdStage = $('#rdStage'), rdVideo = $('#rdVideo'), rdCanvas = $('#rdCanvas'), rdCtx = rdCanvas.getContext('2d');
+// what shows the PC: the video (direct), or pictures drawn on a canvas (through the web address)
+const rdView = () => (rd && rd.relay ? { el: rdCanvas, w: rdCanvas.width, h: rdCanvas.height } : { el: rdVideo, w: rdVideo.videoWidth, h: rdVideo.videoHeight });
 
 async function remoteInfo() {
   const info = await api('/api/remote').catch(() => ({ view: false }));
@@ -611,9 +613,113 @@ const iceDone = pc => new Promise(resolve => {
 });
 const rdState = (text, on = false) => { $('#rdState').textContent = text; $('#rdState').classList.toggle('on', on); };
 
+const rdConnected = () => {
+  // the PC's name first: it's what stays visible on a narrow phone
+  const how = rd.relay ? ' · via web' : '';
+  rdState(rd.pcName ? `${rd.pcName} · ${rd.control ? 'in control' : 'watching'}${how}` : `connected${how} · ${rd.control ? 'mouse and keyboard on' : 'watching only'}`, true);
+  $('#rdState').title = `connected${rd.pcName ? ` to ${rd.pcName}` : ''} · ${rd.control ? 'mouse and keyboard on' : 'watching only'}${rd.relay ? ' · through the web address (a direct connection was blocked)' : ''}`;
+};
+const rdUseControls = r => {
+  rd.control = !!r.control;
+  $('#rdKeys').hidden = !rd.control;
+  $('#rdTouch').hidden = !rd.control || !matchMedia('(pointer: coarse)').matches;
+  dot.hidden = !rd.control || !padMode;
+  rdStage.classList.toggle('watch', !rd.control);
+};
+
+/* Through the web address (the backup when a direct connection is blocked, like behind a VPN):
+   the stream PC sends pictures over the panel's own connection, and mouse and keyboard go back a
+   few at a time. Slower than the direct video, but it works wherever the panel works. */
+function relayStop() {
+  if (!rd) return;
+  if (rd.relayAbort) rd.relayAbort.abort();
+  clearInterval(rd.relayFlush);
+  rd.relayAbort = null; rd.relayFlush = null; rd.relayQueue = [];
+}
+async function relayConnect() {
+  relayStop();
+  if (rd.pc) { rd.pc.close(); rd.pc = null; rd.dc = null; }
+  rdVideo.srcObject = null;
+  rdVideo.hidden = true; rdCanvas.hidden = false;
+  rdState('connecting through the web address…');
+  const gen = rd.gen = (rd.gen || 0) + 1;
+  let r;
+  try {
+    r = await api('/api/remote/start', { relay: true, password: rd.password, screen: $('#rdScreen').value, quality: $('#rdQuality').value });
+  } catch (err) {
+    rdState(err.message);
+    if (/password|tries|access/.test(err.message)) { rdClose(false); toast(err.message, 4000); }
+    return;
+  }
+  if (!rd || rd.gen !== gen) return;
+  rdUseControls(r);
+  const ctl = new AbortController();
+  rd.relayAbort = ctl; rd.relayQueue = [];
+  rd.relayFlush = setInterval(() => {
+    if (!rd || !rd.relayQueue.length) return;
+    const events = rd.relayQueue.splice(0);
+    fetch('/api/remote/relay/input', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Stagelight': '1' }, body: JSON.stringify({ events }) }).catch(() => {});
+  }, 50);
+  let res;
+  try { res = await fetch('/api/remote/relay', { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal }); } catch { return; }
+  if (!res.ok || !res.body) { rdState("couldn't open the picture through the web address"); return; }
+  rdConnected();
+  const reader = res.body.getReader();
+  let buf = new Uint8Array(0), drawing = false, next = null;
+  const draw = async bytes => {
+    if (drawing) { next = bytes; return; } // still drawing the last one: keep only the newest
+    drawing = true;
+    try {
+      const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+      if (rd && rd.gen === gen) {
+        const sized = rdCanvas.width !== bmp.width || rdCanvas.height !== bmp.height;
+        if (sized) { rdCanvas.width = bmp.width; rdCanvas.height = bmp.height; }
+        rdCtx.drawImage(bmp, 0, 0);
+        if (sized) placeDot();
+      }
+      bmp.close();
+    } catch { /* a broken picture: skip it */ }
+    drawing = false;
+    if (next) { const n = next; next = null; draw(n); }
+  };
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const joined = new Uint8Array(buf.length + value.length); joined.set(buf); joined.set(value, buf.length); buf = joined;
+      while (buf.length >= 5) {
+        const len = new DataView(buf.buffer, buf.byteOffset + 1, 4).getUint32(0);
+        if (buf.length < 5 + len) break;
+        const kind = buf[0], body = buf.slice(5, 5 + len);
+        buf = buf.slice(5 + len);
+        if (kind === 1) draw(body);
+        else if (kind === 2) {
+          let msg; try { msg = JSON.parse(new TextDecoder().decode(body)); } catch { continue; }
+          if (msg.t === 'end' && rd && rd.gen === gen) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); return; }
+          if (msg.t === 'note' && typeof msg.text === 'string') toast(msg.text.slice(0, 120), 4000);
+        }
+      }
+    }
+  } catch { /* stopped (closed, or the line dropped) */ }
+  // the line dropped without a goodbye: try again
+  if (rd && rd.gen === gen && rd.relay) { rdState('connection dropped… trying again'); setTimeout(() => { if (rd && rd.gen === gen) relayConnect(); }, 2000); }
+}
+
 async function rdConnect() {
   if (!rd) return;
+  if (rd.relay) return relayConnect();
   if (rd.pc) rd.pc.close();
+  rdVideo.hidden = false; rdCanvas.hidden = true;
+  const gen = rd.gen = (rd.gen || 0) + 1;
+  // no direct connection after 12 s (or it failed): through the web address instead
+  const fallBack = why => {
+    if (!rd || rd.gen !== gen || rd.relay) return;
+    rd.relay = true;
+    toast(`${why}: showing the PC through the web address instead (a little slower)`, 5000);
+    relayConnect();
+  };
+  clearTimeout(rd.fallTimer);
+  rd.fallTimer = setTimeout(() => { if (rd && rd.gen === gen && rd.pc && rd.pc.connectionState !== 'connected') fallBack("couldn't connect directly (a VPN or the network blocks it)"); }, 12_000);
   rdState(rd.pcName ? `connecting to ${rd.pcName}…` : 'connecting…');
   zoomReset();
   const pc = new RTCPeerConnection({ iceServers: (rd.ice || []).map(u => ({ urls: u })) });
@@ -628,12 +734,8 @@ async function rdConnect() {
   pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };
   pc.onconnectionstatechange = () => {
     if (!rd || rd.pc !== pc) return;
-    if (pc.connectionState === 'connected') {
-      // the PC's name first: it's what stays visible on a narrow phone
-      rdState(rd.pcName ? `${rd.pcName} · ${rd.control ? 'in control' : 'watching'}` : (rd.control ? 'connected · mouse and keyboard on' : 'connected · watching only'), true);
-      $('#rdState').title = `connected${rd.pcName ? ` to ${rd.pcName}` : ''} · ${rd.control ? 'mouse and keyboard on' : 'watching only'}`;
-    }
-    if (pc.connectionState === 'failed') rdState("couldn't connect. same network (or Tailscale) as the stream PC?");
+    if (pc.connectionState === 'connected') { clearTimeout(rd.fallTimer); rdConnected(); }
+    if (pc.connectionState === 'failed') fallBack("couldn't connect directly (a VPN or the network blocks it)");
     if (pc.connectionState === 'disconnected') rdState('connection dropped… waiting');
   };
   Object.assign(rd, { pc, dc });
@@ -642,11 +744,7 @@ async function rdConnect() {
   try {
     const r = await api('/api/remote/start', { password: rd.password, sdp: pc.localDescription.sdp, screen: $('#rdScreen').value, quality: $('#rdQuality').value });
     if (!rd || rd.pc !== pc) return;
-    rd.control = !!r.control;
-    $('#rdKeys').hidden = !rd.control;
-    $('#rdTouch').hidden = !rd.control || !matchMedia('(pointer: coarse)').matches;
-    dot.hidden = !rd.control || !padMode;
-    rdStage.classList.toggle('watch', !rd.control);
+    rdUseControls(r);
     await pc.setRemoteDescription({ type: 'answer', sdp: r.sdp });
   } catch (err) {
     rdState(err.message);
@@ -674,9 +772,12 @@ $('#remoteOpen').onclick = async () => {
 function rdClose(tell = true) {
   if (!rd) return;
   const was = rd;
+  relayStop();
+  clearTimeout(was.fallTimer);
   rd = null;
   if (was.pc) was.pc.close();
   rdVideo.srcObject = null;
+  rdCanvas.width = rdCanvas.height = 1;
   zoomReset();
   $('#rd').hidden = true;
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -688,11 +789,21 @@ $('#rdScreen').onchange = $('#rdQuality').onchange = () => rdConnect();
 $('#rdFull').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $('#rd').requestFullscreen()).catch(() => {});
 $('#rdKeys').onclick = () => { $('#rdKeyPad').hidden = !$('#rdKeyPad').hidden; };
 
-const rdSend = m => { if (rd && rd.control && rd.dc && rd.dc.readyState === 'open') rd.dc.send(JSON.stringify(m)); };
+const rdSend = m => {
+  if (!rd || !rd.control) return;
+  if (rd.relay) {
+    // through the web address: a few at a time; of several moves in a row only the last one matters
+    const q = rd.relayQueue;
+    if (!q) return;
+    if (m.t === 'm' && q.length && q[q.length - 1].t === 'm') q[q.length - 1] = m; else if (q.length < 300) q.push(m);
+    return;
+  }
+  if (rd.dc && rd.dc.readyState === 'open') rd.dc.send(JSON.stringify(m));
+};
 // a place on the video → 0…1 across the PC's screen (the picture is letterboxed to fit)
 function rdAt(e) {
-  const r = rdVideo.getBoundingClientRect(), vw = rdVideo.videoWidth, vh = rdVideo.videoHeight;
-  if (!vw || !vh) return null;
+  const v = rdView(), r = v.el.getBoundingClientRect(), vw = v.w, vh = v.h;
+  if (!vw || !vh || vw < 2) return null;
   const k = Math.min(r.width / vw, r.height / vh), w = vw * k, h = vh * k;
   const x = (e.clientX - r.left - (r.width - w) / 2) / w, y = (e.clientY - r.top - (r.height - h) / 2) / h;
   return x < 0 || y < 0 || x > 1 || y > 1 ? null : { x, y };
@@ -721,8 +832,8 @@ function showPadMode() {
   placeDot();
 }
 function placeDot() {
-  const r = rdVideo.getBoundingClientRect(), s = rdStage.getBoundingClientRect(), vw = rdVideo.videoWidth, vh = rdVideo.videoHeight;
-  if (!vw || !vh) return;
+  const v = rdView(), r = v.el.getBoundingClientRect(), s = rdStage.getBoundingClientRect(), vw = v.w, vh = v.h;
+  if (!vw || !vh || vw < 2) return;
   const k = Math.min(r.width / vw, r.height / vh), w = vw * k, h = vh * k;
   dot.style.left = `${r.left - s.left + (r.width - w) / 2 + cursor.x * w}px`;
   dot.style.top = `${r.top - s.top + (r.height - h) / 2 + cursor.y * h}px`;
@@ -738,8 +849,8 @@ window.addEventListener('resize', () => zoomApply());
 
 const pad = { fingers: new Map(), start: 0, moved: 0, lastTapEnd: 0, dragging: false, scrollY: 0, two: false, timer: null, held: false };
 function padMove(dx, dy) {
-  const r = rdVideo.getBoundingClientRect(), vw = rdVideo.videoWidth, vh = rdVideo.videoHeight;
-  if (!vw) return;
+  const v = rdView(), r = v.el.getBoundingClientRect(), vw = v.w, vh = v.h;
+  if (!vw || vw < 2) return;
   const k = Math.min(r.width / vw, r.height / vh);
   // quicker swipes go further (like a laptop trackpad)
   const speed = Math.hypot(dx, dy), gain = speed > 12 ? 1.9 : speed > 5 ? 1.3 : 1;
@@ -807,7 +918,7 @@ function zoomApply() {
   zoom.x = Math.min(0, Math.max(s.width * (1 - zoom.k), zoom.x));
   zoom.y = Math.min(0, Math.max(s.height * (1 - zoom.k), zoom.y));
   if (zoom.k < 1.02) Object.assign(zoom, { k: 1, x: 0, y: 0 });
-  rdVideo.style.transform = zoom.k === 1 ? '' : `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.k})`;
+  rdVideo.style.transform = rdCanvas.style.transform = zoom.k === 1 ? '' : `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.k})`;
   $('#rdZoom').hidden = zoom.k === 1;
   $('#rdZoom').textContent = `${zoom.k.toFixed(1)}× · reset`;
   placeDot();

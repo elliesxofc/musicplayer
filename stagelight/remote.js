@@ -121,6 +121,46 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     log(`remote display: the picture is made by ${soft ? 'the processor' : 'the graphics card'} (${String(info.name || 'unknown').slice(0, 80)})${soft ? ', so it is kept at 15 fps' : ''}`);
     if (soft !== cpu.soft) { cpu.soft = soft; streamChanged(stream); }
   });
+  /* ───────────── through the web address: pictures out, mouse and keyboard in ─────────────
+     Each message to the panel: 1 byte kind (1 picture, 2 a note as JSON, 0 still here),
+     4 bytes length, then the bytes. A slow phone gets the newest picture, not a queue. */
+  const relayOut = { seq: 0, buf: null, note: '', watchers: new Set() };
+  const packet = (kind, body = Buffer.alloc(0)) => { const h = Buffer.alloc(5); h[0] = kind; h.writeUInt32BE(body.length, 1); return Buffer.concat([h, body]); };
+  function relayPush(w) {
+    if (w.busy || !relayOut.buf || w.sent === relayOut.seq) return;
+    w.sent = relayOut.seq;
+    if (!w.res.write(packet(1, relayOut.buf))) w.busy = true;
+  }
+  function relaySay(msg) { for (const w of relayOut.watchers) w.res.write(packet(2, Buffer.from(JSON.stringify(msg)))); }
+  function relayClose(why) {
+    relaySay({ t: 'end', why });
+    for (const w of relayOut.watchers) w.res.end();
+    relayOut.watchers.clear(); relayOut.buf = null;
+  }
+  ipcMain.on('frame', (e, data) => {
+    if (!active || !active.relay || !capture || e.sender !== capture.webContents) return;
+    relayOut.buf = Buffer.from(data); relayOut.seq++;
+    for (const w of relayOut.watchers) relayPush(w);
+  });
+  setInterval(() => { for (const w of relayOut.watchers) if (!w.busy) w.res.write(packet(0)); }, 20_000).unref(); // keeps the web address from closing a quiet line
+  // the panel that started it (its login) watches; false if that's not this session
+  const relayAllowed = owner => !!(active && active.relay && active.owner === owner);
+  function relayWatch(res, owner) {
+    if (!relayAllowed(owner)) return false;
+    const w = { res, sent: 0, busy: false };
+    relayOut.watchers.add(w);
+    res.on('drain', () => { w.busy = false; relayPush(w); });
+    res.on('close', () => relayOut.watchers.delete(w));
+    if (relayOut.note) { res.write(packet(2, Buffer.from(JSON.stringify({ t: 'note', text: relayOut.note })))); relayOut.note = ''; }
+    relayPush(w);
+    return true;
+  }
+  function relayInput(owner, msg) {
+    if (!active || !active.relay || active.owner !== owner) return false;
+    handleInput(msg);
+    return true;
+  }
+
   ipcMain.on('bar-stop', () => end('stopped on the stream PC'));
   ipcMain.on('input', (e, msg) => {
     if (!capture || e.sender !== capture.webContents) return;
@@ -128,14 +168,16 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   });
 
   /* ───────────── start / end ───────────── */
-  async function start({ sdp, screenId, quality, from, ice = [] }) {
+  async function start({ sdp, screenId, quality, from, ice = [], relay = false, owner = '' }) {
     const s = getSettings();
     if (!s.view) throw new Error('the remote display is switched off in Stagelight on the stream PC');
-    if (typeof sdp !== 'string' || sdp.length > 100_000 || !/^v=0/.test(sdp)) throw new Error('bad request');
+    if (!relay && (typeof sdp !== 'string' || sdp.length > 100_000 || !/^v=0/.test(sdp))) throw new Error('bad request');
     const list = await screens();
     const scr = list.find(x => x.id === screenId) || list[0];
     if (!scr) throw new Error("couldn't find a screen to share");
-    if (active) end('someone else connected');
+    // the same panel switching (to the web address, another screen or picture): no goodbye needed
+    if (active && owner && active.owner === owner) { relayClose('switching'); active.quiet = true; end(''); }
+    else if (active) end('someone else connected');
     clearTimeout(closeTimer);
     const q = QUALITY[quality] || QUALITY.smooth;
     const guard = {};
@@ -147,25 +189,27 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     if (win.webContents.isLoading()) await new Promise(r => win.webContents.once('did-finish-load', r));
     const result = await new Promise(resolve => {
       waiting.set(id, resolve);
-      win.webContents.send('start', { id, sourceId: scr.id, offer: sdp, ice, ...q, limit });
+      win.webContents.send('start', { id, sourceId: scr.id, offer: sdp, ice, relay, ...q, limit });
       setTimeout(() => { if (waiting.has(id)) { waiting.delete(id); resolve({ error: 'the screen took too long to start' }); } }, 15_000);
     });
     if (result.error) throw new Error(result.error);
-    active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now(), q, guard, level: limit.level, bitrate: limit.bitrate, fps: limit.fps, scale: limit.scale };
+    active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now(), q, guard, level: limit.level, bitrate: limit.bitrate, fps: limit.fps, scale: limit.scale, relay, owner };
+    relayOut.buf = null; relayOut.note = relay && limit.note ? limit.note : '';
     onStarted();
     const what = active.control ? 'controlling' : 'watching';
-    log(`remote display: ${from} is ${what} this PC`);
+    log(`remote display: ${from} is ${what} this PC${relay ? ' (through the web address)' : ''}`);
     showBar(`${from} is ${what} this PC`);
     if (Notification.isSupported()) new Notification({ title: 'Stagelight: remote display on', body: `${from} is ${what} this PC through the panel.`, icon }).show();
     onChange();
-    return { sdp: result.sdp, control: active.control };
+    return { sdp: result.sdp, control: active.control, relay };
   }
 
   function end(why = '') {
     if (!active) return;
+    relayClose(why || 'ended on the stream PC');
     input.releaseAll();
     if (capture && !capture.isDestroyed()) capture.webContents.send('stop', why);
-    log(`remote display ended${why ? ` (${why})` : ''}`);
+    if (!active.quiet) log(`remote display ended${why ? ` (${why})` : ''}`);
     active = null;
     hideBar();
     onChange();
@@ -208,6 +252,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     const was = active.level, wasRate = active.bitrate;
     Object.assign(active, { level: limit.level, bitrate: limit.bitrate, fps: limit.fps, scale: limit.scale });
     // a note for the panel only when the reason changes (not for a quieter tweak, like the encoder found out)
+    if (active.relay && (limit.level !== was || (limit.level === 'capped' && limit.bitrate !== wasRate))) relaySay({ t: 'note', text: note(limit, was) });
     capture.webContents.send('limit', { ...limit, note: limit.level !== was || (limit.level === 'capped' && limit.bitrate !== wasRate) ? note(limit, was) : undefined });
   }
 
@@ -219,7 +264,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   }
 
   return {
-    start, end, streamChanged, cpuBusy,
+    start, end, streamChanged, cpuBusy, relayWatch, relayInput, relayAllowed,
     screens,
     status: () => ({ active: !!active, from: active ? active.from : '', control: !!(active && active.control) }),
     canControl: () => input.available(),

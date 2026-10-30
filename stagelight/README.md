@@ -122,6 +122,11 @@ Stagelight is made to stay out of OBS's way:
   85% or more for a few seconds, it drops to 10 fps and a smaller picture until the PC is under 65%
   again (the log says how busy the PC was and how much of it was Stagelight); the panel's preview
   pauses while the remote display is open; the screen sharing gets low priority as it starts
+- when a direct connection is blocked (a VPN, some mobile or work networks), the remote display
+  switches by itself after 12 s to a backup route through the panel's own connection (so through
+  the web address too): pictures of the screen (JPEG, up to 10 a second, only when something
+  changed), with mouse and keyboard sent back a few at a time. Slower than the direct video, but no
+  relay server or extra account is needed; the bar says "via web"
 - the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
   Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
 

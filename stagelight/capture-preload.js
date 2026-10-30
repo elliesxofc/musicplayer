@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('capture', {
   answer: (id, result) => ipcRenderer.send('answer', id, result),
   input: msg => ipcRenderer.send('input', msg),
   ended: why => ipcRenderer.send('ended', String(why || '')),
+  frame: buf => ipcRenderer.send('frame', new Uint8Array(buf)),
   encoder: info => ipcRenderer.send('encoder', { name: String(info && info.name || ''), hardware: !!(info && info.hardware) }),
 });

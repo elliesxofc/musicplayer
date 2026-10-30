@@ -163,7 +163,7 @@ h1, h2, h3 { margin: 0; }
 .rd-state { flex: 1; min-width: 90px; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rd-state.on { color: var(--ok); }
 .rd-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; outline: none; touch-action: none; user-select: none; -webkit-user-select: none; }
-.rd-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; transform-origin: 0 0; }
+.rd-stage video, .rd-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; transform-origin: 0 0; }
 .rd-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--amber); }
 .rd-stage.watch { touch-action: none; } /* pinch zooms the picture, not the page */
 .rd-keys { padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); background: var(--bg2); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }

@@ -7,7 +7,56 @@
 
 let pc = null, stream = null, channel = null;
 
+/* Through the web address instead (when a direct connection is blocked, like behind a VPN):
+   pictures of the screen (JPEG), only when something changed (and every 2 s anyway), at up to
+   10 a second, smaller and fewer when the PC is busy. Stagelight sends them on to the panel. */
+let relay = null; // { video, canvas, timer, last, lastSent }
+function stopRelay() {
+  if (!relay) return;
+  clearTimeout(relay.timer);
+  relay.video.srcObject = null;
+  relay = null;
+}
+function startRelay() {
+  const video = document.createElement('video');
+  video.muted = true; video.srcObject = stream; video.play().catch(() => {});
+  const canvas = new OffscreenCanvas(16, 16), ctx = canvas.getContext('2d', { alpha: false });
+  const tiny = new OffscreenCanvas(160, 90), tctx = tiny.getContext('2d', { willReadFrequently: true });
+  relay = { video, canvas, timer: null, prev: null, lastSent: 0 };
+  const me = relay;
+  const tick = async () => {
+    if (relay !== me) return;
+    const t0 = performance.now();
+    try {
+      if (video.readyState >= 2 && video.videoWidth) {
+        const sc = Math.max(1, (limit && limit.scale) || 1);
+        const w = Math.round(video.videoWidth / sc), h = Math.round(video.videoHeight / sc);
+        // how much has changed? a small copy of the screen says it cheaply: nothing (send one every
+        // 2 s anyway), a little (a blinking dot, the mouse pointer: 3 a second at most), or a lot
+        tctx.drawImage(video, 0, 0, 160, 90);
+        const px = tctx.getImageData(0, 0, 160, 90).data;
+        let changed = me.prev ? 0 : Infinity;
+        if (me.prev) for (let i = 0; i < px.length; i += 4) if (Math.abs(px[i] - me.prev[i]) + Math.abs(px[i + 1] - me.prev[i + 1]) + Math.abs(px[i + 2] - me.prev[i + 2]) > 24) changed++;
+        const since = Date.now() - me.lastSent;
+        if ((changed > 30) || (changed > 0 && since >= 330) || since > 2000) {
+          if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+          ctx.drawImage(video, 0, 0, w, h);
+          const busy = limit && (limit.level === 'hot' || limit.level === 'low');
+          const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: busy ? 0.45 : 0.62 });
+          if (relay !== me) return;
+          window.capture.frame(await blob.arrayBuffer());
+          me.prev = px; me.lastSent = Date.now();
+        }
+      }
+    } catch { /* a frame skipped */ }
+    const fps = Math.max(1, Math.min(10, (limit && limit.fps) || 10));
+    me.timer = setTimeout(tick, Math.max(30, 1000 / fps - (performance.now() - t0)));
+  };
+  tick();
+}
+
 function stop(why) {
+  stopRelay();
   // tell the panel first, so it doesn't wait for the connection to time out
   if (channel && channel.readyState === 'open') { try { channel.send(JSON.stringify({ t: 'end', why: why || 'ended on the stream PC' })); } catch { /* closing anyway */ } }
   channel = null;
@@ -47,6 +96,13 @@ window.capture.onStart(async job => {
       audio: false,
       video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: job.sourceId, maxWidth: job.width, maxHeight: job.height, maxFrameRate: job.fps } },
     });
+    if (job.relay) {
+      limit = job.limit || limit;
+      for (const t of stream.getVideoTracks()) t.contentHint = 'detail';
+      startRelay();
+      window.capture.answer(job.id, { ok: true });
+      return;
+    }
     // STUN only when the web address is on (to find a direct way between the two networks)
     pc = new RTCPeerConnection({ iceServers: (job.ice || []).map(u => ({ urls: u })) });
     for (const track of stream.getTracks()) {
@@ -99,6 +155,7 @@ window.capture.onStart(async job => {
 // ended on the stream PC (the bar's stop button, the tray, switched off): the channel needs a
 // moment to deliver the goodbye before the connection closes
 window.capture.onStop(why => {
+  stopRelay();
   const was = pc;
   if (channel && channel.readyState === 'open') { try { channel.send(JSON.stringify({ t: 'end', why })); } catch { /* fine */ } }
   channel = null;

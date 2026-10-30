@@ -16,7 +16,11 @@ const { createRemote } = require('./remote');
 
 // the remote display's video goes straight between the PCs: real addresses (not hidden ones)
 // so a phone on the same network or Tailscale finds this PC
-app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
+// (one list: a second disable-features would replace the first)
+// - WebRtcHideLocalIpsWithMdns: see above
+// - CalculateNativeWinOcclusion: Windows would otherwise treat the hidden screen-sharing window as
+//   covered and pause it, which can freeze the remote display (the web route reads its frames there)
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns,CalculateNativeWinOcclusion');
 
 const ROOT = __dirname;
 const ICON = path.join(ROOT, 'icons', 'icon-256.png');

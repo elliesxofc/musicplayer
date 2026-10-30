@@ -10,37 +10,69 @@ let pc = null, stream = null, channel = null;
 /* Through the web address instead (when a direct connection is blocked, like behind a VPN):
    pictures of the screen (JPEG), only when something changed (and every 2 s anyway), at up to
    10 a second, smaller and fewer when the PC is busy. Stagelight sends them on to the panel. */
-let relay = null; // { video, canvas, timer, last, lastSent }
+let relay = null; // { source, canvas, timer, prev, lastSent, stop }
 function stopRelay() {
   if (!relay) return;
   clearTimeout(relay.timer);
-  relay.video.srcObject = null;
+  relay.stop();
   relay = null;
 }
-function startRelay() {
+/* Where the pictures come from: the screen capture itself, frame by frame (keeps working when
+   Windows thinks the hidden window is covered, which pauses a video player); a hidden video
+   player only where that isn't available. */
+function frameSource() {
+  const track = stream.getVideoTracks()[0];
+  if (typeof MediaStreamTrackProcessor === 'function' && track) {
+    const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+    const src = { latest: null, done: false };
+    (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done || src.done) { if (value) value.close(); break; }
+          if (src.latest) src.latest.close(); // only the newest frame is kept
+          src.latest = value;
+        }
+      } catch { /* the capture ended */ }
+    })();
+    return {
+      image: () => src.latest,
+      size: () => (src.latest ? [src.latest.displayWidth, src.latest.displayHeight] : [0, 0]),
+      stop: () => { src.done = true; reader.cancel().catch(() => {}); if (src.latest) { src.latest.close(); src.latest = null; } },
+    };
+  }
   const video = document.createElement('video');
   video.muted = true; video.srcObject = stream; video.play().catch(() => {});
+  return {
+    image: () => (video.readyState >= 2 ? video : null),
+    size: () => [video.videoWidth, video.videoHeight],
+    stop: () => { video.srcObject = null; },
+  };
+}
+function startRelay() {
+  const source = frameSource();
   const canvas = new OffscreenCanvas(16, 16), ctx = canvas.getContext('2d', { alpha: false });
   const tiny = new OffscreenCanvas(160, 90), tctx = tiny.getContext('2d', { willReadFrequently: true });
-  relay = { video, canvas, timer: null, prev: null, lastSent: 0 };
+  relay = { source, canvas, timer: null, prev: null, lastSent: 0, stop: source.stop };
   const me = relay;
   const tick = async () => {
     if (relay !== me) return;
     const t0 = performance.now();
     try {
-      if (video.readyState >= 2 && video.videoWidth) {
+      const img = source.image(), [vw, vh] = source.size();
+      if (img && vw) {
         const sc = Math.max(1, (limit && limit.scale) || 1);
-        const w = Math.round(video.videoWidth / sc), h = Math.round(video.videoHeight / sc);
+        const w = Math.round(vw / sc), h = Math.round(vh / sc);
         // how much has changed? a small copy of the screen says it cheaply: nothing (send one every
         // 2 s anyway), a little (a blinking dot, the mouse pointer: 3 a second at most), or a lot
-        tctx.drawImage(video, 0, 0, 160, 90);
+        tctx.drawImage(img, 0, 0, 160, 90);
         const px = tctx.getImageData(0, 0, 160, 90).data;
         let changed = me.prev ? 0 : Infinity;
         if (me.prev) for (let i = 0; i < px.length; i += 4) if (Math.abs(px[i] - me.prev[i]) + Math.abs(px[i + 1] - me.prev[i + 1]) + Math.abs(px[i + 2] - me.prev[i + 2]) > 24) changed++;
         const since = Date.now() - me.lastSent;
         if ((changed > 30) || (changed > 0 && since >= 330) || since > 2000) {
           if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-          ctx.drawImage(video, 0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
           const busy = limit && (limit.level === 'hot' || limit.level === 'low');
           const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: busy ? 0.45 : 0.62 });
           if (relay !== me) return;

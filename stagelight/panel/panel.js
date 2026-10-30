@@ -696,7 +696,7 @@ async function relayConnect() {
         else if (kind === 2) {
           let msg; try { msg = JSON.parse(new TextDecoder().decode(body)); } catch { continue; }
           if (msg.t === 'end' && rd && rd.gen === gen) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); return; }
-          if (msg.t === 'note' && typeof msg.text === 'string') toast(msg.text.slice(0, 120), 4000);
+          if (msg.t === 'note' && typeof msg.text === 'string') toast(msg.text.slice(0, 240), msg.text.length > 100 ? 8000 : 4000);
         }
       }
     }
@@ -728,7 +728,7 @@ async function rdConnect() {
   dc.onmessage = m => {
     let msg; try { msg = JSON.parse(m.data); } catch { return; }
     if (msg.t === 'end' && rd && rd.pc === pc) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); }
-    if (msg.t === 'note' && rd && rd.pc === pc && typeof msg.text === 'string') toast(msg.text.slice(0, 120), 4000);
+    if (msg.t === 'note' && rd && rd.pc === pc && typeof msg.text === 'string') toast(msg.text.slice(0, 240), msg.text.length > 100 ? 8000 : 4000);
   };
   pc.addTransceiver('video', { direction: 'recvonly' });
   pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };

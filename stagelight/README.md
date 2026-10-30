@@ -127,6 +127,10 @@ Stagelight is made to stay out of OBS's way:
   the web address too): pictures of the screen (JPEG, up to 10 a second, only when something
   changed), with mouse and keyboard sent back a few at a time. Slower than the direct video, but no
   relay server or extra account is needed; the bar says "via web"
+- Windows drops clicks and keys sent into a program that runs as administrator (Task Manager
+  always does, OBS often does) unless Stagelight does too: the remote display notices it on a
+  click, says so in the panel and the log. Fix: run Stagelight as administrator (shortcut →
+  Properties → Compatibility), or run that program normally
 - the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
   Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
 

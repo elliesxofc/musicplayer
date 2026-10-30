@@ -66,7 +66,16 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   let capture = null, bar = null, active = null, nextJob = 1, closeTimer = null, stream = null;
   const cpu = { hot: false, soft: false }; // the PC is busy / the picture is made by the processor
   const waiting = new Map(); // job id → resolve
-  const input = createInput({ log });
+  // clicks and keys into a program run as administrator are dropped by Windows: say so (once a while)
+  let blockedSaid = { name: '', at: 0 };
+  const input = createInput({ log, onBlocked: name => {
+    if (!active || (blockedSaid.name === name && Date.now() - blockedSaid.at < 20_000)) return;
+    blockedSaid = { name, at: Date.now() };
+    const text = `Windows blocks clicks and keys into ${name} (it runs as administrator). run Stagelight as administrator on the stream PC, or ${name} normally.`;
+    log(`remote display: clicks into ${name} are blocked (it runs as administrator; Stagelight doesn't)`);
+    if (active.relay) relaySay({ t: 'note', text });
+    else if (capture && !capture.isDestroyed()) capture.webContents.send('note', text);
+  } });
 
   /* ───────────── the screens on this PC ───────────── */
   async function screens() {

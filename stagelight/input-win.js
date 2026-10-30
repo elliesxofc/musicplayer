@@ -34,6 +34,41 @@ public static class SL {
     var i = new INPUT(); i.type = 1; i.u.ki.wVk = vk; i.u.ki.dwFlags = (up ? 2u : 0u) | (ext ? 1u : 0u);
     SendInput(1, new[] { i }, Size);
   }
+  // Windows ignores clicks and keys sent into a program that runs as administrator, unless the
+  // sender does too: find out whether that's the case for the window under the pointer (or in front)
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+  [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  [DllImport("advapi32.dll")] static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr tok);
+  [DllImport("advapi32.dll")] static extern bool GetTokenInformation(IntPtr tok, int cls, out uint info, int len, out int ret);
+  // 1: runs as administrator (or can't even be looked at, which comes to the same), 0: doesn't
+  static int Elevated(uint pid) {
+    IntPtr p = OpenProcess(0x1000, false, pid);
+    if (p == IntPtr.Zero) return 1;
+    try {
+      IntPtr t;
+      if (!OpenProcessToken(p, 8, out t)) return 1;
+      uint e; int r;
+      bool ok = GetTokenInformation(t, 20, out e, 4, out r);
+      CloseHandle(t);
+      return ok && e == 0 ? 0 : 1;
+    } finally { CloseHandle(p); }
+  }
+  static int self = -1;
+  public static string Blocked(bool front) {
+    if (self < 0) self = Elevated((uint)System.Diagnostics.Process.GetCurrentProcess().Id);
+    if (self == 1) return null;
+    POINT pt; GetCursorPos(out pt);
+    IntPtr w = front ? GetForegroundWindow() : WindowFromPoint(pt);
+    if (w == IntPtr.Zero) return null;
+    uint pid; GetWindowThreadProcessId(w, out pid);
+    if (pid == 0 || Elevated(pid) == 0) return null;
+    try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { return "a program"; }
+  }
   public static void Text(string s) {
     foreach (char c in s) {
       var d = new INPUT(); d.type = 1; d.u.ki.wScan = c; d.u.ki.dwFlags = 4;
@@ -52,10 +87,10 @@ while ($true) {
   try {
     switch ($p[0]) {
       'M' { [SL]::SetCursorPos([int]$p[1], [int]$p[2]) | Out-Null }
-      'B' { [SL]::Mouse([uint32]$p[1], 0) }
+      'B' { [SL]::Mouse([uint32]$p[1], 0); if ($p.Length -gt 2) { $b = [SL]::Blocked($false); if ($b) { [Console]::Out.WriteLine('blocked ' + $b) } } }
       'W' { [SL]::Mouse(0x0800, [int]$p[1]) }
       'H' { [SL]::Mouse(0x1000, [int]$p[1]) }
-      'K' { [SL]::Key([uint16]$p[1], $p[2] -eq '1', $p[3] -eq '1') }
+      'K' { [SL]::Key([uint16]$p[1], $p[2] -eq '1', $p[3] -eq '1'); if ($p[2] -eq '0') { $b = [SL]::Blocked($true); if ($b) { [Console]::Out.WriteLine('blocked ' + $b) } } }
       'T' { [SL]::Text([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($p[1]))) }
     }
   } catch { [Console]::Out.WriteLine('error ' + $_.Exception.Message) }
@@ -86,7 +121,7 @@ const BUTTONS = { 0: [0x0002, 0x0004], 1: [0x0020, 0x0040], 2: [0x0008, 0x0010] 
 
 const available = () => process.platform === 'win32' || !!process.env.STAGELIGHT_INPUT_CMD;
 
-function createInput({ log = () => {} } = {}) {
+function createInput({ log = () => {}, onBlocked = () => {} } = {}) {
   let child = null;
   const held = { keys: new Set(), buttons: new Set() };
 
@@ -97,7 +132,12 @@ function createInput({ log = () => {} } = {}) {
       ? spawn(process.execPath, [process.env.STAGELIGHT_INPUT_CMD], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] })
       : spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
         Buffer.from(SCRIPT, 'utf16le').toString('base64')], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
-    child.stdout.on('data', d => { const s = String(d); if (/error/.test(s)) log(`mouse/keyboard: ${s.trim().slice(0, 200)}`); });
+    child.stdout.on('data', d => {
+      for (const line of String(d).split(/\r?\n/)) {
+        if (/^blocked /.test(line)) onBlocked(line.slice(8).trim().slice(0, 60));
+        else if (/error/.test(line)) log(`mouse/keyboard: ${line.trim().slice(0, 200)}`);
+      }
+    });
     // below normal priority, like the rest of Stagelight: OBS comes first
     try { require('node:os').setPriority(child.pid, require('node:os').constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* fine */ }
     child.on('exit', () => { child = null; });
@@ -113,7 +153,7 @@ function createInput({ log = () => {} } = {}) {
       const f = BUTTONS[b];
       if (!f) return;
       if (down) held.buttons.add(b); else held.buttons.delete(b);
-      send(`B ${f[down ? 0 : 1]}`);
+      send(`B ${f[down ? 0 : 1]}${down ? ' ?' : ''}`); // on a press, check the window can take it
     },
     wheel(dy, dx) {
       // browsers scroll down with +, Windows with −; 120 is one notch

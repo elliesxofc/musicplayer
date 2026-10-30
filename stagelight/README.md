@@ -117,6 +117,11 @@ Stagelight is made to stay out of OBS's way:
   around, "reset" in the bar to zoom back out (ctrl + wheel on a laptop); two fingers sliding
   together still scroll the PC, and in trackpad mode the view follows the pointer. The bar shows
   the stream PC's name once connected
+- the remote display watches the stream PC's processor too: when the picture is made by the
+  processor (no graphics card encoder), it's kept at 15 fps and about 720p; when the whole PC is at
+  85% or more for a few seconds, it drops to 10 fps and a smaller picture until the PC is under 65%
+  again (the log says how busy the PC was and how much of it was Stagelight); the panel's preview
+  pauses while the remote display is open; the screen sharing gets low priority as it starts
 - the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
   Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
 

@@ -29,11 +29,13 @@ function applyLimit(next) {
   if (!pc || !limit) return;
   for (const sender of pc.getSenders()) {
     const p = sender.getParameters();
-    p.encodings = (p.encodings && p.encodings.length ? p.encodings : [{}]).map(e => ({ ...e, maxBitrate: limit.bitrate, maxFramerate: limit.fps }));
+    p.encodings = (p.encodings && p.encodings.length ? p.encodings : [{}]).map(e => ({ ...e, maxBitrate: limit.bitrate, maxFramerate: limit.fps, scaleResolutionDownBy: Math.max(1, limit.scale || 1) }));
     // while live, fewer frames before blurry text; otherwise smooth first
     p.degradationPreference = limit.saving ? 'maintain-resolution' : 'maintain-framerate';
     sender.setParameters(p).catch(() => {});
   }
+  // fewer frames taken off the screen too, not just sent (taking them costs the processor)
+  if (stream) for (const t of stream.getVideoTracks()) t.applyConstraints({ frameRate: { max: limit.fps } }).catch(() => {});
   if (limit.note && channel && channel.readyState === 'open') { try { channel.send(JSON.stringify({ t: 'note', text: limit.note })); } catch { /* fine */ } }
 }
 window.capture.onLimit(next => applyLimit(next));
@@ -56,6 +58,16 @@ window.capture.onStart(async job => {
       e.channel.onopen = () => { if (limit && limit.note) try { e.channel.send(JSON.stringify({ t: 'note', text: limit.note })); } catch { /* fine */ } };
       e.channel.onmessage = m => { try { window.capture.input(JSON.parse(m.data)); } catch { /* not JSON */ } };
     };
+    // a few seconds in: which encoder makes the picture (the graphics card's, or the processor)
+    const thisPc = pc;
+    setTimeout(async () => {
+      if (pc !== thisPc) return;
+      try {
+        let out = null;
+        (await pc.getStats()).forEach(r => { if (r.type === 'outbound-rtp' && r.kind === 'video') out = r; });
+        if (out && out.encoderImplementation) window.capture.encoder({ name: out.encoderImplementation, hardware: out.powerEfficientEncoder === true || /MediaFoundation|NVENC|QSV|AMF|VideoToolbox|Vaapi|Accelerator/i.test(out.encoderImplementation) });
+      } catch { /* no stats */ }
+    }, 5000);
     pc.onconnectionstatechange = () => {
       if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
         // a short drop can come back; give it a few seconds

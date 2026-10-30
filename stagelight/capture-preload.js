@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld('capture', {
   answer: (id, result) => ipcRenderer.send('answer', id, result),
   input: msg => ipcRenderer.send('input', msg),
   ended: why => ipcRenderer.send('ended', String(why || '')),
+  encoder: info => ipcRenderer.send('encoder', { name: String(info && info.name || ''), hardware: !!(info && info.hardware) }),
 });

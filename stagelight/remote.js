@@ -24,9 +24,22 @@ const LIVE = { bitrate: 1_200_000, fps: 15 };
 const STRUGGLING = { bitrate: 400_000, fps: 8 };
 const CALM_MS = 60_000;
 
+/* The stream PC's processor comes first too. When the picture is made by the processor (no
+   graphics card encoder), it's kept at 15 fps and at most about 720p; when the PC as a whole is
+   busy (85% or more for a few seconds), it drops to 10 fps and a smaller picture until the PC has
+   calmed down. */
+const SOFT = { fps: 15, height: 720 };
+const HOT = { fps: 10, height: 540, bitrate: 1_000_000 };
+
 // the most upload the stream PC lets the picture use (set in Stagelight, 0 = no limit), on top
-function limitFor(q, stream, guard, now = Date.now(), max = 0) {
+function limitFor(q, stream, guard, now = Date.now(), max = 0, cpu = {}) {
   const l = liveLimit(q, stream, guard, now);
+  l.scale = 1;
+  if (cpu.soft) { l.fps = Math.min(l.fps, SOFT.fps); l.scale = Math.max(1, q.height / SOFT.height); }
+  if (cpu.hot) {
+    l.fps = Math.min(l.fps, HOT.fps); l.scale = Math.max(l.scale, q.height / HOT.height); l.bitrate = Math.min(l.bitrate, HOT.bitrate);
+    l.saving = true; l.level = 'hot';
+  }
   if (max > 0 && max < l.bitrate) { l.bitrate = max; l.saving = true; if (l.level === 'full') l.level = 'capped'; }
   return l;
 }
@@ -40,16 +53,18 @@ function liveLimit(q, stream, guard, now) {
 }
 const mbps = b => `${Math.round(b / 100_000) / 10} Mbps`;
 const NOTES = {
-  full: (l, was) => (was === 'capped' ? 'no upload limit any more: full picture again' : 'the stream ended: full picture again'),
+  full: (l, was) => (was === 'capped' ? 'no upload limit any more: full picture again' : was === 'hot' ? 'the stream PC has calmed down: full picture again' : 'the stream ended: full picture again'),
   capped: l => `the stream PC lets the picture use up to ${mbps(l.bitrate)} of its upload`,
+  hot: 'the stream PC is busy: the picture is lowered so OBS keeps its processor',
   live: "you're live: the picture is kept light so the stream keeps its upload",
   low: 'the stream is struggling: the picture is lowered to give it room',
 };
 
 const note = (l, was) => (typeof NOTES[l.level] === 'function' ? NOTES[l.level](l, was) : NOTES[l.level]);
 
-function createRemote({ root, icon, getSettings, log = () => {}, onChange = () => {} }) {
+function createRemote({ root, icon, getSettings, log = () => {}, onChange = () => {}, onStarted = () => {} }) {
   let capture = null, bar = null, active = null, nextJob = 1, closeTimer = null, stream = null;
+  const cpu = { hot: false, soft: false }; // the PC is busy / the picture is made by the processor
   const waiting = new Map(); // job id → resolve
   const input = createInput({ log });
 
@@ -99,6 +114,13 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
 
   ipcMain.on('answer', (_e, id, result) => { const done = waiting.get(id); if (done) { waiting.delete(id); done(result); } });
   ipcMain.on('ended', (_e, why) => { if (active) end(why || 'the connection ended'); });
+  // which encoder makes the picture: the graphics card's, or the processor (software)
+  ipcMain.on('encoder', (e, info) => {
+    if (!active || !capture || e.sender !== capture.webContents || !info) return;
+    const soft = !info.hardware;
+    log(`remote display: the picture is made by ${soft ? 'the processor' : 'the graphics card'} (${String(info.name || 'unknown').slice(0, 80)})${soft ? ', so it is kept at 15 fps' : ''}`);
+    if (soft !== cpu.soft) { cpu.soft = soft; streamChanged(stream); }
+  });
   ipcMain.on('bar-stop', () => end('stopped on the stream PC'));
   ipcMain.on('input', (e, msg) => {
     if (!capture || e.sender !== capture.webContents) return;
@@ -117,7 +139,8 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     clearTimeout(closeTimer);
     const q = QUALITY[quality] || QUALITY.smooth;
     const guard = {};
-    const limit = limitFor(q, stream, guard, Date.now(), s.max);
+    cpu.soft = false; // found out again for each session
+    const limit = limitFor(q, stream, guard, Date.now(), s.max, cpu);
     if (limit.level !== 'full') limit.note = note(limit);
     const id = nextJob++;
     const win = captureWindow();
@@ -128,7 +151,8 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
       setTimeout(() => { if (waiting.has(id)) { waiting.delete(id); resolve({ error: 'the screen took too long to start' }); } }, 15_000);
     });
     if (result.error) throw new Error(result.error);
-    active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now(), q, guard, level: limit.level, bitrate: limit.bitrate };
+    active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now(), q, guard, level: limit.level, bitrate: limit.bitrate, fps: limit.fps, scale: limit.scale };
+    onStarted();
     const what = active.control ? 'controlling' : 'watching';
     log(`remote display: ${from} is ${what} this PC`);
     showBar(`${from} is ${what} this PC`);
@@ -178,16 +202,24 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   function streamChanged(next) {
     stream = next;
     if (!active || !capture || capture.isDestroyed()) return;
-    const limit = limitFor(active.q, stream, active.guard, Date.now(), getSettings().max);
-    if (limit.level === active.level && limit.bitrate === active.bitrate) return;
+    const limit = limitFor(active.q, stream, active.guard, Date.now(), getSettings().max, cpu);
+    if (limit.level === active.level && limit.bitrate === active.bitrate && limit.fps === active.fps && limit.scale === active.scale) return;
     if (limit.level === 'low' && active.level !== 'low') log('remote display: the stream is struggling, the picture is lowered');
-    const was = active.level;
-    active.level = limit.level; active.bitrate = limit.bitrate;
-    capture.webContents.send('limit', { ...limit, note: note(limit, was) });
+    const was = active.level, wasRate = active.bitrate;
+    Object.assign(active, { level: limit.level, bitrate: limit.bitrate, fps: limit.fps, scale: limit.scale });
+    // a note for the panel only when the reason changes (not for a quieter tweak, like the encoder found out)
+    capture.webContents.send('limit', { ...limit, note: limit.level !== was || (limit.level === 'capped' && limit.bitrate !== wasRate) ? note(limit, was) : undefined });
+  }
+
+  // the PC as a whole is busy (or not any more)
+  function cpuBusy(hot) {
+    if (hot === cpu.hot) return;
+    cpu.hot = hot;
+    if (active) streamChanged(stream);
   }
 
   return {
-    start, end, streamChanged,
+    start, end, streamChanged, cpuBusy,
     screens,
     status: () => ({ active: !!active, from: active ? active.from : '', control: !!(active && active.control) }),
     canControl: () => input.available(),

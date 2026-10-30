@@ -79,6 +79,7 @@ const remoteSettings = () => {
 };
 const remote = createRemote({
   root: ROOT, icon: ICON, getSettings: remoteSettings, log,
+  onStarted: () => { setTimeout(lowerPriority, 300); setTimeout(lowerPriority, 3000); },
   onChange: () => { updateBusy(); sendWin('status', status()); refreshTray(); },
 });
 remote.settings = remoteSettings;
@@ -113,6 +114,29 @@ const server = createServer({ obs, remote, mediaDir: mediaDir(), filesOn: () => 
 function lowerPriority() {
   const below = os.constants.priority.PRIORITY_BELOW_NORMAL;
   for (const m of app.getAppMetrics()) { try { os.setPriority(m.pid, below); } catch { /* gone, or not allowed */ } }
+}
+
+/* While the remote display runs: how busy is the whole PC? 85% or more for 6 seconds, and the
+   picture gets lighter (OBS comes first); under 65% for 20 seconds, and it goes back. */
+let cpuLast = null, cpuHigh = 0, cpuLow = 0, cpuHot = false;
+function cpuNow() {
+  const t = os.cpus().reduce((a, c) => { const x = c.times; a.idle += x.idle; a.all += x.user + x.nice + x.sys + x.idle + x.irq; return a; }, { idle: 0, all: 0 });
+  const was = cpuLast; cpuLast = t;
+  return was && t.all > was.all ? 100 * (1 - (t.idle - was.idle) / (t.all - was.all)) : null;
+}
+function watchCpu() {
+  if (!remote.status().active) { cpuLast = null; cpuHigh = cpuLow = 0; if (cpuHot) { cpuHot = false; remote.cpuBusy(false); } return; }
+  const pct = cpuNow();
+  if (pct == null) return;
+  if (pct >= 85) { cpuHigh++; cpuLow = 0; } else if (pct < 65) { cpuLow++; cpuHigh = 0; } else { cpuHigh = 0; cpuLow = 0; }
+  if (!cpuHot && cpuHigh >= 3) {
+    cpuHot = true; remote.cpuBusy(true);
+    const own = app.getAppMetrics().reduce((a, m) => a + m.cpu.percentCPUUsage, 0) / os.cpus().length;
+    log(`the PC is at ${Math.round(pct)}% (Stagelight ${Math.round(own)}% of it): the remote display's picture is lowered`);
+  } else if (cpuHot && cpuLow >= 10) {
+    cpuHot = false; remote.cpuBusy(false);
+    log('the PC has calmed down: the remote display\'s picture is back');
+  }
 }
 
 function status() {
@@ -182,6 +206,7 @@ app.whenReady().then(async () => {
   await startServer();
   lowerPriority();
   setInterval(lowerPriority, 30_000).unref(); // new helpers (screen sharing) get it too
+  setInterval(watchCpu, 2000).unref();
   if (readConfig().obs) obs.start(obsSettings());
   else log('add OBS\'s WebSocket details to connect');
 });

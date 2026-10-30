@@ -313,7 +313,8 @@ $('#goScene').onclick = () => { const name = stageScene(); act({ type: 'scene', 
 async function previewLoop() {
   let wait = 1000;
   try {
-    if ($('#previewOn').checked && !$('#panelView').hidden && document.visibilityState === 'visible' && st && st.connected) {
+    // (not while the remote display covers it: each picture costs OBS a little)
+    if ($('#previewOn').checked && !$('#panelView').hidden && !rd && document.visibilityState === 'visible' && st && st.connected) {
       // asks "has it changed?": an unchanged picture isn't sent again
       const r = await fetch(offStream() ? `/api/preview?scene=${encodeURIComponent(stageScene())}` : '/api/preview', { credentials: 'same-origin', cache: 'no-cache' });
       const tag = r.headers.get('ETag');

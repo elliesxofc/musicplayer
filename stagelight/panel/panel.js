@@ -1097,13 +1097,24 @@ rdStage.addEventListener('keyup', e => { if (!rd || !rd.control) return; e.preve
 rdStage.addEventListener('blur', () => { /* let go of keys the browser won't tell us about */ for (const c of ['ShiftLeft', 'ControlLeft', 'AltLeft', 'MetaLeft']) rdSend({ t: 'k', code: c, d: false }); });
 
 // phones: a text box, held-down ctrl / alt / shift / win, and the keys phones don't have
+/* ctrl, alt, shift and win: one tap holds it for the next key (win + r, ctrl + s, …); a second
+   tap, with no key in between, presses it on its own (win alone opens the Start menu) */
 const mods = new Set();
+const MOD_NAMES = { ControlLeft: 'ctrl', AltLeft: 'alt', ShiftLeft: 'shift', MetaLeft: 'win' };
 $('#rdMods').onclick = e => {
   const b = e.target.closest('[data-mod]');
   if (!b) return;
   const m = b.dataset.mod;
-  if (mods.has(m)) mods.delete(m); else mods.add(m);
-  b.setAttribute('aria-pressed', String(mods.has(m)));
+  if (mods.has(m)) {
+    // tapped again: the key on its own (with any others still held, like ctrl + shift)
+    mods.delete(m);
+    pressWithMods(m);
+    toast(m === 'MetaLeft' ? 'win pressed (Start menu)' : `${MOD_NAMES[m] || m} pressed`);
+    return;
+  }
+  mods.add(m);
+  b.setAttribute('aria-pressed', 'true');
+  toast(`${MOD_NAMES[m] || m} held: tap a key for a shortcut${m === 'MetaLeft' ? ' (win + r, win + e…)' : ''}, or tap ${MOD_NAMES[m] || m} again to press it on its own`, 3500);
 };
 function pressWithMods(code) {
   for (const m of mods) rdSend({ t: 'k', code: m, d: true });

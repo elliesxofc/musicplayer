@@ -133,6 +133,8 @@ Stagelight is made to stay out of OBS's way:
   Properties → Compatibility), or run that program normally
 - the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
   Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
+- the stream PC's screen doesn't go to sleep while someone is connected (a sleeping screen isn't
+  drawn, so the remote display would keep showing the last picture)
 
 ## Safety
 

@@ -6,7 +6,7 @@
    switch. While someone is connected, a small bar shows at the top of the screen (with a
    button to stop it), and Windows shows a notification. One person at a time. */
 
-const { BrowserWindow, desktopCapturer, screen, Notification, ipcMain, session } = require('electron');
+const { BrowserWindow, desktopCapturer, screen, Notification, ipcMain, session, powerSaveBlocker } = require('electron');
 const path = require('node:path');
 const { createInput } = require('./input-win');
 
@@ -64,6 +64,13 @@ const note = (l, was) => (typeof NOTES[l.level] === 'function' ? NOTES[l.level](
 
 function createRemote({ root, icon, getSettings, log = () => {}, onChange = () => {}, onStarted = () => {} }) {
   let capture = null, bar = null, active = null, nextJob = 1, closeTimer = null, stream = null;
+  // the screen stays on while someone is connected: a display that went to sleep isn't drawn any
+  // more, so the remote display would keep showing the last picture from before it slept
+  let awake = null;
+  const keepAwake = on => {
+    if (on && awake === null) awake = powerSaveBlocker.start('prevent-display-sleep');
+    else if (!on && awake !== null) { powerSaveBlocker.stop(awake); awake = null; }
+  };
   const cpu = { hot: false, soft: false }; // the PC is busy / the picture is made by the processor
   const waiting = new Map(); // job id → resolve
   // clicks and keys into a program run as administrator are dropped by Windows: say so (once a while)
@@ -204,6 +211,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     if (result.error) throw new Error(result.error);
     active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now(), q, guard, level: limit.level, bitrate: limit.bitrate, fps: limit.fps, scale: limit.scale, relay, owner };
     relayOut.buf = null; relayOut.note = relay && limit.note ? limit.note : '';
+    keepAwake(true);
     onStarted();
     const what = active.control ? 'controlling' : 'watching';
     log(`remote display: ${from} is ${what} this PC${relay ? ' (through the web address)' : ''}`);
@@ -220,6 +228,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     if (capture && !capture.isDestroyed()) capture.webContents.send('stop', why);
     if (!active.quiet) log(`remote display ended${why ? ` (${why})` : ''}`);
     active = null;
+    keepAwake(false);
     hideBar();
     onChange();
     // the hidden screen-sharing window goes too (a minute later, in case of a reconnect)

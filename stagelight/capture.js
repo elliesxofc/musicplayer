@@ -6,6 +6,7 @@
    program, which decides whether they're allowed. */
 
 let pc = null, stream = null, channel = null;
+let session = 0; // which start this is (a stop meant for an earlier one leaves a newer one alone)
 
 /* Through the web address instead (when a direct connection is blocked, like behind a VPN):
    pictures of the screen (JPEG), only when something changed (and every 2 s anyway), at up to
@@ -124,6 +125,7 @@ window.capture.onLimit(next => applyLimit(next));
 window.capture.onNote(text => { if (channel && channel.readyState === 'open') try { channel.send(JSON.stringify({ t: 'note', text })); } catch { /* fine */ } });
 
 window.capture.onStart(async job => {
+  session++;
   stop();
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -190,8 +192,9 @@ window.capture.onStart(async job => {
 // moment to deliver the goodbye before the connection closes
 window.capture.onStop(why => {
   stopRelay();
-  const was = pc;
+  const was = session;
   if (channel && channel.readyState === 'open') { try { channel.send(JSON.stringify({ t: 'end', why })); } catch { /* fine */ } }
   channel = null;
-  setTimeout(() => { if (pc === was) stop(); }, 300); // only this connection, not a new one started meanwhile
+  // only this session, not a new one started meanwhile (like switching the picture's quality)
+  setTimeout(() => { if (session === was) stop(); }, 300);
 });

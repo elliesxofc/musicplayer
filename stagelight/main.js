@@ -254,7 +254,11 @@ app.whenReady().then(async () => {
   if (elevated) admin.updateService(app, serviceWhere()).then(done => { if (done) log('service updated'); });
   Menu.setApplicationMenu(null);
   tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 32, height: 32 }));
-  tray.on('click', showWindow);
+  // the tray icon opens the window, and clicking it again hides it (Stagelight keeps running)
+  tray.on('click', () => {
+    if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) win.close();
+    else showWindow();
+  });
   refreshTray();
   showWindow();
   await startServer();

@@ -11,6 +11,7 @@
    It stops by itself when Stagelight closes (its input ends). */
 
 const { spawn } = require('node:child_process');
+const net = require('node:net');
 
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -136,31 +137,50 @@ const BUTTONS = { 0: [0x0002, 0x0004], 1: [0x0020, 0x0040], 2: [0x0008, 0x0010] 
 
 const available = () => process.platform === 'win32' || !!process.env.STAGELIGHT_INPUT_CMD;
 
-function createInput({ log = () => {}, onBlocked = () => {}, onClicked = () => {}, onFailed = () => {} } = {}) {
-  let child = null;
+/* Stagelight's service (service/StagelightService.cs), when it's installed: it runs as SYSTEM, so
+   clicks and keys also reach programs that run as administrator, Windows' "do you want to allow"
+   prompts and the lock screen. Only a Stagelight running as administrator may use it; otherwise
+   (or when it isn't installed) the PowerShell helper above does the work. Same commands, plus
+   D (which screen takes input), S (a picture of it) and sas (ctrl + alt + del). */
+const SERVICE_PIPE = process.env.STAGELIGHT_SERVICE_PIPE || (process.platform === 'win32' ? '\\\\.\\pipe\\stagelight-service' : '');
+
+function createInput({ log = () => {}, onBlocked = () => {}, onClicked = () => {}, onFailed = () => {}, onDesk = () => {}, onShot = () => {} } = {}) {
+  let child = null;      // the PowerShell helper
+  let service = null;    // the connection to the service
+  let connecting = null; // trying the service first: commands wait meanwhile
+  const waiting = [];
   const held = { keys: new Set(), buttons: new Set() };
   // the helper not starting (PowerShell blocked, say by antivirus) would otherwise drop every click
   // and key without a word: say why, and stop trying after a few failed starts in a row
   let fails = 0, broken = '';
 
-  function ensure() {
+  // what the helper or the service says back, one line at a time
+  function reader() {
+    let rest = '';
+    return d => {
+      rest += String(d);
+      const lines = rest.split(/\r?\n/); rest = lines.pop();
+      for (const line of lines) {
+        if (line === 'ready') { fails = 0; }
+        else if (/^blocked /.test(line)) onBlocked(line.slice(8).trim().slice(0, 60));
+        else if (/^clicked/.test(line)) onClicked(line.slice(8).trim().slice(0, 60));
+        else if (/^desk /.test(line)) onDesk(line.slice(5).trim().slice(0, 60));
+        else if (/^shot /.test(line)) onShot(line.slice(5).trim());
+        else if (/error/.test(line)) log(`mouse/keyboard: ${line.trim().slice(0, 200)}`);
+      }
+    };
+  }
+
+  function startHelper() {
     if (child || broken) return child;
     // tests swap PowerShell for a stand-in that writes the commands down
     const c = child = process.env.STAGELIGHT_INPUT_CMD
       ? spawn(process.execPath, [process.env.STAGELIGHT_INPUT_CMD], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] })
       : spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
         Buffer.from(SCRIPT, 'utf16le').toString('base64')], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-    let ready = false, rest = '', err = '';
-    c.stdout.on('data', d => {
-      rest += String(d);
-      const lines = rest.split(/\r?\n/); rest = lines.pop();
-      for (const line of lines) {
-        if (line === 'ready') { ready = true; fails = 0; }
-        else if (/^blocked /.test(line)) onBlocked(line.slice(8).trim().slice(0, 60));
-        else if (/^clicked/.test(line)) onClicked(line.slice(8).trim().slice(0, 60));
-        else if (/error/.test(line)) log(`mouse/keyboard: ${line.trim().slice(0, 200)}`);
-      }
-    });
+    let ready = false, err = '';
+    const read = reader();
+    c.stdout.on('data', d => { if (/(^|\n)ready/.test(String(d))) ready = true; read(d); });
     c.stderr.on('data', d => { err = (err + String(d)).slice(-600); });
     // below normal priority, like the rest of Stagelight: OBS comes first
     try { require('node:os').setPriority(c.pid, require('node:os').constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* fine */ }
@@ -176,7 +196,50 @@ function createInput({ log = () => {}, onBlocked = () => {}, onClicked = () => {
     c.stdin.on('error', () => { /* it's gone: said above */ });
     return c;
   }
-  const send = line => { const c = ensure(); if (c && c.stdin.writable) c.stdin.write(`${line}\n`); };
+
+  // the service, if it's there and lets this Stagelight in: true when connected
+  function tryService() {
+    if (!SERVICE_PIPE) return Promise.resolve(false);
+    return new Promise(resolve => {
+      const sock = net.connect(SERVICE_PIPE);
+      let up = false;
+      sock.on('connect', () => {
+        up = true;
+        if (child) { try { child.stdin.end(); } catch { /* gone */ } child = null; } // the service takes over
+        service = sock;
+        sock.write('hello 1\n');
+        resolve(true);
+      });
+      sock.on('data', reader());
+      sock.on('error', () => { if (!up) resolve(false); });
+      sock.on('close', () => { if (service === sock) service = null; if (!up) resolve(false); });
+    });
+  }
+
+  // the service first, else the helper; what was sent meanwhile goes to whichever it is
+  function connect() {
+    connecting = tryService().then(ok => {
+      connecting = null;
+      if (!ok && !child) startHelper();
+      for (const l of waiting.splice(0)) {
+        if (service) service.write(`${l}\n`);
+        else if (child && child.stdin.writable && !/^(D|S |sas)/.test(l)) child.stdin.write(`${l}\n`);
+      }
+    });
+  }
+  function send(line) {
+    if (service) { service.write(`${line}\n`); return; }
+    if (child && !connecting) { if (child.stdin.writable) child.stdin.write(`${line}\n`); return; }
+    if (waiting.length < 500) waiting.push(line);
+    if (!connecting) connect();
+  }
+  // the service is used as soon as it's there (installed, or Stagelight now runs as administrator)
+  let lastTry = 0;
+  function recheck() {
+    if (service || connecting || Date.now() - lastTry < 10_000) return;
+    lastTry = Date.now();
+    connect();
+  }
 
   return {
     available,
@@ -202,12 +265,20 @@ function createInput({ log = () => {}, onBlocked = () => {}, onClicked = () => {
       s = String(s || '').slice(0, 500);
       if (s) send(`T ${Buffer.from(s, 'utf8').toString('base64')}`);
     },
+    // only with the service: which screen takes input, a picture of it, ctrl + alt + del
+    desk() { if (service) send('D'); else recheck(); },
+    shot(width, quality) { if (service) send(`S ${Math.round(width)} ${Math.round(quality)}`); },
+    sas() { if (!service) return false; send('sas'); return true; },
+    service: () => !!service,
     // the session ended: let go of everything still held down, so no key stays stuck
     releaseAll() {
       for (const code of held.keys) this.key(code, false);
       for (const b of held.buttons) this.button(b, false);
     },
-    stop() { if (child) { try { child.stdin.end(); } catch { /* gone */ } child = null; } },
+    stop() {
+      if (child) { try { child.stdin.end(); } catch { /* gone */ } child = null; }
+      if (service) { try { service.end(); } catch { /* gone */ } service = null; }
+    },
     // why mouse and keyboard don't work ('' when they do, as far as is known)
     broken: () => broken,
   };

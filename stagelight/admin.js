@@ -77,4 +77,65 @@ const hasTask = async () => win && (await run('schtasks', ['/Query', '/TN', TASK
 const runTask = async () => win && (await run('schtasks', ['/Run', '/TN', TASK])).ok;
 const removeTask = async () => win && (await run('schtasks', ['/Delete', '/F', '/TN', TASK])).ok;
 
-module.exports = { isAdmin, restartElevated, makeTask, hasTask, runTask, removeTask };
+/* ───────────── the service (service/StagelightService.cs), like AnyDesk's ─────────────
+   Its program is copied to Program Files (which only administrators can change: a service runs as
+   SYSTEM, so its program must not sit where anyone could swap it), registered to start with
+   Windows, and allowed to press ctrl + alt + del. Installing and removing it needs Stagelight to
+   run as administrator. */
+const SERVICE = 'StagelightService';
+const serviceDir = () => path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Stagelight Service');
+const serviceExe = () => path.join(serviceDir(), 'stagelight-service.exe');
+// the one that comes with this version of Stagelight
+const bundledExe = app => (app.isPackaged ? path.join(process.resourcesPath, 'stagelight-service.exe') : path.join(__dirname, 'service', 'bin', 'stagelight-service.exe'));
+
+// 'missing' | 'stopped' | 'running' | 'other'
+async function serviceState() {
+  if (!win) return 'missing';
+  const r = await run('sc', ['query', SERVICE]);
+  if (!r.ok) return 'missing';
+  return /RUNNING/.test(r.out) ? 'running' : /STOPPED/.test(r.out) ? 'stopped' : 'other';
+}
+const sameFile = (a, b) => { try { return fs.readFileSync(a).equals(fs.readFileSync(b)); } catch { return false; } };
+
+async function installService(app) {
+  if (!win) return { ok: false, error: 'Windows only' };
+  const from = bundledExe(app);
+  if (!fs.existsSync(from)) return { ok: false, error: "this copy of Stagelight doesn't include the service" };
+  const state = await serviceState();
+  if (state !== 'missing') { await run('sc', ['stop', SERVICE]); await new Promise(r => setTimeout(r, 1500)); }
+  try {
+    fs.mkdirSync(serviceDir(), { recursive: true });
+    fs.copyFileSync(from, serviceExe());
+  } catch (err) { return { ok: false, error: `couldn't copy it to Program Files (${err.code || err.message})` }; }
+  const bin = `"${serviceExe()}"`;
+  const made = state === 'missing'
+    ? await run('sc', ['create', SERVICE, 'binPath=', bin, 'start=', 'auto', 'obj=', 'LocalSystem', 'DisplayName=', 'Stagelight remote display'])
+    : await run('sc', ['config', SERVICE, 'binPath=', bin, 'start=', 'auto']);
+  if (!made.ok) return { ok: false, error: made.out.trim().slice(0, 200) || "Windows didn't register the service" };
+  await run('sc', ['description', SERVICE, "Lets Stagelight's remote display use the mouse and keyboard everywhere (also programs run as administrator, Windows prompts and the lock screen), like AnyDesk."]);
+  await run('sc', ['failure', SERVICE, 'reset=', '86400', 'actions=', 'restart/5000/restart/5000/restart/30000']);
+  // lets a service press ctrl + alt + del (Windows' "software secure attention sequence" policy)
+  await run('reg', ['add', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'SoftwareSASGeneration', '/t', 'REG_DWORD', '/d', '1', '/f']);
+  const started = await run('sc', ['start', SERVICE]);
+  if (!started.ok && !/already/i.test(started.out)) return { ok: false, error: `registered, but it didn't start: ${started.out.trim().slice(0, 160)}` };
+  return { ok: true };
+}
+
+async function removeService() {
+  if (!win) return { ok: false, error: 'Windows only' };
+  await run('sc', ['stop', SERVICE]);
+  await new Promise(r => setTimeout(r, 1500));
+  const r = await run('sc', ['delete', SERVICE]);
+  try { fs.rmSync(serviceDir(), { recursive: true, force: true }); } catch { /* still in use: goes after a restart */ }
+  return r.ok || /does not exist/i.test(r.out) ? { ok: true } : { ok: false, error: r.out.trim().slice(0, 200) };
+}
+
+// a newer Stagelight brings a newer service: swapped in (while running as administrator)
+async function updateService(app) {
+  if (!win || (await serviceState()) === 'missing') return false;
+  const from = bundledExe(app);
+  if (!fs.existsSync(from) || sameFile(from, serviceExe())) return false;
+  return (await installService(app)).ok;
+}
+
+module.exports = { isAdmin, restartElevated, makeTask, hasTask, runTask, removeTask, serviceState, installService, removeService, updateService };

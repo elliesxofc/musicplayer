@@ -92,7 +92,44 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   // each click said back to the panel (so it knows it arrived), with the program it landed in
   onClicked: name => say({ t: 'ack', on: name }),
   onFailed: why => say({ t: 'note', text: `mouse and keyboard don't work on the stream PC: Windows didn't let Stagelight's helper (PowerShell) start (${why.slice(0, 120)}). antivirus can do this; restarting Stagelight tries again.` }),
+  onDesk: name => secureScreen(!!name && name !== 'Default'),
+  onShot: b64 => secureShot(b64),
   });
+
+  /* ───────────── Windows' protected screens (with Stagelight's service) ─────────────
+     A "do you want to allow" prompt or the lock screen is on a screen of its own that the normal
+     screen sharing can't see (it shows the last picture, or black). The service can: while one is
+     up, its pictures (a few a second) take the place of the screen sharing's. */
+  let deskTimer = null, shotWait = null;
+  function deskWatch(on) {
+    clearInterval(deskTimer); deskTimer = null;
+    if (on) deskTimer = setInterval(() => { if (active) input.desk(); }, 1000);
+  }
+  function secureScreen(secure) {
+    if (!active || !!active.secure === secure) return;
+    active.secure = secure;
+    log(`remote display: ${secure ? 'a Windows prompt or the lock screen is up' : 'back to the desktop'}`);
+    say({ t: 'desk', secure });
+    if (secure) {
+      say({ t: 'note', text: 'the stream PC shows a Windows prompt or the lock screen: shown here a few times a second (ctrl + alt + del is under keys)' });
+      askShot();
+    }
+  }
+  function askShot() {
+    clearTimeout(shotWait);
+    if (!active || !active.secure) return;
+    input.shot(active.relay ? 1280 : 1024, active.relay ? 60 : 50);
+    shotWait = setTimeout(askShot, 3000); // no answer: ask again
+  }
+  function secureShot(b64) {
+    if (!active || !active.secure || !b64) return;
+    if (active.relay) {
+      relayOut.buf = Buffer.from(b64, 'base64'); relayOut.seq++;
+      for (const w of relayOut.watchers) relayPush(w);
+    } else if (b64.length < 240_000) say({ t: 'shot', data: b64 }); // one message over the direct connection
+    clearTimeout(shotWait);
+    shotWait = setTimeout(askShot, 250);
+  }
   // a message for the panel, the way it's connected (direct, or through the web address)
   function say(msg) {
     if (!active) return;
@@ -196,7 +233,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     relayOut.watchers.clear(); relayOut.buf = null;
   }
   ipcMain.on('frame', (e, data) => {
-    if (!active || !active.relay || !capture || e.sender !== capture.webContents) return;
+    if (!active || !active.relay || active.secure || !capture || e.sender !== capture.webContents) return;
     relayOut.buf = Buffer.from(data); relayOut.seq++;
     for (const w of relayOut.watchers) relayPush(w);
   });
@@ -255,6 +292,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     relayOut.buf = null; relayOut.note = relay && limit.note ? limit.note : '';
     keepAwake(true);
     clipWatch(true);
+    deskWatch(true);
     if (active.control && input.broken()) setTimeout(() => say({ t: 'note', text: `mouse and keyboard don't work on the stream PC: Stagelight's helper (PowerShell) couldn't start (${input.broken().slice(0, 120)}). antivirus can do this; restarting Stagelight tries again.` }), 1500);
     onStarted();
     const what = active.control ? 'controlling' : 'watching';
@@ -274,6 +312,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     active = null;
     keepAwake(false);
     clipWatch(false);
+    deskWatch(false); clearTimeout(shotWait);
     hideBar();
     onChange();
     // the hidden screen-sharing window goes too (a minute later, in case of a reconnect)
@@ -311,6 +350,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
           .catch(() => say({ t: 'note', text: "couldn't put that on the stream PC's clipboard (another program has it open): try again" }))
           .finally(() => { clipWriting = null; for (const next of afterClip.splice(0)) handleInput(next); });
         break;
+      case 'sas': if (!input.sas()) say({ t: 'note', text: "ctrl + alt + del needs Stagelight's service on the stream PC (Stagelight's settings → remote display → install the service)" }); break;
       case 'clipget': clipRead().then(text => { clipLast = text; if (text) clipSend(text); else say({ t: 'note', text: "the stream PC's clipboard has no text" }); }); break;
       default: break;
     }

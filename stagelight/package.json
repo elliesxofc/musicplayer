@@ -1,7 +1,7 @@
 {
   "name": "stagelight",
   "productName": "Stagelight",
-  "version": "2.4.8",
+  "version": "2.5.0",
   "description": "a remote control for OBS in any browser, with a password",
   "author": "elliesxofc",
   "license": "UNLICENSED",
@@ -60,6 +60,12 @@
     "linux": {
       "target": "AppImage",
       "icon": "icons/icon-512.png"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "service/bin/stagelight-service.exe",
+        "to": "stagelight-service.exe"
+      }
+    ]
   }
 }

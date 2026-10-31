@@ -587,7 +587,31 @@ $('#selRemove').onclick = async () => {
 let rd = null; // { pc, dc, password, control }
 const rdStage = $('#rdStage'), rdVideo = $('#rdVideo'), rdCanvas = $('#rdCanvas'), rdCtx = rdCanvas.getContext('2d');
 // what shows the PC: the video (direct), or pictures drawn on a canvas (through the web address)
-const rdView = () => (rd && rd.relay ? { el: rdCanvas, w: rdCanvas.width, h: rdCanvas.height } : { el: rdVideo, w: rdVideo.videoWidth, h: rdVideo.videoHeight });
+const rdView = () => (rd && (rd.relay || rd.secure) ? { el: rdCanvas, w: rdCanvas.width, h: rdCanvas.height } : { el: rdVideo, w: rdVideo.videoWidth, h: rdVideo.videoHeight });
+/* A Windows prompt or the lock screen on the stream PC (seen through Stagelight's service): over
+   the direct connection its pictures come as messages and show in place of the video */
+function rdSecure(on) {
+  if (!rd) return;
+  rd.secure = !!on;
+  if (!rd.relay) { rdVideo.hidden = rd.secure; rdCanvas.hidden = !rd.secure; }
+  placeDot();
+}
+async function rdShot(b64) {
+  if (!rd || rd.relay || !rd.secure || typeof b64 !== 'string' || rd.shotBusy) return;
+  rd.shotBusy = true;
+  try {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+    if (rd && rd.secure) {
+      const sized = rdCanvas.width !== bmp.width || rdCanvas.height !== bmp.height;
+      if (sized) { rdCanvas.width = bmp.width; rdCanvas.height = bmp.height; }
+      rdCtx.drawImage(bmp, 0, 0);
+      if (sized) placeDot();
+    }
+    bmp.close();
+  } catch { /* a broken picture: skip it */ }
+  if (rd) rd.shotBusy = false;
+}
 
 async function remoteInfo() {
   const info = await api('/api/remote').catch(() => ({ view: false }));
@@ -701,6 +725,7 @@ async function relayConnect() {
           if (msg.t === 'note' && typeof msg.text === 'string') toast(msg.text.slice(0, 240), msg.text.length > 100 ? 8000 : 4000);
           if (msg.t === 'clip' && rd && rd.gen === gen) clipFromPc(msg.text);
           if (msg.t === 'ack' && rd && rd.gen === gen) clickArrived(msg.on, msg.blocked);
+          if (msg.t === 'desk' && rd && rd.gen === gen) rd.secure = !!msg.secure; // the pictures come the usual way
         }
       }
     }
@@ -711,6 +736,7 @@ async function relayConnect() {
 
 async function rdConnect() {
   if (!rd) return;
+  rd.secure = false;
   if (rd.relay) return relayConnect();
   if (rd.pc) rd.pc.close();
   rdVideo.hidden = false; rdCanvas.hidden = true;
@@ -735,6 +761,8 @@ async function rdConnect() {
     if (msg.t === 'note' && rd && rd.pc === pc && typeof msg.text === 'string') toast(msg.text.slice(0, 240), msg.text.length > 100 ? 8000 : 4000);
     if (msg.t === 'clip' && rd && rd.pc === pc) clipFromPc(msg.text);
     if (msg.t === 'ack' && rd && rd.pc === pc) clickArrived(msg.on, msg.blocked);
+    if (msg.t === 'desk' && rd && rd.pc === pc) rdSecure(msg.secure);
+    if (msg.t === 'shot' && rd && rd.pc === pc) rdShot(msg.data);
   };
   pc.addTransceiver('video', { direction: 'recvonly' });
   pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };
@@ -813,7 +841,7 @@ function clickArrived(on, blocked) {
   if (!rd) return;
   clearTimeout(rd.ackTimer); rd.ackTimer = null; rd.ackSaid = false;
   if (!blocked) { dot.classList.remove('hit'); void dot.offsetWidth; dot.classList.add('hit'); }
-  const names = { explorer: 'Windows', obs64: 'OBS', obs32: 'OBS', Taskmgr: 'Task Manager' }, name = names[on] || String(on || '').slice(0, 30);
+  const names = { explorer: 'Windows', obs64: 'OBS', obs32: 'OBS', Taskmgr: 'Task Manager', consent: 'the Windows prompt', LogonUI: 'the lock screen', Winlogon: 'the lock screen' }, name = names[on] || String(on || '').slice(0, 30);
   rdState(`${rd.pcName || 'the PC'} · in control${rd.relay ? ' · via web' : ''}${name ? ` · ${blocked ? `${name} blocked it` : `clicked ${name}`}` : ''}`, true);
 }
 const rdSend = m => {
@@ -1180,7 +1208,10 @@ function pressWithMods(code) {
   mods.clear();
   $('#rdMods').querySelectorAll('[data-mod]').forEach(b => b.setAttribute('aria-pressed', 'false'));
 }
-$('#rdSpecial').onclick = e => { const b = e.target.closest('[data-key]'); if (b) pressWithMods(b.dataset.key); };
+$('#rdSpecial').onclick = e => {
+  if (e.target.closest('#rdSas')) { rdSend({ t: 'sas' }); toast('ctrl + alt + del sent'); return; }
+  const b = e.target.closest('[data-key]'); if (b) pressWithMods(b.dataset.key);
+};
 $('#rdSend').onclick = () => {
   const text = $('#rdText').value;
   if (!text) return;

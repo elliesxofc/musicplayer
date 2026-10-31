@@ -231,6 +231,8 @@ app.whenReady().then(async () => {
     }
     log("Stagelight should run as administrator but couldn't start that way: use \"restart as administrator\" below");
   }
+  // a newer Stagelight brings a newer service
+  if (elevated) admin.updateService(app).then(done => { if (done) log('service updated'); });
   Menu.setApplicationMenu(null);
   tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 32, height: 32 }));
   tray.on('click', showWindow);
@@ -245,7 +247,7 @@ app.whenReady().then(async () => {
 });
 
 /* ───────────── the settings window asks ───────────── */
-ipcMain.handle('get', () => {
+ipcMain.handle('get', async () => {
   const c = readConfig();
   const o = obsSettings();
   return {
@@ -253,7 +255,7 @@ ipcMain.handle('get', () => {
     accounts: accounts().map(a => ({ name: a.name, role: a.role })),
     port: panelPort(),
     autostart: c.admin ? !!c.autostart : app.getLoginItemSettings().openAtLogin,
-    admin: { on: elevated, always: !!c.admin, windows: process.platform === 'win32' },
+    admin: { on: elevated, always: !!c.admin, windows: process.platform === 'win32', service: await admin.serviceState() },
     remote: { ...remoteSettings(), controlWorks: remote.canControl() },
     status: status(),
     log: logLines,
@@ -319,6 +321,13 @@ ipcMain.handle('admin-restart', async () => {
   if (await admin.restartElevated(app, ['--elevated'])) { log('restarting as administrator'); quitting = true; app.exit(0); return { ok: true }; }
   app.requestSingleInstanceLock();
   return { ok: false, error: 'Windows asked and it was declined (or it couldn\'t ask): nothing changed' };
+});
+// the service (like AnyDesk's): mouse and keyboard also on Windows' prompts and the lock screen
+ipcMain.handle('service', async (_e, install) => {
+  if (!elevated) return { ok: false, error: 'restart as administrator first' };
+  const r = install ? await admin.installService(app) : await admin.removeService();
+  log(r.ok ? (install ? 'service installed: the remote display works everywhere (prompts, lock screen, programs run as administrator)' : 'service removed') : `service: ${r.error}`);
+  return { ...r, state: await admin.serviceState() };
 });
 ipcMain.handle('admin-always', async (_e, on) => {
   const c = readConfig();

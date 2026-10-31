@@ -61,7 +61,28 @@ function showAdmin(a) {
   $('#adminAlways').checked = a.always;
   $('#adminAlways').disabled = !a.on && !a.always;
   $('#adminAlways').parentElement.title = !a.on && !a.always ? 'restart as administrator first' : '';
+  showService(a.service, a.on);
 }
+/* the service, like AnyDesk's: runs as SYSTEM, so mouse and keyboard also work on Windows'
+   "do you want to allow" prompts and the lock screen (and those show in the panel) */
+function showService(state, on) {
+  const there = state && state !== 'missing';
+  $('#serviceState').innerHTML = there
+    ? `<b>the service is installed${state === 'running' ? ' ✓' : ` (${state})`}</b> mouse and keyboard work everywhere, also on Windows' prompts and the lock screen (ctrl + alt + del is under keys in the panel). it's used while Stagelight runs as administrator.`
+    : "<b>the service (optional, like AnyDesk's)</b> lets the remote display also use Windows' \"do you want to allow\" prompts and the lock screen, and shows them in the panel. it runs in the background as part of Windows.";
+  $('#serviceBtn').textContent = there ? 'remove the service' : 'install the service';
+  $('#serviceBtn').dataset.there = there ? '1' : '';
+  $('#serviceBtn').disabled = !on;
+  $('#serviceBtn').title = on ? '' : 'restart as administrator first';
+}
+$('#serviceBtn').onclick = async () => {
+  const install = !$('#serviceBtn').dataset.there;
+  if (install && !confirm("install Stagelight's service?\n\nit runs as part of Windows, so every full access account with mouse and keyboard on can then also use Windows' prompts and the lock screen from the panel, like AnyDesk.")) return;
+  $('#serviceBtn').disabled = true;
+  const r = await S.service(install);
+  showService(r.state, true);
+  if (!r.ok) alert(r.error);
+};
 $('#adminRestart').onclick = async () => {
   $('#adminRestart').disabled = true;
   const r = await S.adminRestart();

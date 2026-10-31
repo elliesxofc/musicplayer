@@ -139,6 +139,14 @@ Stagelight is made to stay out of OBS's way:
   **always run as administrator** sets up a Task Scheduler task with highest privileges so it
   starts that way without asking, also with Windows (opening Stagelight the usual way hands over
   to the task)
+- **the service** (optional, like AnyDesk's; settings → remote display, while running as
+  administrator): a small Windows service (`service/StagelightService.cs`, built with the C#
+  compiler that comes with Windows) runs as SYSTEM, so the remote display's mouse and keyboard
+  also work on Windows' "do you want to allow" prompts and the lock screen, **ctrl + alt + del**
+  (under keys) works, and those protected screens show in the panel (a few pictures a second;
+  normal screen sharing can't see them). It's copied to Program Files, and only a Stagelight
+  running as administrator can use it (its pipe is for administrators and SYSTEM). Without it,
+  the PowerShell helper does the clicking as before
 - each click is answered by the stream PC: the trackpad dot flashes and the bar says where it
   landed (**clicked OBS**, **Task Manager blocked it**); no answer within 5 s says so, and if
   Windows won't let the mouse/keyboard helper (PowerShell) start, the panel says why

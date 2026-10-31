@@ -220,7 +220,7 @@ function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false
     if (p === '/api/preview' && req.method === 'GET') {
       const scene = url.searchParams.get('scene') || undefined;
       const jpg = await obs.screenshot(scene);
-      if (!jpg) return send(res, 503, { error: 'no preview right now' });
+      if (!jpg) return send(res, 503, { error: obs.shotError ? obs.shotError(scene) : 'no preview right now' });
       // the panel already has this picture: say so instead of sending it again
       const tag = obs.shotTag(scene);
       if (req.headers['if-none-match'] === tag) { res.writeHead(304, { ETag: tag, 'Cache-Control': 'no-cache' }); return res.end(); }

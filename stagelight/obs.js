@@ -475,10 +475,10 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
         const took = Date.now() - started;
         const m = /^data:image\/\w+;base64,(.*)$/.exec(r.imageData || '');
         // a slow answer means OBS is busy: wait longer before the next picture
-        Object.assign(shot, { at: Date.now(), data: m ? Buffer.from(m[1], 'base64') : null, busy: null, gap: took > 250 ? 4000 : took > 120 ? 2000 : 1000 });
+        Object.assign(shot, { at: Date.now(), data: m ? Buffer.from(m[1], 'base64') : null, busy: null, error: m ? '' : 'OBS sent an empty picture', gap: took > 250 ? 4000 : took > 120 ? 2000 : 1000 });
         return shot.data;
       })
-      .catch(() => { shot.busy = null; return null; });
+      .catch(err => { shot.busy = null; shot.error = String((err && err.message) || err).slice(0, 160); return null; });
     // pictures of scenes nobody looks at any more go
     for (const [s, x] of shots) if (s !== scene && Date.now() - x.at > 60_000 && !x.busy) shots.delete(s);
     return shot.busy;
@@ -646,6 +646,8 @@ function createObs({ onChange = () => {}, log = () => {} } = {}) {
     snapshot,
     screenshot,
     shotTag: (scene = state.scene) => `"${(shots.get(scene) || { at: 0 }).at}"`,
+    // why there's no picture: OBS's own answer, or what Stagelight is missing
+    shotError: (scene = state.scene) => (!identified ? 'OBS is not connected' : !itemsIn(scene) ? `Stagelight doesn't know the scene "${scene}" yet` : (shots.get(scene) || {}).error || 'OBS sent no picture'),
     setBusy,
     summary: () => (!state.connected ? 'OBS not connected' : state.stream.active ? 'live' : state.record.active ? 'recording' : 'OBS connected'),
   };

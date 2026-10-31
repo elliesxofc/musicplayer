@@ -310,6 +310,7 @@ $('#editScene').onchange = () => pickScene($('#editScene').value);
 $('#goScene').onclick = () => { const name = stageScene(); act({ type: 'scene', name }, () => { toast(`"${name}" is on stream now ✦`); editScene = ''; renderStage(); }); };
 
 // the picture: about once a second while the panel is open (it pauses in the background)
+let previewFails = 0;
 async function previewLoop() {
   let wait = 1000;
   try {
@@ -327,7 +328,15 @@ async function previewLoop() {
         if (lastShot) URL.revokeObjectURL(lastShot);
         lastShot = url;
         $('#stageMsg').textContent = '';
-      } else wait = 2500;
+        previewFails = 0;
+      } else {
+        wait = 2500;
+        // still nothing after a few tries: say why, instead of "loading" forever
+        if (++previewFails >= 3 && !$('#previewImg').getAttribute('src')) {
+          const why = (await r.json().catch(() => ({}))).error;
+          $('#stageMsg').textContent = `no preview: ${why || `error ${r.status}`}`;
+        }
+      }
     } else if (st && !st.connected) {
       $('#stageMsg').textContent = 'OBS is not connected';
     } else if (!$('#previewOn').checked) {

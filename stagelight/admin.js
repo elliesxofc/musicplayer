@@ -103,7 +103,7 @@ const sameFile = (a, b) => { try { return fs.readFileSync(a).equals(fs.readFileS
 /* where: Stagelight's settings file (the service reads the accounts and the panel's port from it,
    for the page before anyone signs in) and that port (let through Windows' firewall for the home
    network and Tailscale, as Stagelight itself is) */
-async function installService(app, { config, port }) {
+async function installService(app, { config, port, exe }) {
   if (!win) return { ok: false, error: 'Windows only' };
   const from = bundledExe(app);
   if (!fs.existsSync(from)) return { ok: false, error: "this copy of Stagelight doesn't include the service" };
@@ -114,7 +114,8 @@ async function installService(app, { config, port }) {
     fs.copyFileSync(from, serviceExe());
     if (fs.existsSync(bundledPage(app))) fs.copyFileSync(bundledPage(app), path.join(serviceDir(), 'signin.html'));
   } catch (err) { return { ok: false, error: `couldn't copy it to Program Files (${err.code || err.message})` }; }
-  const bin = `"${serviceExe()}" --config "${config}"`;
+  // exe: Stagelight itself, so the service can start it again if it closes by accident
+  const bin = `"${serviceExe()}" --config "${config}"${exe ? ` --app "${exe}"` : ''}`;
   const made = state === 'missing'
     ? await run('sc', ['create', SERVICE, 'binPath=', bin, 'start=', 'auto', 'obj=', 'LocalSystem', 'DisplayName=', 'Stagelight remote display'])
     : await run('sc', ['config', SERVICE, 'binPath=', bin, 'start=', 'auto']);
@@ -145,7 +146,11 @@ async function updateService(app, where) {
   if (!win || (await serviceState()) === 'missing') return false;
   const from = bundledExe(app);
   if (!fs.existsSync(from)) return false;
-  if (sameFile(from, serviceExe()) && (!fs.existsSync(bundledPage(app)) || sameFile(bundledPage(app), path.join(serviceDir(), 'signin.html')))) return false;
+  const page = !fs.existsSync(bundledPage(app)) || sameFile(bundledPage(app), path.join(serviceDir(), 'signin.html'));
+  // the service also needs to know where Stagelight is (older installs didn't say)
+  const conf = await run('sc', ['qc', SERVICE]);
+  const knowsApp = !where.exe || conf.out.toLowerCase().includes(where.exe.toLowerCase());
+  if (sameFile(from, serviceExe()) && page && knowsApp) return false;
   return (await installService(app, where)).ok;
 }
 

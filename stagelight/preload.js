@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('stagelight', {
   adminRestart: () => ipcRenderer.invoke('admin-restart'),
   adminAlways: on => ipcRenderer.invoke('admin-always', !!on),
   service: install => ipcRenderer.invoke('service', !!install),
+  keepRunning: on => ipcRenderer.invoke('keep-running', !!on),
   logoutAll: () => ipcRenderer.invoke('logout-all'),
   setRemote: settings => ipcRenderer.invoke('set-remote', settings),
   setRemoteMax: max => ipcRenderer.invoke('set-remote-max', Number(max)),

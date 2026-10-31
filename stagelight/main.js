@@ -5,7 +5,7 @@
    password-protected panel to phones, tablets and other PCs on the same network, or from
    anywhere through Tailscale. */
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, safeStorage, Notification } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, shell, nativeImage, safeStorage, Notification, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -205,7 +205,7 @@ function refreshTray(force = false) {
     { label: 'open the panel here', click: () => shell.openExternal(`http://localhost:${server.port() || panelPort()}`) },
     { label: 'settings', click: showWindow },
     { type: 'separator' },
-    { label: 'quit Stagelight', click: () => { quitting = true; app.quit(); } },
+    { label: 'quit Stagelight', click: quitOnPurpose },
   ]));
 }
 
@@ -216,11 +216,29 @@ if (process.argv.includes('--task')) { startHidden = !readConfig().showNext; if 
 let elevated = false;
 
 app.on('second-instance', () => { startHidden = false; showWindow(); });
+
+/* Quitting from the tray icon is on purpose: asked first (it may be a click by accident over the
+   remote display), and noted, so Stagelight's service doesn't start it again until Windows
+   restarts. Anything else that closes it (a crash, a click on the wrong thing) and the service
+   brings it back. */
+function quitOnPurpose() {
+  const keep = readConfig().keepRunning !== false;
+  const r = dialog.showMessageBoxSync({
+    type: 'question', buttons: ['quit', 'keep running'], defaultId: 1, cancelId: 1, title: 'Stagelight', noLink: true,
+    message: 'quit Stagelight?',
+    detail: `the panel and the remote display stop until Stagelight is opened again${keep ? ' (its service won\'t restart it by itself until Windows restarts)' : ''}.`,
+  });
+  if (r !== 0) return;
+  writeConfig({ quitOnPurpose: Date.now() });
+  quitting = true; app.quit();
+}
 app.on('before-quit', () => { quitting = true; remote.stop(); obs.stop(); server.stop(); });
 app.on('window-all-closed', () => { /* stays in the tray */ });
 
 app.whenReady().then(async () => {
   elevated = await admin.isAdmin();
+  if (readConfig().quitOnPurpose) writeConfig({ quitOnPurpose: undefined }); // running again
+  if (process.argv.includes('--restarted')) log('Stagelight had closed: its service started it again');
   // "always as administrator": a copy opened the usual way hands over to the task (no prompt)
   if (process.platform === 'win32' && readConfig().admin && !elevated && !handedOver) {
     if (await admin.hasTask()) {
@@ -256,7 +274,7 @@ ipcMain.handle('get', async () => {
     accounts: accounts().map(a => ({ name: a.name, role: a.role })),
     port: panelPort(),
     autostart: c.admin ? !!c.autostart : app.getLoginItemSettings().openAtLogin,
-    admin: { on: elevated, always: !!c.admin, windows: process.platform === 'win32', service: await admin.serviceState() },
+    admin: { on: elevated, always: !!c.admin, windows: process.platform === 'win32', service: await admin.serviceState(), keepRunning: c.keepRunning !== false },
     remote: { ...remoteSettings(), controlWorks: remote.canControl() },
     status: status(),
     log: logLines,
@@ -326,7 +344,7 @@ ipcMain.handle('admin-restart', async () => {
   return { ok: false, error: 'Windows asked and it was declined (or it couldn\'t ask): nothing changed' };
 });
 // what the service needs for its page before anyone signs in: the accounts, and the panel's port
-const serviceWhere = () => ({ config: configPath(), port: panelPort() });
+const serviceWhere = () => ({ config: configPath(), port: panelPort(), exe: app.isPackaged ? process.execPath : '' });
 // the service (like AnyDesk's): mouse and keyboard also on Windows' prompts and the lock screen
 ipcMain.handle('service', async (_e, install) => {
   if (!elevated) return { ok: false, error: 'restart as administrator first' };
@@ -334,6 +352,8 @@ ipcMain.handle('service', async (_e, install) => {
   log(r.ok ? (install ? 'service installed: the remote display works everywhere (prompts, lock screen, programs run as administrator)' : 'service removed') : `service: ${r.error}`);
   return { ...r, state: await admin.serviceState() };
 });
+// the service starting Stagelight again if it closes (on unless switched off)
+ipcMain.handle('keep-running', (_e, on) => { writeConfig({ keepRunning: on ? undefined : false }); return readConfig().keepRunning !== false; });
 ipcMain.handle('admin-always', async (_e, on) => {
   const c = readConfig();
   if (on) {

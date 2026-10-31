@@ -66,10 +66,19 @@ class StagelightService : ServiceBase {
     listener = new Thread(Listen); listener.IsBackground = true; listener.Start();
     // before anyone signs in to Windows (Stagelight itself isn't running then), the service shows
     // a small sign-in page on Stagelight's address; it steps aside once someone is signed in
-    string config = Program.Arg(Environment.GetCommandLineArgs(), "--config");
+    string[] cmd = Environment.GetCommandLineArgs();
+    string config = Program.Arg(cmd, "--config");
     if (config != null) {
       signIn = new SignIn(config, new HelperScreen(), true, null);
-      var watch = new Thread(() => { while (!stopping) { try { signIn.Tick(); } catch { } Thread.Sleep(2000); } });
+      // and while someone is signed in: Stagelight closed or crashed by accident comes back
+      var keep = new KeepRunning(config, Program.Arg(cmd, "--app"));
+      var watch = new Thread(() => {
+        while (!stopping) {
+          try { signIn.Tick(); } catch { }
+          try { keep.Tick(); } catch { }
+          Thread.Sleep(2000);
+        }
+      });
       watch.IsBackground = true; watch.Start();
     }
   }
@@ -283,6 +292,7 @@ static class Helper {
 static class Native {
   public const uint TOKEN_ALL_ACCESS = 0xF01FF;
   [DllImport("kernel32.dll")] public static extern uint WTSGetActiveConsoleSessionId();
+  [DllImport("kernel32.dll")] public static extern ulong GetTickCount64();
   [DllImport("kernel32.dll")] public static extern IntPtr GetCurrentProcess();
   [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
   [DllImport("advapi32.dll", SetLastError = true)] public static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
@@ -300,6 +310,10 @@ static class Native {
   [DllImport("sas.dll")] public static extern void SendSAS(bool asUser);
   [DllImport("wtsapi32.dll")] public static extern bool WTSQuerySessionInformation(IntPtr server, uint session, int info, out IntPtr buffer, out int bytes);
   [DllImport("wtsapi32.dll")] public static extern void WTSFreeMemory(IntPtr memory);
+  [DllImport("wtsapi32.dll", SetLastError = true)] public static extern bool WTSQueryUserToken(uint session, out IntPtr token);
+  [DllImport("advapi32.dll", SetLastError = true)] public static extern bool GetTokenInformation(IntPtr token, int cls, out IntPtr info, int length, out int returned);
+  [DllImport("userenv.dll", SetLastError = true)] public static extern bool CreateEnvironmentBlock(out IntPtr env, IntPtr token, bool inherit);
+  [DllImport("userenv.dll")] public static extern bool DestroyEnvironmentBlock(IntPtr env);
 
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
@@ -590,6 +604,87 @@ static class Scrypt {
         Array.Copy(t, 0, result, (i - 1) * 32, Math.Min(32, length - (i - 1) * 32));
       }
       return result;
+    }
+  }
+}
+
+/* ───────────── keeping Stagelight running ─────────────
+   While someone is signed in, Stagelight closed by accident or crashed is started again (in the
+   tray, as that person; as administrator when "always run as administrator" is on). Not after
+   quitting it on purpose from its tray icon (until Windows restarts), not while an installer is
+   updating it, not when switched off in its settings, and not over and over if it keeps crashing. */
+class KeepRunning {
+  readonly string config, app;
+  uint session = 0xFFFFFFFF; DateTime sessionSince, goneSince = DateTime.MinValue;
+  readonly List<DateTime> starts = new List<DateTime>();
+  static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
+  // when Windows started (GetTickCount64: the 32-bit count wraps after 25 days)
+  static readonly DateTime Booted = DateTime.UtcNow.AddMilliseconds(-(double)Native.GetTickCount64());
+
+  public KeepRunning(string config, string app) { this.config = config; this.app = app; }
+
+  public void Tick() {
+    if (string.IsNullOrEmpty(app) || !File.Exists(app) || SignIn.NobodySignedIn()) { goneSince = DateTime.MinValue; return; }
+    Dictionary<string, object> c;
+    try { c = Json.DeserializeObject(File.ReadAllText(config)) as Dictionary<string, object>; } catch { return; }
+    if (c == null) return;
+    object v;
+    if (c.TryGetValue("keepRunning", out v) && false.Equals(v)) return;
+    // quit on purpose (from the tray icon) since Windows started: left alone
+    if (c.TryGetValue("quitOnPurpose", out v) && v != null) {
+      try { if (new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(Convert.ToDouble(v)) > Booted) return; } catch { }
+    }
+    uint now = Native.WTSGetActiveConsoleSessionId();
+    // just signed in: Stagelight starts with Windows by itself first
+    if (now != session) { session = now; sessionSince = DateTime.UtcNow; goneSince = DateTime.MinValue; return; }
+    if (DateTime.UtcNow - sessionSince < TimeSpan.FromSeconds(40)) return;
+    if (Running(now)) { goneSince = DateTime.MinValue; return; }
+    if (goneSince == DateTime.MinValue) { goneSince = DateTime.UtcNow; return; }
+    if (DateTime.UtcNow - goneSince < TimeSpan.FromSeconds(8)) return;
+    if (Updating()) return;
+    // crashing again and again: stop trying (until the service or Windows restarts)
+    starts.RemoveAll(t => DateTime.UtcNow - t > TimeSpan.FromMinutes(10));
+    if (starts.Count >= 5) return;
+    starts.Add(DateTime.UtcNow);
+    bool admin = c.TryGetValue("admin", out v) && true.Equals(v);
+    Start(now, admin);
+    goneSince = DateTime.MinValue;
+  }
+
+  bool Running(uint s) {
+    foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(app))) { try { if ((uint)p.SessionId == s) return true; } catch { } }
+    return false;
+  }
+  // an installer (or uninstaller) at work, or its files just changed: wait
+  bool Updating() {
+    try { if (DateTime.UtcNow - File.GetLastWriteTimeUtc(app) < TimeSpan.FromMinutes(1)) return true; } catch { return true; }
+    foreach (var p in Process.GetProcesses()) {
+      string n; try { n = p.ProcessName.ToLowerInvariant(); } catch { continue; }
+      if (n.Contains("stagelight-setup") || n.Contains("stagelight setup") || n.StartsWith("un_") || n.Contains("uninstall stagelight")) return true;
+    }
+    return false;
+  }
+
+  // as the person signed in (their own settings and files), in the tray
+  void Start(uint s, bool admin) {
+    IntPtr user = IntPtr.Zero, linked = IntPtr.Zero, env = IntPtr.Zero;
+    try {
+      if (!Native.WTSQueryUserToken(s, out user)) return;
+      IntPtr token = user;
+      // "always run as administrator": the same person's administrator side
+      if (admin) { int got; if (Native.GetTokenInformation(user, 19 /* TokenLinkedToken */, out linked, IntPtr.Size, out got) && linked != IntPtr.Zero) token = linked; }
+      Native.CreateEnvironmentBlock(out env, user, false);
+      var si = new Native.STARTUPINFO();
+      si.cb = Marshal.SizeOf(typeof(Native.STARTUPINFO));
+      si.lpDesktop = "winsta0\\default";
+      Native.PROCESS_INFORMATION pi;
+      if (Native.CreateProcessAsUser(token, app, "\"" + app + "\" --hidden --restarted", IntPtr.Zero, IntPtr.Zero, false, 0x00000400 /* unicode environment */, env, Path.GetDirectoryName(app), ref si, out pi)) {
+        Native.CloseHandle(pi.hThread); Native.CloseHandle(pi.hProcess);
+      }
+    } finally {
+      if (env != IntPtr.Zero) Native.DestroyEnvironmentBlock(env);
+      if (linked != IntPtr.Zero) Native.CloseHandle(linked);
+      if (user != IntPtr.Zero) Native.CloseHandle(user);
     }
   }
 }

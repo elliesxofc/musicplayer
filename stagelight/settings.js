@@ -62,6 +62,7 @@ function showAdmin(a) {
   $('#adminAlways').disabled = !a.on && !a.always;
   $('#adminAlways').parentElement.title = !a.on && !a.always ? 'restart as administrator first' : '';
   showService(a.service, a.on);
+  $('#keepRunning').checked = a.keepRunning;
 }
 /* the service, like AnyDesk's: runs as SYSTEM, so mouse and keyboard also work on Windows'
    "do you want to allow" prompts and the lock screen (and those show in the panel) */
@@ -74,7 +75,9 @@ function showService(state, on) {
   $('#serviceBtn').dataset.there = there ? '1' : '';
   $('#serviceBtn').disabled = !on;
   $('#serviceBtn').title = on ? '' : 'restart as administrator first';
+  $('#keepRow').hidden = !there;
 }
+$('#keepRunning').onchange = async () => { $('#keepRunning').checked = await S.keepRunning($('#keepRunning').checked); };
 $('#serviceBtn').onclick = async () => {
   const install = !$('#serviceBtn').dataset.there;
   if (install && !confirm("install Stagelight's service?\n\nit runs as part of Windows, so every full access account with mouse and keyboard on can then also use Windows' prompts and the lock screen from the panel, like AnyDesk.")) return;

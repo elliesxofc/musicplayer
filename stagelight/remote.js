@@ -75,12 +75,18 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   const waiting = new Map(); // job id → resolve
   // clicks and keys into a program run as administrator are dropped by Windows: say so (once a while)
   let blockedSaid = { name: '', at: 0 };
-  const input = createInput({ log, onBlocked: name => {
+  const input = createInput({ log, onBlocked: raw => {
+    // "*Taskmgr": it's in front, and that blocks every click and key (not only the ones into it)
+    const front = raw.startsWith('*'), name = front ? raw.slice(1) : raw;
+    const nice = { Taskmgr: 'Task Manager', obs64: 'OBS', obs32: 'OBS' }[name] || name;
     say({ t: 'ack', on: name, blocked: true }); // it got there, Windows just didn't pass it on
-    if (!active || (blockedSaid.name === name && Date.now() - blockedSaid.at < 20_000)) return;
-    blockedSaid = { name, at: Date.now() };
-    const text = `Windows blocks clicks and keys into ${name} (it runs as administrator). run Stagelight as administrator on the stream PC, or ${name} normally.`;
-    log(`remote display: clicks into ${name} are blocked (it runs as administrator; Stagelight doesn't)`);
+    if (!active || (blockedSaid.name === raw && Date.now() - blockedSaid.at < 20_000)) return;
+    blockedSaid = { name: raw, at: Date.now() };
+    const fix = 'fix: Stagelight on the stream PC → "restart as administrator"';
+    const text = front
+      ? `${nice} is in front on the stream PC and runs as administrator, so Windows blocks every click and key. ${fix}.`
+      : `Windows blocks clicks and keys into ${nice} (it runs as administrator). ${fix}.`;
+    log(`remote display: clicks ${front ? `blocked everywhere while ${name} is in front` : `into ${name} are blocked`} (it runs as administrator; Stagelight doesn't)`);
     say({ t: 'note', text });
   },
   // each click said back to the panel (so it knows it arrived), with the program it landed in

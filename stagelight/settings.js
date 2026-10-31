@@ -49,6 +49,31 @@ function showRemote(r) {
   $('#remoteFiles').checked = !!r.files;
   $('#filesWarn').hidden = !r.files;
 }
+/* Windows blocks clicks and keys from a program into one that runs as administrator (Task Manager,
+   often OBS), and while such a window is in front, all of them: running as administrator too fixes it */
+function showAdmin(a) {
+  $('#adminBox').hidden = !a.windows;
+  $('#adminState').innerHTML = a.on
+    ? '<b>Stagelight runs as administrator ✓</b> mouse and keyboard also work in programs that run as administrator (Task Manager, OBS).'
+    : "<b>Stagelight doesn't run as administrator.</b> Windows then blocks the remote display's clicks and keys into programs that do (Task Manager, often OBS), and while one of them is in front, all of them.";
+  $('#adminState').classList.toggle('warn', !a.on);
+  $('#adminRestart').hidden = a.on;
+  $('#adminAlways').checked = a.always;
+  $('#adminAlways').disabled = !a.on && !a.always;
+  $('#adminAlways').parentElement.title = !a.on && !a.always ? 'restart as administrator first' : '';
+}
+$('#adminRestart').onclick = async () => {
+  $('#adminRestart').disabled = true;
+  const r = await S.adminRestart();
+  $('#adminRestart').disabled = false;
+  if (!r.ok) alert(r.error);
+};
+$('#adminAlways').onchange = async () => {
+  const r = await S.adminAlways($('#adminAlways').checked);
+  if (!r.ok) { alert(r.error); $('#adminAlways').checked = !$('#adminAlways').checked; return; }
+  $('#adminAlways').checked = r.always;
+  $('#autostart').checked = r.autostart;
+};
 async function saveRemote() {
   showRemote(await S.setRemote({ view: $('#remoteView').checked, control: $('#remoteControl').checked }));
 }
@@ -84,6 +109,7 @@ $('#remoteStop').onclick = async () => showStatus(await S.stopRemote());
   showAccounts(c.accounts);
   $('#port').value = c.port;
   $('#autostart').checked = c.autostart;
+  showAdmin(c.admin);
   $('#log').textContent = c.log.join('\n');
   showRemote(c.remote);
   $('#remoteNoInput').hidden = c.remote.controlWorks;

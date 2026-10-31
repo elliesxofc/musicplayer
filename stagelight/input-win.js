@@ -59,11 +59,18 @@ public static class SL {
     } finally { CloseHandle(p); }
   }
   static int self = -1;
+  // a window in front that runs as administrator blocks every click and key, wherever they go:
+  // its name then starts with * (for keys, the window in front is the one that gets them anyway)
   public static string Blocked(bool front) {
     if (self < 0) self = Elevated((uint)System.Diagnostics.Process.GetCurrentProcess().Id);
     if (self == 1) return null;
+    string f = ElevatedName(GetForegroundWindow());
+    if (f != null) return front ? f : "*" + f;
+    if (front) return null;
     POINT pt; GetCursorPos(out pt);
-    IntPtr w = front ? GetForegroundWindow() : WindowFromPoint(pt);
+    return ElevatedName(WindowFromPoint(pt));
+  }
+  static string ElevatedName(IntPtr w) {
     if (w == IntPtr.Zero) return null;
     uint pid; GetWindowThreadProcessId(w, out pid);
     if (pid == 0 || Elevated(pid) == 0) return null;

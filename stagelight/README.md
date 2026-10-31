@@ -133,6 +133,12 @@ Stagelight is made to stay out of OBS's way:
   Properties → Compatibility), or run that program normally
 - the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
   Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
+- **run as administrator** (settings → remote display, Windows): Windows blocks clicks and keys from
+  Stagelight into programs that run as administrator (Task Manager, often OBS), and while one of
+  them is in front, all of them. **restart as administrator** fixes it now (Windows asks first);
+  **always run as administrator** sets up a Task Scheduler task with highest privileges so it
+  starts that way without asking, also with Windows (opening Stagelight the usual way hands over
+  to the task)
 - each click is answered by the stream PC: the trackpad dot flashes and the bar says where it
   landed (**clicked OBS**, **Task Manager blocked it**); no answer within 5 s says so, and if
   Windows won't let the mouse/keyboard helper (PowerShell) start, the panel says why

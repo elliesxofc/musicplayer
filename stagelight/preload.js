@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('stagelight', {
   removeAccount: name => ipcRenderer.invoke('remove-account', String(name)),
   setPort: port => ipcRenderer.invoke('set-port', Number(port)),
   autostart: on => ipcRenderer.invoke('autostart', !!on),
+  adminRestart: () => ipcRenderer.invoke('admin-restart'),
+  adminAlways: on => ipcRenderer.invoke('admin-always', !!on),
   logoutAll: () => ipcRenderer.invoke('logout-all'),
   setRemote: settings => ipcRenderer.invoke('set-remote', settings),
   setRemoteMax: max => ipcRenderer.invoke('set-remote-max', Number(max)),

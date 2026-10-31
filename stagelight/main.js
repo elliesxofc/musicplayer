@@ -13,6 +13,7 @@ const crypto = require('node:crypto');
 const { createObs } = require('./obs');
 const { createServer, hashPassword, ROLES } = require('./server');
 const { createRemote } = require('./remote');
+const admin = require('./admin');
 
 // the remote display's video goes straight between the PCs: real addresses (not hidden ones)
 // so a phone on the same network or Tailscale finds this PC
@@ -27,7 +28,14 @@ const ICON = path.join(ROOT, 'icons', 'icon-256.png');
 
 app.setName('Stagelight'); // its own settings folder, apart from moonlit's
 if (process.platform === 'win32') app.setAppUserModelId('io.github.elliesxofc.stagelight');
-if (!app.requestSingleInstanceLock()) { app.quit(); return; }
+// a copy started as administrator (by Stagelight itself) waits for the one that started it to close
+const handedOver = process.argv.includes('--elevated') || process.argv.includes('--task');
+let locked = app.requestSingleInstanceLock();
+for (let i = 0; !locked && handedOver && i < 40; i++) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  locked = app.requestSingleInstanceLock();
+}
+if (!locked) { app.quit(); return; }
 
 /* ───────────── settings file (the OBS password is encrypted, the panel password hashed) ───────────── */
 const configPath = () => path.join(app.getPath('userData'), 'stagelight.json');
@@ -150,7 +158,10 @@ function status() {
 
 async function startServer() {
   try {
-    await server.start(panelPort());
+    // the copy this one took over from may still be letting go of the port for a moment
+    for (let i = 0; ; i++) {
+      try { await server.start(panelPort()); break; } catch (err) { if (err.code !== 'EADDRINUSE' || !handedOver || i >= 12) throw err; await new Promise(r => setTimeout(r, 500)); }
+    }
     log(`panel ready on port ${server.port()}`);
   } catch (err) {
     log(`couldn't open the panel on port ${panelPort()} (${err.code === 'EADDRINUSE' ? 'another program uses it, pick another port' : err.message})`);
@@ -167,7 +178,7 @@ function showWindow() {
     webPreferences: { preload: path.join(ROOT, 'preload.js'), contextIsolation: true, sandbox: true },
   });
   win.loadFile(path.join(ROOT, 'settings.html'));
-  win.once('ready-to-show', () => { if (!process.argv.includes('--hidden')) win.show(); });
+  win.once('ready-to-show', () => { if (!startHidden) win.show(); });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', e => e.preventDefault());
   // closing the window keeps Stagelight running in the tray (the panel keeps working); the window
@@ -197,11 +208,29 @@ function refreshTray(force = false) {
   ]));
 }
 
-app.on('second-instance', showWindow);
+/* Started by Windows (with Windows, or the "always as administrator" task): hidden in the tray,
+   unless a copy that handed over to the task was opened by someone (then the window shows). */
+let startHidden = process.argv.includes('--hidden');
+if (process.argv.includes('--task')) { startHidden = !readConfig().showNext; if (readConfig().showNext) writeConfig({ showNext: undefined }); }
+let elevated = false;
+
+app.on('second-instance', () => { startHidden = false; showWindow(); });
 app.on('before-quit', () => { quitting = true; remote.stop(); obs.stop(); server.stop(); });
 app.on('window-all-closed', () => { /* stays in the tray */ });
 
 app.whenReady().then(async () => {
+  elevated = await admin.isAdmin();
+  // "always as administrator": a copy opened the usual way hands over to the task (no prompt)
+  if (process.platform === 'win32' && readConfig().admin && !elevated && !handedOver) {
+    if (await admin.hasTask()) {
+      writeConfig({ showNext: !process.argv.includes('--hidden') });
+      app.releaseSingleInstanceLock();
+      if (await admin.runTask()) { app.exit(0); return; }
+      app.requestSingleInstanceLock();
+      writeConfig({ showNext: undefined });
+    }
+    log("Stagelight should run as administrator but couldn't start that way: use \"restart as administrator\" below");
+  }
   Menu.setApplicationMenu(null);
   tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 32, height: 32 }));
   tray.on('click', showWindow);
@@ -223,7 +252,8 @@ ipcMain.handle('get', () => {
     obs: { host: o.host, port: o.port, hasPassword: !!o.password },
     accounts: accounts().map(a => ({ name: a.name, role: a.role })),
     port: panelPort(),
-    autostart: app.getLoginItemSettings().openAtLogin,
+    autostart: c.admin ? !!c.autostart : app.getLoginItemSettings().openAtLogin,
+    admin: { on: elevated, always: !!c.admin, windows: process.platform === 'win32' },
     remote: { ...remoteSettings(), controlWorks: remote.canControl() },
     status: status(),
     log: logLines,
@@ -271,9 +301,43 @@ ipcMain.handle('set-port', async (_e, port) => {
   await startServer();
   return { ok: server.port() === port, status: status() };
 });
-ipcMain.handle('autostart', (_e, on) => {
+ipcMain.handle('autostart', async (_e, on) => {
+  // always as administrator: the task starts it with Windows (the usual way would start it without)
+  if (readConfig().admin) {
+    const r = await admin.makeTask(app, !!on);
+    if (r.ok) writeConfig({ autostart: !!on });
+    else log(`couldn't change starting with Windows: ${r.error}`);
+    return !!readConfig().autostart;
+  }
   app.setLoginItemSettings({ openAtLogin: !!on, args: ['--hidden'] });
   return app.getLoginItemSettings().openAtLogin;
+});
+// run as administrator: now (Windows asks first), or always (a task, set up while running as one)
+ipcMain.handle('admin-restart', async () => {
+  if (elevated) return { ok: true };
+  app.releaseSingleInstanceLock();
+  if (await admin.restartElevated(app, ['--elevated'])) { log('restarting as administrator'); quitting = true; app.exit(0); return { ok: true }; }
+  app.requestSingleInstanceLock();
+  return { ok: false, error: 'Windows asked and it was declined (or it couldn\'t ask): nothing changed' };
+});
+ipcMain.handle('admin-always', async (_e, on) => {
+  const c = readConfig();
+  if (on) {
+    if (!elevated) return { ok: false, error: 'restart as administrator first, then switch this on' };
+    const startup = c.admin ? !!c.autostart : app.getLoginItemSettings().openAtLogin;
+    const r = await admin.makeTask(app, startup);
+    if (!r.ok) return { ok: false, error: `Windows didn't make the task: ${r.error}` };
+    // starting with Windows is the task's job now (the usual way would start it without)
+    app.setLoginItemSettings({ openAtLogin: false });
+    writeConfig({ admin: true, autostart: startup });
+    log('Stagelight now always starts as administrator');
+  } else {
+    await admin.removeTask();
+    if (c.autostart) app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] });
+    writeConfig({ admin: false, autostart: undefined });
+    log('Stagelight no longer starts as administrator');
+  }
+  return { ok: true, always: !!readConfig().admin, autostart: on ? !!readConfig().autostart : app.getLoginItemSettings().openAtLogin };
 });
 // the remote display: watching, and mouse and keyboard (both off unless switched on here)
 ipcMain.handle('set-remote', (_e, next) => {

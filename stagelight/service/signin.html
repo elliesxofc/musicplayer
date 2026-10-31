@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Stagelight · sign in to Windows</title>
+<!-- Served by Stagelight's service while nobody is signed in to Windows on the stream PC (Stagelight
+     itself isn't running then): log in, see the sign-in screen, click and type to sign in. -->
+<style>
+  :root { --bg: #0d0b1a; --bg2: #171330; --ink: #f4f1ff; --muted: #a9a2c8; --line: rgba(255, 255, 255, .12); --amber: #ffb547; --bad: #ff7a8a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  button, input { font: inherit; }
+  .btn { min-height: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255, 255, 255, .06); color: var(--ink); cursor: pointer; }
+  .btn.primary { border: 0; background: linear-gradient(90deg, #ff9a3c, #b083ff); color: #140d05; font-weight: 600; }
+  .btn:active { transform: translateY(1px); }
+  input { height: 44px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0, 0, 0, .3); color: var(--ink); font-size: 16px; outline: none; width: 100%; }
+  input:focus { border-color: var(--amber); }
+  #login { max-width: 380px; margin: 0 auto; padding: 48px 16px; display: grid; gap: 12px; }
+  #login h1 { font-size: 22px; margin: 0; }
+  #login p { margin: 0; color: var(--muted); font-size: 14px; }
+  #err { color: var(--bad); min-height: 20px; font-size: 14px; }
+  #remote { position: fixed; inset: 0; display: flex; flex-direction: column; }
+  #remote[hidden], #login[hidden] { display: none; }
+  .bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 8px 10px; background: var(--bg2); border-bottom: 1px solid var(--line); }
+  .bar .state { flex: 1; min-width: 120px; color: var(--muted); font-size: 13px; }
+  .stage { flex: 1; min-height: 0; position: relative; background: #000; touch-action: none; user-select: none; -webkit-user-select: none; outline: none; }
+  .stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+  .keys { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: var(--bg2); border-top: 1px solid var(--line); }
+  .keys .type { display: flex; gap: 6px; width: 100%; }
+  #toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); background: rgba(18, 14, 36, .96); border: 1px solid var(--line); padding: 10px 14px; border-radius: 12px; max-width: 90vw; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <form id="login">
+    <h1>Stagelight · sign in to Windows</h1>
+    <p>nobody is signed in to Windows on the stream PC yet, so Stagelight isn't running. log in with a <b>full access</b> account to see the sign-in screen and sign in. Stagelight's panel comes back once Windows is signed in.</p>
+    <input id="user" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="username" required>
+    <input id="pass" type="password" autocomplete="current-password" placeholder="password" required>
+    <button class="btn primary" type="submit">log in</button>
+    <div id="err"></div>
+  </form>
+
+  <div id="remote" hidden>
+    <div class="bar">
+      <span class="state" id="state">sign-in screen</span>
+      <button class="btn" id="sas" type="button">ctrl + alt + del</button>
+      <button class="btn" id="out" type="button">log out</button>
+    </div>
+    <div class="stage" id="stage" tabindex="0"><img id="screen" alt="the stream PC's sign-in screen"></div>
+    <div class="keys">
+      <div class="type">
+        <input id="text" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="type (a PIN or password), then send">
+        <button class="btn primary" id="send" type="button">send</button>
+      </div>
+      <button class="btn" data-vk="13" type="button">enter</button>
+      <button class="btn" data-vk="8" type="button">⌫</button>
+      <button class="btn" data-vk="9" type="button">tab</button>
+      <button class="btn" data-vk="27" type="button">esc</button>
+      <button class="btn" data-vk="32" type="button">space</button>
+    </div>
+  </div>
+  <div id="toast"></div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+let toastTimer = 0;
+const toast = (t, ms = 3000) => { $('#toast').textContent = t; $('#toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('show'), ms); };
+const post = (path, body) => fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Stagelight': '1' }, body: JSON.stringify(body) });
+
+/* ───── logging in ───── */
+$('#login').onsubmit = async e => {
+  e.preventDefault();
+  $('#err').textContent = '';
+  const r = await post('/api/login', { username: $('#user').value, password: $('#pass').value }).catch(() => null);
+  if (!r) { $('#err').textContent = "couldn't reach the stream PC"; return; }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { $('#err').textContent = d.error || `error ${r.status}`; return; }
+  $('#pass').value = '';
+  showRemote();
+};
+$('#out').onclick = async () => { await post('/api/logout', {}).catch(() => {}); location.reload(); };
+
+/* ───── the screen: a picture a few times a second ───── */
+let running = false, lastUrl = '';
+function showRemote() {
+  $('#login').hidden = true; $('#remote').hidden = false;
+  if (!running) { running = true; loop(); }
+  $('#stage').focus();
+}
+async function loop() {
+  let misses = 0;
+  while (running) {
+    try {
+      const r = await fetch(`/api/shot?w=${Math.min(1920, Math.round(innerWidth * devicePixelRatio))}`, { credentials: 'same-origin', cache: 'no-store' });
+      if (r.status === 401) { running = false; location.reload(); return; }
+      if (r.ok) {
+        const url = URL.createObjectURL(await r.blob());
+        $('#screen').src = url;
+        if (lastUrl) URL.revokeObjectURL(lastUrl);
+        lastUrl = url; misses = 0;
+        $('#state').textContent = 'sign-in screen · tap to click, type below';
+      } else misses++;
+    } catch { misses++; }
+    // gone: someone signed in, and Stagelight's own panel takes the address back in a moment
+    if (misses >= 3) { $('#state').textContent = 'Windows is signed in: opening Stagelight…'; await new Promise(r => setTimeout(r, 3000)); location.reload(); return; }
+    await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+/* ───── mouse and keyboard ───── */
+let queue = [], timer = 0;
+const sendEv = (...lines) => { queue.push(...lines); if (!timer) timer = setTimeout(flush, 40); };
+function flush() { timer = 0; const events = queue.splice(0); if (events.length) post('/api/input', { events }).catch(() => {}); }
+// where on the PC's screen, 0…1 (the picture is letterboxed in the box)
+function at(e) {
+  const img = $('#screen'), r = $('#stage').getBoundingClientRect();
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  if (!iw) return null;
+  const k = Math.min(r.width / iw, r.height / ih), w = iw * k, h = ih * k, x0 = r.left + (r.width - w) / 2, y0 = r.top + (r.height - h) / 2;
+  const fx = (e.clientX - x0) / w, fy = (e.clientY - y0) / h;
+  if (fx < 0 || fy < 0 || fx > 1 || fy > 1) return null;
+  return `m ${fx.toFixed(5)} ${fy.toFixed(5)}`;
+}
+const BTN = { 0: [2, 4], 2: [8, 16] };
+let held = null;
+$('#stage').addEventListener('pointerdown', e => {
+  const m = at(e); if (!m) return;
+  e.preventDefault(); $('#stage').focus();
+  if (e.pointerType === 'touch') {
+    // a tap clicks, a long press right-clicks
+    held = { m, t: Date.now(), x: e.clientX, y: e.clientY };
+    return;
+  }
+  const b = BTN[e.button]; if (!b) return;
+  sendEv(m, `B ${b[0]} ?`);
+});
+$('#stage').addEventListener('pointerup', e => {
+  if (e.pointerType === 'touch') {
+    if (!held || Math.hypot(e.clientX - held.x, e.clientY - held.y) > 24) { held = null; return; }
+    const b = Date.now() - held.t > 550 ? BTN[2] : BTN[0];
+    sendEv(held.m, `B ${b[0]} ?`, `B ${b[1]}`); held = null;
+    return;
+  }
+  const b = BTN[e.button]; if (!b) return;
+  const m = at(e); if (m) sendEv(m);
+  sendEv(`B ${b[1]}`);
+});
+$('#stage').addEventListener('pointermove', e => { if (e.pointerType !== 'touch' && e.buttons) { const m = at(e); if (m) sendEv(m); } });
+$('#stage').addEventListener('contextmenu', e => e.preventDefault());
+$('#stage').addEventListener('wheel', e => { e.preventDefault(); sendEv(`W ${Math.max(-1200, Math.min(1200, Math.round(-e.deltaY)))}`); }, { passive: false });
+
+// a real keyboard on the screen: KeyboardEvent.code → Windows key code [vk, extended]
+const VK = (() => {
+  const m = { Enter: [13], Escape: [27], Backspace: [8], Tab: [9], Space: [32], CapsLock: [20], ShiftLeft: [160], ShiftRight: [161], ControlLeft: [162], ControlRight: [163, 1], AltLeft: [164], AltRight: [165, 1], MetaLeft: [91, 1],
+    ArrowLeft: [37, 1], ArrowUp: [38, 1], ArrowRight: [39, 1], ArrowDown: [40, 1], Delete: [46, 1], Home: [36, 1], End: [35, 1],
+    Minus: [189], Equal: [187], BracketLeft: [219], BracketRight: [221], Backslash: [220], Semicolon: [186], Quote: [222], Backquote: [192], Comma: [188], Period: [190], Slash: [191], NumpadEnter: [13, 1] };
+  for (let i = 0; i < 26; i++) m[`Key${String.fromCharCode(65 + i)}`] = [65 + i];
+  for (let i = 0; i < 10; i++) { m[`Digit${i}`] = [48 + i]; m[`Numpad${i}`] = [96 + i]; }
+  for (let i = 1; i <= 12; i++) m[`F${i}`] = [111 + i];
+  return m;
+})();
+const key = (code, up) => { const k = VK[code]; if (k) sendEv(`K ${k[0]} ${up ? 1 : 0} ${k[1] ? 1 : 0}`); };
+$('#stage').addEventListener('keydown', e => { if (VK[e.code]) { e.preventDefault(); key(e.code, false); } });
+$('#stage').addEventListener('keyup', e => { if (VK[e.code]) { e.preventDefault(); key(e.code, true); } });
+
+// phones: type into the box and send (a PIN, a password); the keys phones don't have
+const b64 = s => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+$('#send').onclick = () => { const t = $('#text').value; if (!t) return; sendEv(`T ${b64(t)}`); $('#text').value = ''; toast('typed on the stream PC'); };
+$('#text').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#send').click(); } });
+document.querySelectorAll('[data-vk]').forEach(b => { b.onclick = () => { const vk = b.dataset.vk; sendEv(`K ${vk} 0 0`, `K ${vk} 1 0`); }; });
+$('#sas').onclick = () => { sendEv('sas'); toast('ctrl + alt + del sent'); };
+
+// already logged in (a reload): straight to the screen
+fetch('/api/shot?w=320', { credentials: 'same-origin', cache: 'no-store' }).then(r => { if (r.ok) showRemote(); }).catch(() => {});
+</script>
+</body>
+</html>

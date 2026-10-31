@@ -68,8 +68,8 @@ function showAdmin(a) {
 function showService(state, on) {
   const there = state && state !== 'missing';
   $('#serviceState').innerHTML = there
-    ? `<b>the service is installed${state === 'running' ? ' ✓' : ` (${state})`}</b> mouse and keyboard work everywhere, also on Windows' prompts and the lock screen (ctrl + alt + del is under keys in the panel). it's used while Stagelight runs as administrator.`
-    : "<b>the service (optional, like AnyDesk's)</b> lets the remote display also use Windows' \"do you want to allow\" prompts and the lock screen, and shows them in the panel. it runs in the background as part of Windows.";
+    ? `<b>the service is installed${state === 'running' ? ' ✓' : ` (${state})`}</b> mouse and keyboard work everywhere, also on Windows' prompts and the lock screen (ctrl + alt + del is under keys in the panel). it's used while Stagelight runs as administrator. before anyone signs in to Windows (after a restart), the panel's address shows a sign-in page: log in with a full access account to sign in to Windows from there.`
+    : "<b>the service (optional, like AnyDesk's)</b> lets the remote display also use Windows' \"do you want to allow\" prompts and the lock screen, shows them in the panel, and lets you sign in to Windows from the panel's address after a restart. it runs in the background as part of Windows.";
   $('#serviceBtn').textContent = there ? 'remove the service' : 'install the service';
   $('#serviceBtn').dataset.there = there ? '1' : '';
   $('#serviceBtn').disabled = !on;

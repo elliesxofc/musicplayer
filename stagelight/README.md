@@ -147,6 +147,14 @@ Stagelight is made to stay out of OBS's way:
   normal screen sharing can't see them). It's copied to Program Files, and only a Stagelight
   running as administrator can use it (its pipe is for administrators and SYSTEM). Without it,
   the PowerShell helper does the clicking as before
+- **before anyone signs in** (with the service): after a restart, or signed out, Stagelight isn't
+  running, so the service answers on the panel's address with a small sign-in page
+  (`service/signin.html`): log in with a full access account (the same accounts, checked against
+  their scrypt hashes in Stagelight's settings file), see the sign-in screen a few times a second,
+  tap, type a PIN or password, ctrl + alt + del. Once Windows is signed in it steps aside and
+  Stagelight's panel takes the address back. Only while the remote display with mouse and keyboard
+  is on. Tailscale needs "run unattended" and cloudflared needs to run as a Windows service to be
+  reachable before sign-in
 - each click is answered by the stream PC: the trackpad dot flashes and the bar says where it
   landed (**clicked OBS**, **Task Manager blocked it**); no answer within 5 s says so, and if
   Windows won't let the mouse/keyboard helper (PowerShell) start, the panel says why

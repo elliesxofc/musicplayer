@@ -160,7 +160,8 @@ async function startServer() {
   try {
     // the copy this one took over from may still be letting go of the port for a moment
     for (let i = 0; ; i++) {
-      try { await server.start(panelPort()); break; } catch (err) { if (err.code !== 'EADDRINUSE' || !handedOver || i >= 12) throw err; await new Promise(r => setTimeout(r, 500)); }
+      // (or the service's page from before Windows was signed in: it steps aside within seconds)
+      try { await server.start(panelPort()); break; } catch (err) { if (err.code !== 'EADDRINUSE' || i >= 30) throw err; await new Promise(r => setTimeout(r, 500)); }
     }
     log(`panel ready on port ${server.port()}`);
   } catch (err) {
@@ -232,7 +233,7 @@ app.whenReady().then(async () => {
     log("Stagelight should run as administrator but couldn't start that way: use \"restart as administrator\" below");
   }
   // a newer Stagelight brings a newer service
-  if (elevated) admin.updateService(app).then(done => { if (done) log('service updated'); });
+  if (elevated) admin.updateService(app, serviceWhere()).then(done => { if (done) log('service updated'); });
   Menu.setApplicationMenu(null);
   tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 32, height: 32 }));
   tray.on('click', showWindow);
@@ -301,6 +302,8 @@ ipcMain.handle('set-port', async (_e, port) => {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { ok: false, error: 'pick a port between 1024 and 65535' };
   writeConfig({ port });
   await startServer();
+  // the service's page before sign-in uses the same port: its firewall rule follows
+  if (elevated && (await admin.serviceState()) !== 'missing') admin.installService(app, serviceWhere()).catch(() => {});
   return { ok: server.port() === port, status: status() };
 });
 ipcMain.handle('autostart', async (_e, on) => {
@@ -322,10 +325,12 @@ ipcMain.handle('admin-restart', async () => {
   app.requestSingleInstanceLock();
   return { ok: false, error: 'Windows asked and it was declined (or it couldn\'t ask): nothing changed' };
 });
+// what the service needs for its page before anyone signs in: the accounts, and the panel's port
+const serviceWhere = () => ({ config: configPath(), port: panelPort() });
 // the service (like AnyDesk's): mouse and keyboard also on Windows' prompts and the lock screen
 ipcMain.handle('service', async (_e, install) => {
   if (!elevated) return { ok: false, error: 'restart as administrator first' };
-  const r = install ? await admin.installService(app) : await admin.removeService();
+  const r = install ? await admin.installService(app, serviceWhere()) : await admin.removeService();
   log(r.ok ? (install ? 'service installed: the remote display works everywhere (prompts, lock screen, programs run as administrator)' : 'service removed') : `service: ${r.error}`);
   return { ...r, state: await admin.serviceState() };
 });

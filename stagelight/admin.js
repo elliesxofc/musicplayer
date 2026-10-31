@@ -87,6 +87,9 @@ const serviceDir = () => path.join(process.env.ProgramFiles || 'C:\\Program File
 const serviceExe = () => path.join(serviceDir(), 'stagelight-service.exe');
 // the one that comes with this version of Stagelight
 const bundledExe = app => (app.isPackaged ? path.join(process.resourcesPath, 'stagelight-service.exe') : path.join(__dirname, 'service', 'bin', 'stagelight-service.exe'));
+// the page it shows before anyone signs in to Windows
+const bundledPage = app => (app.isPackaged ? path.join(process.resourcesPath, 'signin.html') : path.join(__dirname, 'service', 'signin.html'));
+const RULE = 'Stagelight sign-in screen';
 
 // 'missing' | 'stopped' | 'running' | 'other'
 async function serviceState() {
@@ -97,7 +100,10 @@ async function serviceState() {
 }
 const sameFile = (a, b) => { try { return fs.readFileSync(a).equals(fs.readFileSync(b)); } catch { return false; } };
 
-async function installService(app) {
+/* where: Stagelight's settings file (the service reads the accounts and the panel's port from it,
+   for the page before anyone signs in) and that port (let through Windows' firewall for the home
+   network and Tailscale, as Stagelight itself is) */
+async function installService(app, { config, port }) {
   if (!win) return { ok: false, error: 'Windows only' };
   const from = bundledExe(app);
   if (!fs.existsSync(from)) return { ok: false, error: "this copy of Stagelight doesn't include the service" };
@@ -106,8 +112,9 @@ async function installService(app) {
   try {
     fs.mkdirSync(serviceDir(), { recursive: true });
     fs.copyFileSync(from, serviceExe());
+    if (fs.existsSync(bundledPage(app))) fs.copyFileSync(bundledPage(app), path.join(serviceDir(), 'signin.html'));
   } catch (err) { return { ok: false, error: `couldn't copy it to Program Files (${err.code || err.message})` }; }
-  const bin = `"${serviceExe()}"`;
+  const bin = `"${serviceExe()}" --config "${config}"`;
   const made = state === 'missing'
     ? await run('sc', ['create', SERVICE, 'binPath=', bin, 'start=', 'auto', 'obj=', 'LocalSystem', 'DisplayName=', 'Stagelight remote display'])
     : await run('sc', ['config', SERVICE, 'binPath=', bin, 'start=', 'auto']);
@@ -116,6 +123,8 @@ async function installService(app) {
   await run('sc', ['failure', SERVICE, 'reset=', '86400', 'actions=', 'restart/5000/restart/5000/restart/30000']);
   // lets a service press ctrl + alt + del (Windows' "software secure attention sequence" policy)
   await run('reg', ['add', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'SoftwareSASGeneration', '/t', 'REG_DWORD', '/d', '1', '/f']);
+  await run('netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=${RULE}`]);
+  await run('netsh', ['advfirewall', 'firewall', 'add', 'rule', `name=${RULE}`, 'dir=in', 'action=allow', 'protocol=TCP', `localport=${port}`, 'profile=private,domain']);
   const started = await run('sc', ['start', SERVICE]);
   if (!started.ok && !/already/i.test(started.out)) return { ok: false, error: `registered, but it didn't start: ${started.out.trim().slice(0, 160)}` };
   return { ok: true };
@@ -126,16 +135,18 @@ async function removeService() {
   await run('sc', ['stop', SERVICE]);
   await new Promise(r => setTimeout(r, 1500));
   const r = await run('sc', ['delete', SERVICE]);
+  await run('netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=${RULE}`]);
   try { fs.rmSync(serviceDir(), { recursive: true, force: true }); } catch { /* still in use: goes after a restart */ }
   return r.ok || /does not exist/i.test(r.out) ? { ok: true } : { ok: false, error: r.out.trim().slice(0, 200) };
 }
 
 // a newer Stagelight brings a newer service: swapped in (while running as administrator)
-async function updateService(app) {
+async function updateService(app, where) {
   if (!win || (await serviceState()) === 'missing') return false;
   const from = bundledExe(app);
-  if (!fs.existsSync(from) || sameFile(from, serviceExe())) return false;
-  return (await installService(app)).ok;
+  if (!fs.existsSync(from)) return false;
+  if (sameFile(from, serviceExe()) && (!fs.existsSync(bundledPage(app)) || sameFile(bundledPage(app), path.join(serviceDir(), 'signin.html')))) return false;
+  return (await installService(app, where)).ok;
 }
 
 module.exports = { isAdmin, restartElevated, makeTask, hasTask, runTask, removeTask, serviceState, installService, removeService, updateService };

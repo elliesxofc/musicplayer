@@ -147,6 +147,11 @@ Stagelight is made to stay out of OBS's way:
   normal screen sharing can't see them). It's copied to Program Files, and only a Stagelight
   running as administrator can use it (its pipe is for administrators and SYSTEM). Without it,
   the PowerShell helper does the clicking as before
+- **set up by itself**: installing Stagelight asks Windows once (Stagelight runs as administrator for
+  a moment, `--setup-service`) and sets up the service and "always run as administrator"; updates
+  don't ask again. Stagelight running as administrator also installs a missing service by itself,
+  unless it was removed on purpose. Uninstalling removes the service and the task
+  (`build/installer.nsh`)
 - **keeps Stagelight running** (with the service, on unless switched off): if Stagelight closes by
   accident or crashes while someone is signed in, the service starts it again within about 10 s
   (in the tray, as that person, as administrator with "always run as administrator"). Quitting

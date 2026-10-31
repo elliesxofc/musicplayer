@@ -28,6 +28,31 @@ const ICON = path.join(ROOT, 'icons', 'icon-256.png');
 
 app.setName('Stagelight'); // its own settings folder, apart from moonlit's
 if (process.platform === 'win32') app.setAppUserModelId('io.github.elliesxofc.stagelight');
+/* Set up by the installer (Windows asks once: it runs this as administrator): Stagelight's service
+   and "always run as administrator", then it closes. --remove-service undoes both (uninstalling).
+   --config: the settings file of the person installing. */
+if (process.argv.includes('--setup-service') || process.argv.includes('--remove-service')) {
+  app.whenReady().then(async () => {
+    const at = process.argv.indexOf('--config');
+    const file = at > 0 && process.argv[at + 1] ? process.argv[at + 1] : path.join(app.getPath('userData'), 'stagelight.json');
+    let c = {}; try { c = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* a first install */ }
+    const save = patch => { c = { ...c, ...patch }; try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(c, null, 2)); } catch { /* fine */ } };
+    const admin = require('./admin');
+    if (process.argv.includes('--remove-service')) {
+      await admin.removeService(); await admin.removeTask();
+      if (c.admin && c.autostart) app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] });
+      save({ admin: false, autostart: undefined });
+      return;
+    }
+    if (c.serviceOff) return; // removed on purpose earlier: left alone
+    const r = await admin.installService(app, { config: file, port: Math.max(1024, Math.min(65535, Number(c.port) || 4850)), exe: process.execPath });
+    if (!r.ok) return;
+    const startup = c.admin ? !!c.autostart : app.getLoginItemSettings().openAtLogin;
+    if ((await admin.makeTask(app, startup)).ok) { app.setLoginItemSettings({ openAtLogin: false }); save({ admin: true, autostart: startup }); }
+  }).catch(() => {}).finally(() => app.exit(0));
+  return;
+}
+
 // a copy started as administrator (by Stagelight itself) waits for the one that started it to close
 const handedOver = process.argv.includes('--elevated') || process.argv.includes('--task');
 let locked = app.requestSingleInstanceLock();
@@ -251,7 +276,17 @@ app.whenReady().then(async () => {
     log("Stagelight should run as administrator but couldn't start that way: use \"restart as administrator\" below");
   }
   // a newer Stagelight brings a newer service
-  if (elevated) admin.updateService(app, serviceWhere()).then(done => { if (done) log('service updated'); });
+  // the service is set up by itself while running as administrator (unless it was removed on
+  // purpose), and a newer Stagelight brings a newer service
+  if (elevated && app.isPackaged) {
+    (async () => {
+      if ((await admin.serviceState()) === 'missing') {
+        if (readConfig().serviceOff) return;
+        const r = await admin.installService(app, serviceWhere());
+        log(r.ok ? 'service installed by itself (Stagelight runs as administrator)' : `couldn't install the service: ${r.error}`);
+      } else if (await admin.updateService(app, serviceWhere())) log('service updated');
+    })().catch(() => {});
+  }
   Menu.setApplicationMenu(null);
   tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 32, height: 32 }));
   // the tray icon opens the window, and clicking it again hides it (Stagelight keeps running)
@@ -353,6 +388,8 @@ const serviceWhere = () => ({ config: configPath(), port: panelPort(), exe: app.
 ipcMain.handle('service', async (_e, install) => {
   if (!elevated) return { ok: false, error: 'restart as administrator first' };
   const r = install ? await admin.installService(app, serviceWhere()) : await admin.removeService();
+  // removed on purpose: not set up again by itself (installing it again undoes that)
+  if (r.ok) writeConfig({ serviceOff: install ? undefined : true });
   log(r.ok ? (install ? 'service installed: the remote display works everywhere (prompts, lock screen, programs run as administrator)' : 'service removed') : `service: ${r.error}`);
   return { ...r, state: await admin.serviceState() };
 });

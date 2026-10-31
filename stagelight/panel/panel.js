@@ -700,6 +700,7 @@ async function relayConnect() {
           if (msg.t === 'end' && rd && rd.gen === gen) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); return; }
           if (msg.t === 'note' && typeof msg.text === 'string') toast(msg.text.slice(0, 240), msg.text.length > 100 ? 8000 : 4000);
           if (msg.t === 'clip' && rd && rd.gen === gen) clipFromPc(msg.text);
+          if (msg.t === 'ack' && rd && rd.gen === gen) clickArrived(msg.on, msg.blocked);
         }
       }
     }
@@ -733,6 +734,7 @@ async function rdConnect() {
     if (msg.t === 'end' && rd && rd.pc === pc) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); }
     if (msg.t === 'note' && rd && rd.pc === pc && typeof msg.text === 'string') toast(msg.text.slice(0, 240), msg.text.length > 100 ? 8000 : 4000);
     if (msg.t === 'clip' && rd && rd.pc === pc) clipFromPc(msg.text);
+    if (msg.t === 'ack' && rd && rd.pc === pc) clickArrived(msg.on, msg.blocked);
   };
   pc.addTransceiver('video', { direction: 'recvonly' });
   pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };
@@ -779,7 +781,7 @@ function rdClose(tell = true) {
   if (!rd) return;
   const was = rd;
   relayStop();
-  clearTimeout(was.fallTimer);
+  clearTimeout(was.fallTimer); clearTimeout(was.ackTimer);
   rd = null;
   if (was.pc) was.pc.close();
   rdVideo.srcObject = null;
@@ -796,8 +798,27 @@ $('#rdFull').onclick = () => (document.fullscreenElement ? document.exitFullscre
 $('#rdKeys').onclick = () => { $('#rdKeyPad').hidden = !$('#rdKeyPad').hidden; $('#rdClipPad').hidden = true; };
 $('#rdClip').onclick = () => { $('#rdClipPad').hidden = !$('#rdClipPad').hidden; $('#rdKeyPad').hidden = true; };
 
+/* Each click is said back by the stream PC: the pointer dot flashes, so a tap that did nothing
+   on the PC can be told apart from one that never got there. No answer: say so (once). */
+function clickSent() {
+  if (rd.ackTimer) return;
+  rd.ackTimer = setTimeout(() => {
+    rd.ackTimer = null;
+    if (!rd || rd.ackSaid) return;
+    rd.ackSaid = true;
+    toast("the stream PC didn't answer that click: its mouse and keyboard may not be working. restart Stagelight on the stream PC (as administrator), or check the connection", 8000);
+  }, 5000);
+}
+function clickArrived(on, blocked) {
+  if (!rd) return;
+  clearTimeout(rd.ackTimer); rd.ackTimer = null; rd.ackSaid = false;
+  if (!blocked) { dot.classList.remove('hit'); void dot.offsetWidth; dot.classList.add('hit'); }
+  const names = { explorer: 'Windows', obs64: 'OBS', obs32: 'OBS', Taskmgr: 'Task Manager' }, name = names[on] || String(on || '').slice(0, 30);
+  rdState(`${rd.pcName || 'the PC'} · in control${rd.relay ? ' · via web' : ''}${name ? ` · ${blocked ? `${name} blocked it` : `clicked ${name}`}` : ''}`, true);
+}
 const rdSend = m => {
   if (!rd || !rd.control) return;
+  if (m.t === 'b' && m.d) clickSent();
   if (rd.relay) {
     // through the web address: a few at a time; of several moves in a row only the last one matters
     const q = rd.relayQueue;

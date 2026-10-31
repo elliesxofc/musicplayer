@@ -76,12 +76,17 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   // clicks and keys into a program run as administrator are dropped by Windows: say so (once a while)
   let blockedSaid = { name: '', at: 0 };
   const input = createInput({ log, onBlocked: name => {
+    say({ t: 'ack', on: name, blocked: true }); // it got there, Windows just didn't pass it on
     if (!active || (blockedSaid.name === name && Date.now() - blockedSaid.at < 20_000)) return;
     blockedSaid = { name, at: Date.now() };
     const text = `Windows blocks clicks and keys into ${name} (it runs as administrator). run Stagelight as administrator on the stream PC, or ${name} normally.`;
     log(`remote display: clicks into ${name} are blocked (it runs as administrator; Stagelight doesn't)`);
     say({ t: 'note', text });
-  } });
+  },
+  // each click said back to the panel (so it knows it arrived), with the program it landed in
+  onClicked: name => say({ t: 'ack', on: name }),
+  onFailed: why => say({ t: 'note', text: `mouse and keyboard don't work on the stream PC: Windows didn't let Stagelight's helper (PowerShell) start (${why.slice(0, 120)}). antivirus can do this; restarting Stagelight tries again.` }),
+  });
   // a message for the panel, the way it's connected (direct, or through the web address)
   function say(msg) {
     if (!active) return;
@@ -244,6 +249,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     relayOut.buf = null; relayOut.note = relay && limit.note ? limit.note : '';
     keepAwake(true);
     clipWatch(true);
+    if (active.control && input.broken()) setTimeout(() => say({ t: 'note', text: `mouse and keyboard don't work on the stream PC: Stagelight's helper (PowerShell) couldn't start (${input.broken().slice(0, 120)}). antivirus can do this; restarting Stagelight tries again.` }), 1500);
     onStarted();
     const what = active.control ? 'controlling' : 'watching';
     log(`remote display: ${from} is ${what} this PC${relay ? ' (through the web address)' : ''}`);

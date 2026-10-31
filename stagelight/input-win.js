@@ -69,6 +69,14 @@ public static class SL {
     if (pid == 0 || Elevated(pid) == 0) return null;
     try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { return "a program"; }
   }
+  // the program a click landed in (said back to the panel, so it knows the click arrived)
+  public static string Under() {
+    POINT pt; GetCursorPos(out pt);
+    IntPtr w = WindowFromPoint(pt);
+    if (w == IntPtr.Zero) return "";
+    uint pid; GetWindowThreadProcessId(w, out pid);
+    try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { return ""; }
+  }
   public static void Text(string s) {
     foreach (char c in s) {
       var d = new INPUT(); d.type = 1; d.u.ki.wScan = c; d.u.ki.dwFlags = 4;
@@ -87,7 +95,7 @@ while ($true) {
   try {
     switch ($p[0]) {
       'M' { [SL]::SetCursorPos([int]$p[1], [int]$p[2]) | Out-Null }
-      'B' { [SL]::Mouse([uint32]$p[1], 0); if ($p.Length -gt 2) { $b = [SL]::Blocked($false); if ($b) { [Console]::Out.WriteLine('blocked ' + $b) } } }
+      'B' { [SL]::Mouse([uint32]$p[1], 0); if ($p.Length -gt 2) { $b = [SL]::Blocked($false); if ($b) { [Console]::Out.WriteLine('blocked ' + $b) } else { [Console]::Out.WriteLine('clicked ' + [SL]::Under()) } } }
       'W' { [SL]::Mouse(0x0800, [int]$p[1]) }
       'H' { [SL]::Mouse(0x1000, [int]$p[1]) }
       'K' { [SL]::Key([uint16]$p[1], $p[2] -eq '1', $p[3] -eq '1'); if ($p[2] -eq '0') { $b = [SL]::Blocked($true); if ($b) { [Console]::Out.WriteLine('blocked ' + $b) } } }
@@ -121,28 +129,45 @@ const BUTTONS = { 0: [0x0002, 0x0004], 1: [0x0020, 0x0040], 2: [0x0008, 0x0010] 
 
 const available = () => process.platform === 'win32' || !!process.env.STAGELIGHT_INPUT_CMD;
 
-function createInput({ log = () => {}, onBlocked = () => {} } = {}) {
+function createInput({ log = () => {}, onBlocked = () => {}, onClicked = () => {}, onFailed = () => {} } = {}) {
   let child = null;
   const held = { keys: new Set(), buttons: new Set() };
+  // the helper not starting (PowerShell blocked, say by antivirus) would otherwise drop every click
+  // and key without a word: say why, and stop trying after a few failed starts in a row
+  let fails = 0, broken = '';
 
   function ensure() {
-    if (child) return child;
+    if (child || broken) return child;
     // tests swap PowerShell for a stand-in that writes the commands down
-    child = process.env.STAGELIGHT_INPUT_CMD
-      ? spawn(process.execPath, [process.env.STAGELIGHT_INPUT_CMD], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'ignore'] })
+    const c = child = process.env.STAGELIGHT_INPUT_CMD
+      ? spawn(process.execPath, [process.env.STAGELIGHT_INPUT_CMD], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['pipe', 'pipe', 'pipe'] })
       : spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
-        Buffer.from(SCRIPT, 'utf16le').toString('base64')], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
-    child.stdout.on('data', d => {
-      for (const line of String(d).split(/\r?\n/)) {
-        if (/^blocked /.test(line)) onBlocked(line.slice(8).trim().slice(0, 60));
+        Buffer.from(SCRIPT, 'utf16le').toString('base64')], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    let ready = false, rest = '', err = '';
+    c.stdout.on('data', d => {
+      rest += String(d);
+      const lines = rest.split(/\r?\n/); rest = lines.pop();
+      for (const line of lines) {
+        if (line === 'ready') { ready = true; fails = 0; }
+        else if (/^blocked /.test(line)) onBlocked(line.slice(8).trim().slice(0, 60));
+        else if (/^clicked/.test(line)) onClicked(line.slice(8).trim().slice(0, 60));
         else if (/error/.test(line)) log(`mouse/keyboard: ${line.trim().slice(0, 200)}`);
       }
     });
+    c.stderr.on('data', d => { err = (err + String(d)).slice(-600); });
     // below normal priority, like the rest of Stagelight: OBS comes first
-    try { require('node:os').setPriority(child.pid, require('node:os').constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* fine */ }
-    child.on('exit', () => { child = null; });
-    child.on('error', err => { log(`mouse/keyboard helper failed: ${err.message}`); child = null; });
-    return child;
+    try { require('node:os').setPriority(c.pid, require('node:os').constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* fine */ }
+    const gone = why => {
+      if (child === c) child = null;
+      if (ready) return;
+      const text = why || err.replace(/\s+/g, ' ').trim().slice(0, 300) || 'it stopped right away';
+      log(`mouse/keyboard helper didn't start: ${text}`);
+      if (++fails >= 3) { broken = text; onFailed(text); }
+    };
+    c.on('exit', () => gone(''));
+    c.on('error', e => gone(e.message));
+    c.stdin.on('error', () => { /* it's gone: said above */ });
+    return c;
   }
   const send = line => { const c = ensure(); if (c && c.stdin.writable) c.stdin.write(`${line}\n`); };
 
@@ -176,6 +201,8 @@ function createInput({ log = () => {}, onBlocked = () => {} } = {}) {
       for (const b of held.buttons) this.button(b, false);
     },
     stop() { if (child) { try { child.stdin.end(); } catch { /* gone */ } child = null; } },
+    // why mouse and keyboard don't work ('' when they do, as far as is known)
+    broken: () => broken,
   };
 }
 

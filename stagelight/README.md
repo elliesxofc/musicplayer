@@ -133,6 +133,9 @@ Stagelight is made to stay out of OBS's way:
   Properties → Compatibility), or run that program normally
 - the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
   Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
+- each click is answered by the stream PC: the trackpad dot flashes and the bar says where it
+  landed (**clicked OBS**, **Task Manager blocked it**); no answer within 5 s says so, and if
+  Windows won't let the mouse/keyboard helper (PowerShell) start, the panel says why
 - copy and paste with the stream PC (text, while you're in control): what's copied on the PC comes
   to the panel (and onto your device's clipboard where the browser allows it, like over https), and
   ctrl + v on the remote screen pastes what your device copied; on a phone, the **clipboard**

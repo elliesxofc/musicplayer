@@ -27,7 +27,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force stagelight/service/bin | Out-Null
-          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe /platform:x64 /optimize /out:stagelight/service/bin/stagelight-service.exe /r:System.ServiceProcess.dll /r:System.Drawing.dll stagelight/service/StagelightService.cs
+          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe /platform:x64 /optimize /out:stagelight\service\bin\stagelight-service.exe /r:System.ServiceProcess.dll /r:System.Drawing.dll stagelight\service\StagelightService.cs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run: npx electron-builder --projectDir stagelight --win --x64 --publish never
       - uses: actions/upload-artifact@v4

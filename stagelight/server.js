@@ -271,7 +271,8 @@ function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false
     if (p === '/api/remote/relay/input' && remote) {
       if (!atLeast(session.role, 'full')) return send(res, 403, { error: 'your account has no access to the remote display' });
       let body;
-      try { body = await readBody(req, 50_000); } catch { return send(res, 400, { error: 'bad request' }); }
+      // (text for the stream PC's clipboard comes this way too)
+      try { body = await readBody(req, 500_000); } catch { return send(res, 400, { error: 'bad request' }); }
       const events = Array.isArray(body.events) ? body.events.slice(0, 300) : [];
       for (const ev of events) if (!remote.relayInput(session.token, ev)) return send(res, 409, { error: 'the remote display is not open' });
       return send(res, 200, { ok: true });

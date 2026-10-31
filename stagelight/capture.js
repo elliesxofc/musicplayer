@@ -121,8 +121,9 @@ function applyLimit(next) {
   if (limit.note && channel && channel.readyState === 'open') { try { channel.send(JSON.stringify({ t: 'note', text: limit.note })); } catch { /* fine */ } }
 }
 window.capture.onLimit(next => applyLimit(next));
-// something to tell the panel (like: Windows blocks clicks into a program run as administrator)
-window.capture.onNote(text => { if (channel && channel.readyState === 'open') try { channel.send(JSON.stringify({ t: 'note', text })); } catch { /* fine */ } });
+// something for the panel (a note, like: Windows blocks clicks into a program run as administrator;
+// or text copied on this PC)
+window.capture.onSay(msg => { if (channel && channel.readyState === 'open') try { channel.send(JSON.stringify(msg)); } catch { /* fine */ } });
 
 window.capture.onStart(async job => {
   session++;

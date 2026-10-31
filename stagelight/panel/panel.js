@@ -622,6 +622,8 @@ const rdConnected = () => {
 const rdUseControls = r => {
   rd.control = !!r.control;
   $('#rdKeys').hidden = !rd.control;
+  $('#rdClip').hidden = !rd.control;
+  if (!rd.control) $('#rdClipPad').hidden = true;
   $('#rdTouch').hidden = !rd.control || !matchMedia('(pointer: coarse)').matches;
   dot.hidden = !rd.control || !padMode;
   rdStage.classList.toggle('watch', !rd.control);
@@ -697,6 +699,7 @@ async function relayConnect() {
           let msg; try { msg = JSON.parse(new TextDecoder().decode(body)); } catch { continue; }
           if (msg.t === 'end' && rd && rd.gen === gen) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); return; }
           if (msg.t === 'note' && typeof msg.text === 'string') toast(msg.text.slice(0, 240), msg.text.length > 100 ? 8000 : 4000);
+          if (msg.t === 'clip' && rd && rd.gen === gen) clipFromPc(msg.text);
         }
       }
     }
@@ -729,6 +732,7 @@ async function rdConnect() {
     let msg; try { msg = JSON.parse(m.data); } catch { return; }
     if (msg.t === 'end' && rd && rd.pc === pc) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); }
     if (msg.t === 'note' && rd && rd.pc === pc && typeof msg.text === 'string') toast(msg.text.slice(0, 240), msg.text.length > 100 ? 8000 : 4000);
+    if (msg.t === 'clip' && rd && rd.pc === pc) clipFromPc(msg.text);
   };
   pc.addTransceiver('video', { direction: 'recvonly' });
   pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };
@@ -764,6 +768,8 @@ $('#remoteOpen').onclick = async () => {
   rd = { password: v.password, control: false, ice: info.ice || [], pcName: String(info.pcName || '').slice(0, 64) };
   $('#rd').hidden = false;
   $('#rdKeyPad').hidden = true;
+  $('#rdClipPad').hidden = true;
+  $('#rdClipFrom').value = '';
   Object.assign(cursor, { x: 0.5, y: 0.5 });
   showPadMode();
   rdStage.focus();
@@ -787,7 +793,8 @@ function rdClose(tell = true) {
 $('#rdEnd').onclick = () => rdClose();
 $('#rdScreen').onchange = $('#rdQuality').onchange = () => rdConnect();
 $('#rdFull').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $('#rd').requestFullscreen()).catch(() => {});
-$('#rdKeys').onclick = () => { $('#rdKeyPad').hidden = !$('#rdKeyPad').hidden; };
+$('#rdKeys').onclick = () => { $('#rdKeyPad').hidden = !$('#rdKeyPad').hidden; $('#rdClipPad').hidden = true; };
+$('#rdClip').onclick = () => { $('#rdClipPad').hidden = !$('#rdClipPad').hidden; $('#rdKeyPad').hidden = true; };
 
 const rdSend = m => {
   if (!rd || !rd.control) return;
@@ -1092,8 +1099,37 @@ rdStage.addEventListener('wheel', e => {
 }, { passive: false });
 
 // a real keyboard: everything typed while the screen is focused goes to the PC
-rdStage.addEventListener('keydown', e => { if (!rd || !rd.control) return; e.preventDefault(); rdSend({ t: 'k', code: e.code, d: true }); });
-rdStage.addEventListener('keyup', e => { if (!rd || !rd.control) return; e.preventDefault(); rdSend({ t: 'k', code: e.code, d: false }); });
+rdStage.addEventListener('keydown', e => {
+  if (!rd || !rd.control) return;
+  // ctrl + v: the browser's paste comes first (with what this device copied), then the PC pastes it
+  if (e.ctrlKey && !e.altKey && e.code === 'KeyV') {
+    clearTimeout(rd.pasteWait);
+    rd.pasteWait = setTimeout(() => pasteOnPc(), 400); // no paste from the browser: the PC's own clipboard
+    return;
+  }
+  e.preventDefault();
+  rdSend({ t: 'k', code: e.code, d: true });
+});
+rdStage.addEventListener('paste', e => {
+  if (!rd || !rd.control) return;
+  e.preventDefault();
+  clearTimeout(rd.pasteWait);
+  const text = e.clipboardData && e.clipboardData.getData('text/plain');
+  if (text && !clipToPc(text)) return;
+  pasteOnPc();
+});
+// ctrl + v on the PC (ctrl may already be held down there, from the real keyboard)
+function pasteOnPc() {
+  if (!rd) return;
+  const held = rd.ctrlDown;
+  if (!held) rdSend({ t: 'k', code: 'ControlLeft', d: true });
+  rdSend({ t: 'k', code: 'KeyV', d: true }); rdSend({ t: 'k', code: 'KeyV', d: false });
+  if (!held) rdSend({ t: 'k', code: 'ControlLeft', d: false });
+}
+rdStage.addEventListener('keyup', e => { if (!rd || !rd.control) return; e.preventDefault(); if (e.code === 'KeyV' && e.ctrlKey) return; rdSend({ t: 'k', code: e.code, d: false }); });
+// is ctrl held down on the PC right now (from the real keyboard)?
+rdStage.addEventListener('keydown', e => { if (rd && /^Control/.test(e.code)) rd.ctrlDown = true; }, true);
+rdStage.addEventListener('keyup', e => { if (rd && /^Control/.test(e.code)) rd.ctrlDown = false; }, true);
 rdStage.addEventListener('blur', () => { /* let go of keys the browser won't tell us about */ for (const c of ['ShiftLeft', 'ControlLeft', 'AltLeft', 'MetaLeft']) rdSend({ t: 'k', code: c, d: false }); });
 
 // phones: a text box, held-down ctrl / alt / shift / win, and the keys phones don't have
@@ -1133,6 +1169,54 @@ $('#rdSend').onclick = () => {
   $('#rdText').value = '';
 };
 $('#rdText').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#rdSend').click(); } });
+
+/* ───────────── copy and paste with the stream PC (text) ───────────── */
+const CLIP_MAX = 200_000; // bytes, like the stream PC's limit
+function clipToPc(text) {
+  if (new Blob([text]).size > CLIP_MAX) { toast('that text is too long for the clipboard (200 KB): use files instead', 4000); return false; }
+  rdSend({ t: 'clip', s: text });
+  return true;
+}
+// copy on this device: the browser's clipboard where it's allowed (https, or this PC), else the
+// old way (a selected text box), which needs a tap
+async function copyHere(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext && document.hasFocus()) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* not allowed now */ }
+  const box = $('#rdClipFrom');
+  box.value = text; box.focus(); box.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { /* no */ }
+  box.blur(); rdStage.focus();
+  return ok;
+}
+async function clipFromPc(text) {
+  if (typeof text !== 'string' || !text) return;
+  $('#rdClipFrom').value = text;
+  // copied right away where the browser allows it without a tap (https with the page in front)
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext && document.hasFocus()) { await navigator.clipboard.writeText(text); ok = true; }
+  } catch { /* needs a tap */ }
+  const short = text.length > 40 ? `${text.slice(0, 40)}…` : text;
+  toast(ok ? `copied on the stream PC, and here too: "${short}"` : `copied on the stream PC: "${short}" (clipboard → copy here)`, 3500);
+}
+$('#rdClipGet').onclick = () => rdSend({ t: 'clipget' });
+$('#rdClipCopy').onclick = async () => {
+  const text = $('#rdClipFrom').value;
+  if (!text) return toast('nothing yet: copy something on the PC, or tap get');
+  toast((await copyHere(text)) ? 'copied on this device' : "couldn't copy: select the text and copy it yourself", 3000);
+};
+$('#rdClipPut').onclick = () => {
+  const text = $('#rdClipTo').value;
+  if (!text) return toast('type or paste some text first');
+  if (clipToPc(text)) toast("it's on the stream PC's clipboard: ctrl + v pastes it there");
+};
+$('#rdClipPaste').onclick = () => {
+  const text = $('#rdClipTo').value;
+  if (!text) return toast('type or paste some text first');
+  if (clipToPc(text)) { pasteOnPc(); toast('pasted on the stream PC'); }
+};
 
 /* ───────────── go live / end stream / record ───────────── */
 function ask(title, text, yes) {

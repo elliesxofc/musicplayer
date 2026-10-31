@@ -173,6 +173,9 @@ h1, h2, h3 { margin: 0; }
 .rd-row .btn { min-height: 38px; padding: 0 12px; }
 .rd-row .btn[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); background: rgba(255, 181, 71, .12); }
 .rd-keys .hint { margin: 0; }
+.rd-clip-head { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.rd-clip-head b { flex: 1; font-weight: 600; color: var(--muted); }
+.rd-clip-text { width: 100%; min-height: 44px; max-height: 22vh; resize: vertical; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0, 0, 0, .3); color: var(--ink); font: 16px/1.4 ui-monospace, Consolas, monospace; outline: none; box-sizing: border-box; } /* 16px: phones zoom in on smaller */
 
 /* who's signed in, and what a watch-only account can't touch */
 .who { font-size: 12.5px; color: var(--muted); white-space: nowrap; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }

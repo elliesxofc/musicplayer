@@ -6,7 +6,7 @@
    switch. While someone is connected, a small bar shows at the top of the screen (with a
    button to stop it), and Windows shows a notification. One person at a time. */
 
-const { BrowserWindow, desktopCapturer, screen, Notification, ipcMain, session, powerSaveBlocker } = require('electron');
+const { BrowserWindow, desktopCapturer, screen, Notification, ipcMain, session, powerSaveBlocker, clipboard } = require('electron');
 const path = require('node:path');
 const { createInput } = require('./input-win');
 
@@ -80,9 +80,40 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     blockedSaid = { name, at: Date.now() };
     const text = `Windows blocks clicks and keys into ${name} (it runs as administrator). run Stagelight as administrator on the stream PC, or ${name} normally.`;
     log(`remote display: clicks into ${name} are blocked (it runs as administrator; Stagelight doesn't)`);
-    if (active.relay) relaySay({ t: 'note', text });
-    else if (capture && !capture.isDestroyed()) capture.webContents.send('note', text);
+    say({ t: 'note', text });
   } });
+  // a message for the panel, the way it's connected (direct, or through the web address)
+  function say(msg) {
+    if (!active) return;
+    if (active.relay) relaySay(msg);
+    else if (capture && !capture.isDestroyed()) capture.webContents.send('say', msg);
+  }
+
+  /* ───────────── copy and paste between the panel and this PC (text) ─────────────
+     Something copied here goes to the panel; the panel can put text on this PC's clipboard
+     (then ctrl + v pastes it). Only while someone is in control. */
+  const CLIP_MAX = 200_000; // bytes, so it fits one message (bigger: the files button)
+  let clipLast = '', clipTimer = null, clipBusy = false;
+  const clipRead = () => clipboard.readText().catch(() => ''); // another program may hold it open
+  async function clipWatch(on) {
+    clearInterval(clipTimer); clipTimer = null;
+    if (!on) return;
+    clipLast = await clipRead(); // what was copied before isn't sent, only what's copied now
+    clipTimer = setInterval(async () => {
+      if (clipBusy || !active || !active.control || !getSettings().control) return;
+      clipBusy = true;
+      try {
+        const text = await clipRead();
+        if (text === clipLast) return;
+        clipLast = text;
+        if (text) clipSend(text);
+      } finally { clipBusy = false; }
+    }, 700);
+  }
+  function clipSend(text) {
+    if (Buffer.byteLength(text) > CLIP_MAX) say({ t: 'note', text: 'the stream PC copied more text than fits here (200 KB): use files instead' });
+    else say({ t: 'clip', text });
+  }
 
   /* ───────────── the screens on this PC ───────────── */
   async function screens() {
@@ -212,6 +243,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     active = { from, displayId: scr.displayId, control: !!s.control, since: Date.now(), q, guard, level: limit.level, bitrate: limit.bitrate, fps: limit.fps, scale: limit.scale, relay, owner };
     relayOut.buf = null; relayOut.note = relay && limit.note ? limit.note : '';
     keepAwake(true);
+    clipWatch(true);
     onStarted();
     const what = active.control ? 'controlling' : 'watching';
     log(`remote display: ${from} is ${what} this PC${relay ? ' (through the web address)' : ''}`);
@@ -229,6 +261,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     if (!active.quiet) log(`remote display ended${why ? ` (${why})` : ''}`);
     active = null;
     keepAwake(false);
+    clipWatch(false);
     hideBar();
     onChange();
     // the hidden screen-sharing window goes too (a minute later, in case of a reconnect)
@@ -238,8 +271,11 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
 
   /* ───────────── mouse and keyboard from the panel ───────────── */
   let lastMove = 0;
+  // while text is being put on the clipboard, what comes next waits (so ctrl + v pastes the new text)
+  let clipWriting = null; const afterClip = [];
   function handleInput(m) {
     if (!active || !m || typeof m !== 'object') return;
+    if (clipWriting) { if (afterClip.length < 300) afterClip.push(m); return; }
     if (!active.control || !getSettings().control || !input.available()) return; // watching only
     const d = screen.getAllDisplays().find(x => x.id === active.displayId) || screen.getPrimaryDisplay();
     // the panel sends places as 0…1 across the shared screen; Windows wants real pixels
@@ -256,6 +292,14 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
       case 'w': input.wheel(Number(m.dy) || 0, Number(m.dx) || 0); break;
       case 'k': if (typeof m.code === 'string') input.key(m.code, !!m.d); break;
       case 'txt': input.text(m.s); break;
+      case 'clip':
+        if (typeof m.s !== 'string' || Buffer.byteLength(m.s) > CLIP_MAX) break;
+        clipLast = m.s;
+        clipWriting = Promise.race([clipboard.writeText(m.s), new Promise((_, no) => setTimeout(no, 2000))])
+          .catch(() => say({ t: 'note', text: "couldn't put that on the stream PC's clipboard (another program has it open): try again" }))
+          .finally(() => { clipWriting = null; for (const next of afterClip.splice(0)) handleInput(next); });
+        break;
+      case 'clipget': clipRead().then(text => { clipLast = text; if (text) clipSend(text); else say({ t: 'note', text: "the stream PC's clipboard has no text" }); }); break;
       default: break;
     }
   }

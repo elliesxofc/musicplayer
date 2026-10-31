@@ -133,6 +133,10 @@ Stagelight is made to stay out of OBS's way:
   Properties → Compatibility), or run that program normally
 - the remote display's picture menu has **light · 480p** (about 0.8 Mbps) for a weak connection, and
   Stagelight's settings can cap the upload it may use at any time (4, 2, 1 or 0.5 Mbps)
+- copy and paste with the stream PC (text, while you're in control): what's copied on the PC comes
+  to the panel (and onto your device's clipboard where the browser allows it, like over https), and
+  ctrl + v on the remote screen pastes what your device copied; on a phone, the **clipboard**
+  button has both ways (**copy here**, **put on its clipboard**, **paste there**)
 - the stream PC's screen doesn't go to sleep while someone is connected (a sleeping screen isn't
   drawn, so the remote display would keep showing the last picture)
 

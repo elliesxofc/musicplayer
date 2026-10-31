@@ -165,6 +165,7 @@
       <button class="btn small" id="rdZoom" type="button" hidden>1.0× · reset</button>
       <button class="btn small" id="rdTouch" type="button" aria-pressed="false">direct touch</button>
       <button class="btn small" id="rdKeys" type="button">keys</button>
+      <button class="btn small" id="rdClip" type="button" hidden>clipboard</button>
       <button class="btn small" id="rdFiles" type="button" hidden>files</button>
       <button class="btn small" id="rdFull" type="button">full screen</button>
       <button class="btn small danger" id="rdEnd" type="button">end</button>
@@ -172,6 +173,13 @@
     <div class="rd-stage" id="rdStage" tabindex="0">
       <video id="rdVideo" autoplay playsinline muted></video>
       <canvas id="rdCanvas" width="1" height="1" hidden></canvas>
+    </div>
+    <div class="rd-keys" id="rdClipPad" hidden>
+      <div class="rd-clip-head"><b>from the stream PC</b><button class="btn small" id="rdClipGet" type="button">get</button><button class="btn small primary" id="rdClipCopy" type="button">copy here</button></div>
+      <textarea class="rd-clip-text" id="rdClipFrom" rows="2" readonly placeholder="copy something on the PC (ctrl + c) and it shows here"></textarea>
+      <div class="rd-clip-head"><b>to the stream PC</b><button class="btn small" id="rdClipPut" type="button">put on its clipboard</button><button class="btn small primary" id="rdClipPaste" type="button">paste there</button></div>
+      <textarea class="rd-clip-text" id="rdClipTo" rows="2" placeholder="paste or type text here" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+      <p class="hint">text only (for files: the files button). with a keyboard: what you copy on the PC is copied here too (when the browser allows it), and ctrl + v on the remote screen pastes what this device copied.</p>
     </div>
     <div class="rd-keys" id="rdKeyPad" hidden>
       <div class="rd-type">

@@ -44,6 +44,8 @@ class StagelightService : ServiceBase {
   public StagelightService() { ServiceName = "StagelightService"; CanStop = true; }
 
   protected override void OnStart(string[] args) {
+    // below normal priority, like the rest of Stagelight: OBS comes first
+    try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
     listener = new Thread(Listen); listener.IsBackground = true; listener.Start();
   }
   protected override void OnStop() {
@@ -149,6 +151,7 @@ static class Helper {
   static string deskName = "";
 
   public static void Run() {
+    try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
     Native.SetProcessDPIAware();
     var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
     var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)); stdout.AutoFlush = true; stdout.NewLine = "\n";

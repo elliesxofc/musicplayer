@@ -104,15 +104,20 @@ Stagelight is made to stay out of OBS's way:
   you're live, slower whenever OBS takes long to make one, and not sent again when unchanged
 - the settings window really closes (no memory used until it's opened again)
 - the remote display's video is H.264, which most PCs encode on the graphics card, and the
-  screen-sharing part closes a minute after a session ends
+  screen-sharing part keeps running even when the settings window is minimised or closed (it's a
+  tiny off-screen grabber), closing a minute after a session ends
+- the picture holds the quality you pick (720p or 1080p) sharp, dropping frames rather than
+  smearing text when the connection is tight; only the 60 fps setting keeps the frame rate up
+- the panel shows who's connected by name; the address stays on the stream PC (its bar and log)
 - while you're live, the remote display shares the upload with the stream and the stream comes
   first: the picture stays at 1.2 Mbps and 15 fps, and drops to 0.4 Mbps and 8 fps as soon as
   OBS drops frames, struggles to send or reconnects, until the stream has been fine for a minute
 - file transfer (like AnyDesk's), a separate switch under the remote display, off by default: full
   access accounts browse the stream PC's drives and folders, download files (a folder as a .zip,
-  up to 4 GB), upload files or whole folders into the open folder, and make folders, after typing
-  their password again (good for 30 minutes of use). Nothing can be deleted, renamed or
-  overwritten (a taken name gets " (2)"); every transfer is logged and shows a notification
+  up to 4 GB), upload files or whole folders into the open folder, make folders, and delete files
+  or folders, after typing their password again (good for 30 minutes of use). An upload whose name
+  is already taken asks first: replace it, or keep both (the new one is added as " (2)"). Deleting
+  asks first too and can't be undone; every transfer is logged and shows a notification
 - remote display on a phone: pinch to zoom in (up to 5×) like AnyDesk, move both fingers to look
   around, "reset" in the bar to zoom back out (ctrl + wheel on a laptop); two fingers sliding
   together still scroll the PC, and in trackpad mode the view follows the pointer. The bar shows

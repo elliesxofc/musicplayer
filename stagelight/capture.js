@@ -75,7 +75,7 @@ function startRelay() {
           if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
           ctx.drawImage(img, 0, 0, w, h);
           const busy = limit && (limit.level === 'hot' || limit.level === 'low');
-          const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: busy ? 0.45 : 0.62 });
+          const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: busy ? 0.5 : 0.78 });
           if (relay !== me) return;
           window.capture.frame(await blob.arrayBuffer());
           me.prev = px; me.lastSent = Date.now();
@@ -112,8 +112,10 @@ function applyLimit(next) {
   for (const sender of pc.getSenders()) {
     const p = sender.getParameters();
     p.encodings = (p.encodings && p.encodings.length ? p.encodings : [{}]).map(e => ({ ...e, maxBitrate: limit.bitrate, maxFramerate: limit.fps, scaleResolutionDownBy: Math.max(1, limit.scale || 1) }));
-    // while live, fewer frames before blurry text; otherwise smooth first
-    p.degradationPreference = limit.saving ? 'maintain-resolution' : 'maintain-framerate';
+    // keep the chosen resolution sharp (OBS's menus, numbers and text) and drop frames when the
+    // connection is tight, rather than smearing the picture; only the 60 fps "fast" quality, chosen
+    // for motion, keeps the frame rate up instead
+    p.degradationPreference = limit.fps >= 50 ? 'maintain-framerate' : 'maintain-resolution';
     sender.setParameters(p).catch(() => {});
   }
   // fewer frames taken off the screen too, not just sent (taking them costs the processor)

@@ -180,10 +180,18 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
 
   function captureWindow() {
     if (capture && !capture.isDestroyed()) return capture;
+    // the window that grabs the screen. Windows (and Chromium) pause the picture of a window that
+    // is hidden or off every screen, which froze the remote display when the settings window was
+    // minimised or closed. So it's a tiny, see-through, click-through window kept open far off any
+    // screen (never shown on a taskbar, never focused): invisible, but "on screen" enough that the
+    // grab keeps going whatever the settings window does.
     capture = new BrowserWindow({
-      show: false, width: 320, height: 200, skipTaskbar: true,
+      show: false, width: 1, height: 1, x: -32000, y: -32000,
+      frame: false, transparent: true, skipTaskbar: true, focusable: false,
       webPreferences: { preload: path.join(root, 'capture-preload.js'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
     });
+    capture.setIgnoreMouseEvents(true);
+    capture.once('ready-to-show', () => { try { if (capture && !capture.isDestroyed()) capture.showInactive(); } catch { /* fine */ } });
     capture.loadFile(path.join(root, 'capture.html'));
     capture.on('closed', () => { capture = null; });
     return capture;
@@ -194,11 +202,14 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     if (!bar || bar.isDestroyed()) {
       const d = screen.getPrimaryDisplay().workArea;
       bar = new BrowserWindow({
-        width: 460, height: 44, x: Math.round(d.x + d.width / 2 - 230), y: d.y + 6,
-        frame: false, transparent: true, resizable: false, movable: true, alwaysOnTop: true, skipTaskbar: true, focusable: false,
+        width: 460, height: 44, x: Math.round(d.x + d.width / 2 - 230), y: d.y + 6, show: false,
+        frame: false, transparent: true, resizable: false, movable: true, alwaysOnTop: true, skipTaskbar: true,
         webPreferences: { preload: path.join(root, 'bar-preload.js'), contextIsolation: true, sandbox: true },
       });
       bar.setAlwaysOnTop(true, 'screen-saver');
+      // shown without taking focus (so it doesn't interrupt whatever's on screen), but still a normal
+      // clickable window — a non-focusable bar stopped passing its stop button's clicks on
+      bar.once('ready-to-show', () => { try { if (bar && !bar.isDestroyed()) bar.showInactive(); } catch { /* fine */ } });
       bar.loadFile(path.join(root, 'bar.html'), { query: { text } });
       bar.on('closed', () => { bar = null; });
     } else {

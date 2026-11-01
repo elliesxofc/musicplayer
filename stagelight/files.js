@@ -2,8 +2,9 @@
 
 /* File transfer for the remote display, like AnyDesk's: browse the stream PC's drives and
    folders, download a file or a whole folder (as a .zip, made while it downloads), upload files
-   or folders into a folder, and make new folders. Nothing is deleted, renamed or overwritten: an
-   upload with a name that's taken gets " (2)" added. Who may use it is decided by server.js. */
+   or folders into a folder, make new folders, and delete files or folders. An upload whose name
+   is taken keeps both (" (2)" is added) unless the panel asks to replace it (it asks first).
+   Who may use it is decided by server.js. */
 
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -154,19 +155,35 @@ function freeName(dir, name) {
   throw Object.assign(new Error('too many files with that name'), { code: 409 });
 }
 
-// rel: the file's place inside an uploaded folder ("My folder/sub/file.png"), or just its name
-async function receive(req, dirPath, rel) {
-  const dir = full(dirPath);
-  if (!(await fsp.stat(dir)).isDirectory()) throw Object.assign(new Error("that's not a folder"), { code: 400 });
+// the parts of where an upload lands ("My folder/sub/file.png" → ["My folder","sub","file.png"])
+function nameParts(rel) {
   const parts = String(rel || '').split(/[\\/]+/).filter(Boolean).map(part);
   if (!parts.length) throw Object.assign(new Error('the file has no name'), { code: 400 });
+  return parts;
+}
+// is there already a file or folder where this upload would land? (so the panel can ask to replace)
+function exists(dirPath, rel) {
+  const dir = full(dirPath);
+  return fs.existsSync(path.join(dir, ...nameParts(rel)));
+}
+
+// rel: the file's place inside an uploaded folder ("My folder/sub/file.png"), or just its name
+async function receive(req, dirPath, rel, { overwrite = false } = {}) {
+  const dir = full(dirPath);
+  if (!(await fsp.stat(dir)).isDirectory()) throw Object.assign(new Error("that's not a folder"), { code: 400 });
+  const parts = nameParts(rel);
   const size = Number(req.headers['content-length']);
   if (!Number.isFinite(size) || size < 0) throw Object.assign(new Error('the upload has no size'), { code: 411 });
   if (size > UPLOAD_MAX) throw Object.assign(new Error('that file is too big (20 GB at most)'), { code: 413 });
   // the folders inside an uploaded folder are made as needed (an existing one is used)
   let target = dir;
   for (const p of parts.slice(0, -1)) { target = path.join(target, p); await fsp.mkdir(target, { recursive: true }); }
-  const name = freeName(target, parts.at(-1));
+  // keep both by default; replace only when asked (the panel asked first)
+  let name = parts.at(-1);
+  if (overwrite) {
+    try { if ((await fsp.lstat(path.join(target, name))).isDirectory()) throw Object.assign(new Error('a folder already has that name'), { code: 409 }); }
+    catch (err) { if (err.code && err.code !== 'ENOENT') throw err; }
+  } else name = freeName(target, name);
   const final = path.join(target, name), tmp = path.join(target, `.${name}.stagelight-upload`);
   await new Promise((resolve, reject) => {
     const out = fs.createWriteStream(tmp, { flags: 'wx' });
@@ -189,4 +206,14 @@ async function makeDir(dirPath, name) {
   return { path: path.join(dir, n), name: n };
 }
 
-module.exports = { list, sendFile, sendZip, receive, makeDir, full };
+// delete a file or a whole folder (gone for good). A drive or filesystem root can't be deleted.
+async function remove(p) {
+  const fp = full(p);
+  if (path.dirname(fp) === fp) throw Object.assign(new Error("a whole drive can't be deleted from here"), { code: 400 });
+  const st = await fsp.lstat(fp); // ENOENT if it's already gone
+  const dir = st.isDirectory() && !st.isSymbolicLink();
+  await fsp.rm(fp, { recursive: dir, force: false });
+  return { name: path.basename(fp) || fp, dir };
+}
+
+module.exports = { list, sendFile, sendZip, receive, makeDir, remove, exists, full };

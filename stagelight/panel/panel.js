@@ -1356,12 +1356,36 @@ async function fmGo(path) {
       dl.setAttribute('aria-label', `download ${en.name}`);
       dl.innerHTML = '<svg><use href="#i-down"/></svg>';
       dl.onclick = () => toast(en.dir ? `zipping and downloading ${en.name}…` : `downloading ${en.name}…`);
-      li.append(dl);
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'del'; del.title = en.dir ? 'delete the folder' : 'delete';
+      del.setAttribute('aria-label', `delete ${en.name}`);
+      del.innerHTML = '<svg><use href="#i-trash"/></svg>';
+      del.onclick = () => fmDelete(en);
+      li.append(dl, del);
     }
     return li;
   }));
   if (!r.entries.length) list.innerHTML = '<li class="empty">this folder is empty</li>';
   list.scrollTop = 0;
+}
+async function fmDelete(en) {
+  const ok = await ask(`delete ${en.dir ? 'this folder' : 'this file'}?`, `"${en.name}" will be permanently deleted from the stream PC${en.dir ? ', with everything inside it' : ''}. this can't be undone.`, 'delete');
+  if (!ok) return;
+  try { const r = await fmApi('/api/files/delete', { path: en.path }); toast(`deleted ${r.name} ✦`); fmGo(fmPath); }
+  catch (err) { if (err.message !== 'locked') toast(err.message, 4000); }
+}
+// an upload's name is already taken: replace it, or keep both (adds it as a copy)
+function fmClash(name) {
+  $('#confirmTitle').textContent = 'replace it?';
+  $('#confirmText').textContent = `"${name}" already exists on the stream PC. replace it with the one you're uploading, or keep both (the new one is added as a copy)?`;
+  $('#confirmYes').textContent = 'replace';
+  $('#confirmNo').textContent = 'keep both';
+  $('#confirm').hidden = false;
+  return new Promise(resolve => {
+    const done = v => { $('#confirm').hidden = true; $('#confirmNo').textContent = 'cancel'; resolve(v); };
+    $('#confirmYes').onclick = () => done(true);
+    $('#confirmNo').onclick = () => done(false);
+  });
 }
 $('#fmUp').onclick = () => fmGo($('#fmUp').dataset.to || '');
 $('#fmRoots').onclick = () => fmGo('');
@@ -1381,12 +1405,22 @@ async function fmUpload(list) {
   fmBusy = true;
   const dir = fmPath, total = items.reduce((n, f) => n + f.size, 0);
   let done = 0, ok = 0, failed = 0;
+  // when a name is already taken, ask once (the first clash) and do the same with the rest of this batch
+  let replaceAll = null; // null = not asked yet, true = replace, false = keep both
   for (const [i, f] of items.entries()) {
     const rel = f.webkitRelativePath || f.name;
+    let over = false;
+    try {
+      const chk = await fmApi(`/api/files/exists?dir=${encodeURIComponent(dir)}&rel=${encodeURIComponent(rel)}`);
+      if (chk.exists) {
+        if (replaceAll === null) replaceAll = await fmClash(rel);
+        over = replaceAll;
+      }
+    } catch (err) { if (err.message === 'locked') { fmBusy = false; return fmLocked(); } /* couldn't check: upload keeps both */ }
     try {
       await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', `/api/files/upload?dir=${encodeURIComponent(dir)}&rel=${encodeURIComponent(rel)}`);
+        xhr.open('POST', `/api/files/upload?dir=${encodeURIComponent(dir)}&rel=${encodeURIComponent(rel)}${over ? '&over=1' : ''}`);
         xhr.setRequestHeader('X-Stagelight', '1');
         xhr.setRequestHeader('Content-Type', 'application/octet-stream');
         xhr.upload.onprogress = e => fmStatus(`uploading ${i + 1} of ${items.length}: ${rel} · ${Math.round((done + e.loaded) / Math.max(1, total) * 100)}%`);

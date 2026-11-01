@@ -383,6 +383,8 @@ function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false
     const who = `${session.user} (${ipOf(req)})`;
     try {
       if (p === '/api/files/list' && req.method === 'GET') return send(res, 200, await files.list(url.searchParams.get('path') || ''));
+      // does an upload's name already land on something? (the panel asks before replacing)
+      if (p === '/api/files/exists' && req.method === 'GET') return send(res, 200, { exists: files.exists(url.searchParams.get('dir') || '', url.searchParams.get('rel') || '') });
       if (p === '/api/files/download' && req.method === 'GET') {
         const target = url.searchParams.get('path') || '';
         const r = url.searchParams.get('zip') === '1' ? await files.sendZip(res, target) : await files.sendFile(res, target);
@@ -392,10 +394,19 @@ function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false
       }
       if (p === '/api/files/upload' && req.method === 'POST') {
         if (req.headers['x-stagelight'] !== '1' || !/^application\/octet-stream\b/.test(req.headers['content-type'] || '')) return fail(403, 'not from the panel');
-        const r = await files.receive(req, url.searchParams.get('dir') || '', url.searchParams.get('rel') || '');
-        log(`${who} uploaded ${r.path} (${Math.round(r.size / 1024)} KB)`);
-        onFiles(`${session.user} uploaded ${r.name}`);
+        const over = url.searchParams.get('over') === '1';
+        const r = await files.receive(req, url.searchParams.get('dir') || '', url.searchParams.get('rel') || '', { overwrite: over });
+        log(`${who} ${over ? 'replaced' : 'uploaded'} ${r.path} (${Math.round(r.size / 1024)} KB)`);
+        onFiles(`${session.user} ${over ? 'replaced' : 'uploaded'} ${r.name}`);
         return send(res, 200, { ok: true, name: r.name });
+      }
+      if (p === '/api/files/delete' && req.method === 'POST') {
+        if (!fromPanel(req)) return fail(403, 'not from the panel');
+        let body; try { body = await readBody(req); } catch { return fail(400, 'bad request'); }
+        const r = await files.remove(body.path);
+        log(`${who} deleted the ${r.dir ? 'folder' : 'file'} ${body.path}`);
+        onFiles(`${session.user} deleted ${r.name}`);
+        return send(res, 200, { ok: true, name: r.name, dir: r.dir });
       }
       if (p === '/api/files/mkdir' && req.method === 'POST') {
         if (!fromPanel(req)) return fail(403, 'not from the panel');

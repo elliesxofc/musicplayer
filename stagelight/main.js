@@ -120,7 +120,8 @@ const remote = createRemote({
   onChange: () => { updateBusy(); sendWin('status', status()); refreshTray(); },
 });
 remote.settings = remoteSettings;
-remote.info = () => { const r = remote.status(); return { ...remoteSettings(), controlWorks: remote.canControl(), active: r.active, from: r.from, pcName: os.hostname() }; };
+// the panel is shown who's connected by name only; the address stays on the stream PC (its bar, tray and log)
+remote.info = () => { const r = remote.status(); return { ...remoteSettings(), controlWorks: remote.canControl(), active: r.active, from: String(r.from || '').replace(/\s*\([^)]*\)\s*$/, ''), pcName: os.hostname() }; };
 /* ───────────── accounts: who can open the panel, and what they can do ───────────── */
 function accounts() {
   const c = readConfig();

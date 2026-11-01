@@ -76,6 +76,8 @@ const unseal = text => {
   try { return safeStorage.decryptString(Buffer.from(String(text).slice(4), 'base64')); } catch { return ''; }
 };
 const obsSettings = () => { const o = readConfig().obs || {}; return { host: o.host || 'localhost', port: Number(o.port) || 4455, password: unseal(o.password) }; };
+// what the panel calls this PC: a name picked in the settings ("LILIANA-SERVER"), else Windows' own
+const pcName = () => { const n = readConfig().pcName; return typeof n === 'string' && n.trim() ? n.trim() : os.hostname(); };
 const panelPort = () => Math.max(1024, Math.min(65535, Number(readConfig().port) || 4850));
 
 /* ───────────── the addresses other devices open ───────────── */
@@ -121,7 +123,7 @@ const remote = createRemote({
 });
 remote.settings = remoteSettings;
 // the panel is shown who's connected by name only; the address stays on the stream PC (its bar, tray and log)
-remote.info = () => { const r = remote.status(); return { ...remoteSettings(), controlWorks: remote.canControl(), active: r.active, from: String(r.from || '').replace(/\s*\([^)]*\)\s*$/, ''), pcName: os.hostname() }; };
+remote.info = () => { const r = remote.status(); return { ...remoteSettings(), controlWorks: remote.canControl(), active: r.active, from: String(r.from || '').replace(/\s*\([^)]*\)\s*$/, ''), pcName: pcName() }; };
 /* ───────────── accounts: who can open the panel, and what they can do ───────────── */
 function accounts() {
   const c = readConfig();
@@ -313,6 +315,7 @@ ipcMain.handle('get', async () => {
     obs: { host: o.host, port: o.port, hasPassword: !!o.password },
     accounts: accounts().map(a => ({ name: a.name, role: a.role })),
     port: panelPort(),
+    pcName: typeof c.pcName === 'string' ? c.pcName : '', hostname: os.hostname(),
     autostart: c.admin ? !!c.autostart : app.getLoginItemSettings().openAtLogin,
     admin: { on: elevated, always: !!c.admin, windows: process.platform === 'win32', service: await admin.serviceState(), keepRunning: c.keepRunning !== false },
     remote: { ...remoteSettings(), controlWorks: remote.canControl() },
@@ -363,6 +366,14 @@ ipcMain.handle('set-port', async (_e, port) => {
   // the service's page before sign-in uses the same port: its firewall rule follows
   if (elevated && (await admin.serviceState()) !== 'missing') admin.installService(app, serviceWhere()).catch(() => {});
   return { ok: server.port() === port, status: status() };
+});
+// the name the panel shows for this PC (empty: Windows' own name)
+ipcMain.handle('set-name', (_e, name) => {
+  const n = String(name || '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim();
+  if (n.length > 40) return { ok: false, error: 'use 40 characters at most' };
+  writeConfig({ pcName: n || undefined });
+  log(n ? `this PC is called "${n}" in the panel` : `this PC uses Windows' name in the panel (${os.hostname()})`);
+  return { ok: true, name: pcName() };
 });
 ipcMain.handle('autostart', async (_e, on) => {
   // always as administrator: the task starts it with Windows (the usual way would start it without)

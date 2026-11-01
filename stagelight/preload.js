@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('stagelight', {
   saveAccount: account => ipcRenderer.invoke('save-account', account),
   removeAccount: name => ipcRenderer.invoke('remove-account', String(name)),
   setPort: port => ipcRenderer.invoke('set-port', Number(port)),
+  setName: name => ipcRenderer.invoke('set-name', String(name)),
   autostart: on => ipcRenderer.invoke('autostart', !!on),
   adminRestart: () => ipcRenderer.invoke('admin-restart'),
   adminAlways: on => ipcRenderer.invoke('admin-always', !!on),

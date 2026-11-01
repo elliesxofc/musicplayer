@@ -628,6 +628,7 @@ async function remoteInfo() {
   $('#remoteOpen').hidden = !info.view;
   $('#filesOpen').hidden = !info.files;
   $('#rdFiles').hidden = !info.files;
+  $('#remoteTitle').textContent = info.pcName ? `remote display · ${String(info.pcName).slice(0, 40)}` : 'remote display';
   if (!info.view && info.files) $('#remoteHint').textContent = 'browse, download and upload files on the stream PC.';
   if (info.view) {
     $('#remoteHint').textContent = info.active
@@ -645,6 +646,53 @@ const iceDone = pc => new Promise(resolve => {
   pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); resolve(); } });
 });
 const rdState = (text, on = false) => { $('#rdState').textContent = text; $('#rdState').classList.toggle('on', on); };
+
+/* ───── the connection's strength, like Wi-Fi bars (📶) ─────
+   Direct: the video connection's own round trip and how many of its packets got lost. Through the
+   web address: how long a tiny request takes there and back, and whether pictures keep coming. */
+const SIG_WORDS = ['waiting', 'weak', 'okay', 'good', 'great'];
+function sigShow(bars, ms = null, lost = null) {
+  const el = $('#rdSig');
+  el.dataset.bars = String(bars);
+  $('#rdSigMs').textContent = ms != null && bars ? `${Math.round(ms)} ms` : '';
+  const t = `connection: ${SIG_WORDS[bars]}${ms != null ? ` · ${Math.round(ms)} ms there and back` : ''}${lost != null ? ` · ${(lost * 100).toFixed(1)}% lost` : ''}${rd && rd.relay ? ' · through the web address' : ''}`;
+  el.title = t; el.setAttribute('aria-label', t);
+}
+const sigBars = (ms, lost = 0) => (ms == null ? 0 : ms < 80 && lost < 0.01 ? 4 : ms < 150 && lost < 0.03 ? 3 : ms < 300 && lost < 0.08 ? 2 : 1);
+async function sigTick() {
+  const me = rd;
+  if (!me || me.sigBusy) return;
+  me.sigBusy = true;
+  try {
+    if (me.relay) {
+      if (!me.relayLast) return sigShow(0);
+      const t0 = performance.now();
+      const r = await fetch('/api/me', { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
+      if (rd !== me) return;
+      if (!r || !r.ok) return sigShow(1);
+      const ms = performance.now() - t0;
+      me.sigMs = me.sigMs == null ? ms : me.sigMs * 0.6 + ms * 0.4; // smoothed, so one slow answer doesn't flicker
+      // the PC sends a picture every 2 s at least: none for a while means the line is stuck
+      sigShow(Date.now() - me.relayLast > 6000 ? 1 : sigBars(me.sigMs), me.sigMs);
+    } else if (me.pc && me.pc.connectionState === 'connected') {
+      const stats = await me.pc.getStats();
+      if (rd !== me) return;
+      let pair = null, nominated = null, lostN = 0, gotN = 0;
+      stats.forEach(x => {
+        if (x.type === 'transport' && x.selectedCandidatePairId) pair = stats.get(x.selectedCandidatePairId) || pair;
+        if (x.type === 'candidate-pair' && x.nominated && x.state === 'succeeded') nominated = x;
+        if (x.type === 'inbound-rtp' && x.kind === 'video') { lostN = x.packetsLost || 0; gotN = x.packetsReceived || 0; }
+      });
+      pair = pair || nominated;
+      const ms = pair && pair.currentRoundTripTime != null ? pair.currentRoundTripTime * 1000 : null;
+      const prev = me.sigPrev || { lost: lostN, got: gotN };
+      const dl = Math.max(0, lostN - prev.lost), dg = Math.max(0, gotN - prev.got);
+      me.sigPrev = { lost: lostN, got: gotN };
+      const lost = dl + dg ? dl / (dl + dg) : 0;
+      sigShow(sigBars(ms, lost), ms, lost);
+    } else sigShow(me.pc && me.pc.connectionState === 'disconnected' ? 1 : 0);
+  } catch { /* again in a moment */ } finally { me.sigBusy = false; }
+}
 
 const rdConnected = () => {
   // the PC's name first: it's what stays visible on a narrow phone
@@ -678,6 +726,7 @@ async function relayConnect() {
   rdVideo.hidden = true; rdCanvas.hidden = false;
   rdState('connecting through the web address…');
   const gen = rd.gen = (rd.gen || 0) + 1;
+  rd.relayLast = 0; rd.sigMs = null; sigShow(0);
   let r;
   try {
     r = await api('/api/remote/start', { relay: true, password: rd.password, screen: $('#rdScreen').value, quality: $('#rdQuality').value });
@@ -721,6 +770,7 @@ async function relayConnect() {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
+      if (rd && rd.gen === gen) rd.relayLast = Date.now();
       const joined = new Uint8Array(buf.length + value.length); joined.set(buf); joined.set(value, buf.length); buf = joined;
       while (buf.length >= 5) {
         const len = new DataView(buf.buffer, buf.byteOffset + 1, 4).getUint32(0);
@@ -748,6 +798,7 @@ async function rdConnect() {
   rd.secure = false;
   if (rd.relay) return relayConnect();
   if (rd.pc) rd.pc.close();
+  rd.sigPrev = null; sigShow(0);
   rdVideo.hidden = false; rdCanvas.hidden = true;
   const gen = rd.gen = (rd.gen || 0) + 1;
   // no direct connection after 12 s (or it failed): through the web address instead
@@ -805,6 +856,8 @@ $('#remoteOpen').onclick = async () => {
   $('#rdScreen').replaceChildren(...(info.screens || []).map(sc => { const o = document.createElement('option'); o.value = sc.id; o.textContent = sc.name; return o; }));
   $('#rdScreen').hidden = (info.screens || []).length < 2;
   rd = { password: v.password, control: false, ice: info.ice || [], pcName: String(info.pcName || '').slice(0, 64) };
+  rd.sigTimer = setInterval(sigTick, 2000);
+  sigShow(0);
   $('#rd').hidden = false;
   $('#rdKeyPad').hidden = true;
   $('#rdClipPad').hidden = true;
@@ -818,7 +871,7 @@ function rdClose(tell = true) {
   if (!rd) return;
   const was = rd;
   relayStop();
-  clearTimeout(was.fallTimer); clearTimeout(was.ackTimer);
+  clearTimeout(was.fallTimer); clearTimeout(was.ackTimer); clearInterval(was.sigTimer);
   rd = null;
   if (was.pc) was.pc.close();
   rdVideo.srcObject = null;

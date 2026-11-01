@@ -132,6 +132,8 @@ $('#remoteStop').onclick = async () => showStatus(await S.stopRemote());
   if (c.obs.hasPassword) $('#obsPass').placeholder = 'saved ✓ (type a new one to replace it)';
   showAccounts(c.accounts);
   $('#port').value = c.port;
+  $('#pcName').value = c.pcName || '';
+  $('#pcName').placeholder = c.hostname || 'LILIANA-SERVER';
   $('#autostart').checked = c.autostart;
   showAdmin(c.admin);
   $('#log').textContent = c.log.join('\n');
@@ -196,6 +198,13 @@ $('#portSave').onclick = async () => {
   if (r.status) showStatus(r.status);
   if (!r.ok) alert(r.error || "that port didn't work (another program may use it). see \"what happened\" below.");
 };
+const saveName = async () => {
+  const r = await S.setName($('#pcName').value);
+  $('#pcNameHint').classList.toggle('bad', !r.ok);
+  $('#pcNameHint').textContent = r.ok ? `saved ✓ the panel calls this PC "${r.name}"` : r.error;
+};
+$('#pcNameSave').onclick = saveName;
+$('#pcName').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); saveName(); } };
 $('#autostart').onchange = async () => { $('#autostart').checked = await S.autostart($('#autostart').checked); };
 $('#openMedia').onclick = () => S.openMedia();
 $('#openHere').onclick = () => S.open($('#openHere').dataset.url);

@@ -109,6 +109,11 @@ Stagelight is made to stay out of OBS's way:
 - the picture holds the quality you pick (720p or 1080p) sharp, dropping frames rather than
   smearing text when the connection is tight; only the 60 fps setting keeps the frame rate up
 - the panel shows who's connected by name; the address stays on the stream PC (its bar and log)
+- give the stream PC its own name (settings → more, like "LILIANA-SERVER"): the panel shows it
+  on the remote display card and in the remote display's bar instead of Windows' name
+- the remote display's bar shows the connection's strength as Wi-Fi-style bars (📶), with the
+  round trip in ms: from the video connection itself (time and lost packets) when direct, and
+  from a tiny request there and back (and whether pictures keep coming) through the web address
 - while you're live, the remote display shares the upload with the stream and the stream comes
   first: the picture stays at 1.2 Mbps and 15 fps, and drops to 0.4 Mbps and 8 fps as soon as
   OBS drops frames, struggles to send or reconnects, until the stream has been fine for a minute

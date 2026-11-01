@@ -106,7 +106,7 @@
     </section>
 
     <section class="card" id="remoteCard" hidden>
-      <h2>remote display</h2>
+      <h2 id="remoteTitle">remote display</h2>
       <p class="hint" id="remoteHint"></p>
       <button class="btn primary wide" id="remoteOpen">open the PC's full screen</button>
       <button class="btn wide" id="filesOpen" hidden>files on the stream PC</button>
@@ -162,6 +162,7 @@
         <option value="sharp">sharp · 1080p</option>
         <option value="fast">fast · 60 fps</option>
       </select>
+      <span class="rd-sig" id="rdSig" data-bars="0" title="connection: waiting" role="img" aria-label="connection: waiting"><svg viewBox="0 0 20 16" aria-hidden="true"><rect x="1" y="11" width="3.2" height="4" rx="1"/><rect x="6" y="8" width="3.2" height="7" rx="1"/><rect x="11" y="4.5" width="3.2" height="10.5" rx="1"/><rect x="16" y="1" width="3.2" height="14" rx="1"/></svg><span id="rdSigMs"></span></span>
       <span class="rd-state" id="rdState">connecting…</span>
       <button class="btn small" id="rdZoom" type="button" hidden>1.0× · reset</button>
       <button class="btn small" id="rdTouch" type="button" aria-pressed="false">direct touch</button>

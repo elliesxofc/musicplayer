@@ -274,6 +274,8 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
         w.sentAt.delete(n);
         const ms = Date.now() - at;
         w.lag = w.lag == null ? ms : w.lag * 0.7 + ms * 0.3;
+        // the picture's size follows it too (a slow line: smaller pictures, so each one arrives sooner)
+        if (capture && !capture.isDestroyed()) capture.webContents.send('lag', ms);
         if (Date.now() - w.lagSaid > 2000) { w.lagSaid = Date.now(); w.res.write(packet(2, Buffer.from(JSON.stringify({ t: 'lag', ms: Math.round(w.lag) })))); }
       }
       relayPush(w);

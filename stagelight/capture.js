@@ -56,7 +56,9 @@ function startRelay() {
   const tiny = new OffscreenCanvas(160, 90), tctx = tiny.getContext('2d', { willReadFrequently: true });
   // q: the JPEG quality, shrink: how much smaller than the screen; both follow the upload the
   // picture may use (limit.bitrate: the quality picked, lowered while live or by the PC's setting)
-  relay = { source, canvas, timer: null, prev: null, lastSent: 0, stop: source.stop, q: 0.7, shrink: 1, nextAt: 0 };
+  // lag: how long pictures take to reach the panel (measured there and back); floor: the quickest
+  // lately (the line's own delay, which a smaller picture can't beat)
+  relay = { source, canvas, timer: null, prev: null, lastSent: 0, stop: source.stop, q: 0.7, shrink: 1, nextAt: 0, lag: null, floor: null, slowAt: 0 };
   const me = relay;
   const tick = async () => {
     if (relay !== me) return;
@@ -86,9 +88,14 @@ function startRelay() {
           const rate = Math.max(200_000, (limit && limit.bitrate) || 3_000_000);
           const aim = rate / 8 / 6;
           me.nextAt = Date.now() + blob.size * 8 / rate * 1000;
-          if (blob.size > aim * 1.3) {
+          // and pictures that take long to arrive (the line is slower than the quality allows):
+          // smaller ones, a step at a time; bigger again only once they arrive quickly
+          const late = me.lag != null && me.lag > me.floor + 220 && Date.now() - me.slowAt > 600;
+          const quick = me.lag == null || me.lag < me.floor + 90;
+          if (late) me.slowAt = Date.now();
+          if (blob.size > aim * 1.3 || late) {
             if (me.q > 0.4) me.q = Math.max(0.4, me.q - 0.06); else me.shrink = Math.min(2.5, me.shrink * 1.15);
-          } else if (blob.size < aim * 0.6) {
+          } else if (blob.size < aim * 0.6 && quick) {
             if (me.shrink > 1) me.shrink = Math.max(1, me.shrink / 1.1); else me.q = Math.min(0.8, me.q + 0.03);
           }
         }
@@ -135,6 +142,11 @@ function applyLimit(next) {
   if (limit.note && channel && channel.readyState === 'open') { try { channel.send(JSON.stringify({ t: 'note', text: limit.note })); } catch { /* fine */ } }
 }
 window.capture.onLimit(next => applyLimit(next));
+window.capture.onLag(ms => {
+  if (!relay || !Number.isFinite(ms) || ms < 0) return;
+  relay.lag = relay.lag == null ? ms : relay.lag * 0.6 + ms * 0.4;
+  relay.floor = relay.floor == null ? ms : Math.min(ms, relay.floor + 2); // drifts up slowly if the line got slower for good
+});
 // something for the panel (a note, like: Windows blocks clicks into a program run as administrator;
 // or text copied on this PC)
 window.capture.onSay(msg => { if (channel && channel.readyState === 'open') try { channel.send(JSON.stringify(msg)); } catch { /* fine */ } });

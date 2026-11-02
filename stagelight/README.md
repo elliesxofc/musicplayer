@@ -113,7 +113,8 @@ Stagelight is made to stay out of OBS's way:
   on the remote display card and in the remote display's bar instead of Windows' name
 - through the web address (Cloudflare) the remote display waits for the panel to say each picture
   arrived before sending more (at most two on their way), sizes the pictures to the upload it may
-  use (lower while live), and sends mouse and keyboard one batch at a time, in order. Before, the
+  use (lower while live) and to how long they really take to arrive (a slower line: smaller
+  pictures, so they keep arriving quickly), and sends mouse and keyboard one batch at a time, in order. Before, the
   tunnel held seconds of old pictures and clicks waited behind them: on a slow line clicks now
   answer in under a second instead of 10+ seconds
 - the remote display's bar shows the connection's strength as Wi-Fi-style bars (📶), with the

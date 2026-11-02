@@ -45,8 +45,8 @@ function showRemote(r) {
   $('#remoteControl').checked = r.control;
   $('#remoteControl').disabled = !r.view;
   $('#remoteWarn').hidden = !r.control;
-  $('#remoteMax').value = String(r.max || 0);
-  $('#remoteLiveMax').value = String(r.liveMax || 1200000);
+  $('#remoteMax').value = String(r.max ?? 1000000);
+  $('#remoteLiveMax').value = String(r.liveMax || 1000000);
   $('#remoteFiles').checked = !!r.files;
   $('#filesWarn').hidden = !r.files;
 }

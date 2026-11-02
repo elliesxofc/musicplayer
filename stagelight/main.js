@@ -112,10 +112,11 @@ const obs = createObs({ onChange: () => { remote.streamChanged(obs.snapshot().st
 // OBS is asked often only while someone looks (a panel, or the settings window)
 const updateBusy = () => obs.setBusy(server.watcherCount() > 0 || winOpen() || remote.status().active);
 const UPLOAD_LIMITS = [0, 4_000_000, 2_000_000, 1_000_000, 500_000]; // 0 = no limit
-const LIVE_LIMITS = [1_200_000, 3_000_000, 6_000_000]; // while live (the stream comes first)
+const UPLOAD_DEFAULT = 1_000_000; // light enough for any line, through the web address and Tailscale alike
+const LIVE_LIMITS = [1_000_000, 3_000_000, 6_000_000]; // while live (the stream comes first)
 const remoteSettings = () => {
   const r = readConfig().remote || {};
-  return { view: !!r.view, control: !!r.view && !!r.control, max: UPLOAD_LIMITS.includes(r.max) ? r.max : 0, liveMax: LIVE_LIMITS.includes(r.liveMax) ? r.liveMax : LIVE_LIMITS[0], files: !!r.files };
+  return { view: !!r.view, control: !!r.view && !!r.control, max: UPLOAD_LIMITS.includes(r.max) ? r.max : UPLOAD_DEFAULT, liveMax: LIVE_LIMITS.includes(r.liveMax) ? r.liveMax : LIVE_LIMITS[0], files: !!r.files };
 };
 const remote = createRemote({
   root: ROOT, icon: ICON, getSettings: remoteSettings, log,
@@ -148,7 +149,13 @@ function noteFiles(text) {
   filesNoted.push(now);
   new Notification({ title: 'Stagelight: file transfer', body: text, icon: ICON }).show();
 }
-const server = createServer({ obs, remote, mediaDir: mediaDir(), filesOn: () => remoteSettings().files, onFiles: noteFiles, getAccounts: accounts, getWeb: webSettings, log, onWatchers: updateBusy });
+// logins kept across restarts (fingerprints only, readable by this Windows account alone)
+const sessionFile = () => path.join(app.getPath('userData'), 'logins.json');
+const sessionStore = {
+  load: () => JSON.parse(fs.readFileSync(sessionFile(), 'utf8')),
+  save: list => { fs.mkdirSync(path.dirname(sessionFile()), { recursive: true }); fs.writeFileSync(sessionFile(), JSON.stringify(list), { mode: 0o600 }); },
+};
+const server = createServer({ store: sessionStore, obs, remote, mediaDir: mediaDir(), filesOn: () => remoteSettings().files, onFiles: noteFiles, getAccounts: accounts, getWeb: webSettings, log, onWatchers: updateBusy });
 
 /* The stream comes first: every Stagelight process (window, screen sharing, the GPU helper)
    runs below normal priority, so when the PC is busy Windows serves OBS before Stagelight. */
@@ -451,7 +458,7 @@ ipcMain.handle('set-remote-files', (_e, on) => {
   return remoteSettings();
 });
 ipcMain.handle('set-remote-max', (_e, max) => {
-  const m = UPLOAD_LIMITS.includes(Number(max)) ? Number(max) : 0;
+  const m = UPLOAD_LIMITS.includes(Number(max)) ? Number(max) : UPLOAD_DEFAULT;
   writeConfig({ remote: { ...(readConfig().remote || {}), max: m } });
   remote.settingsChanged();
   log(`remote display upload: ${m ? `at most ${m / 1_000_000} Mbps` : 'no limit'}`);

@@ -103,6 +103,16 @@ Stagelight is made to stay out of OBS's way:
 - the preview is at most one picture a second, shared by every open panel, smaller while
   you're live, slower whenever OBS takes long to make one, and not sent again when unchanged
 - the settings window really closes (no memory used until it's opened again)
+- the remote display uses at most **1 Mbps** of the stream PC's upload by default (when you're not
+  live; while live, the "while you're live" setting), on every route: the web address, Tailscale and
+  the home network. Pick more under remote display for a sharper picture on a good line
+- the screen grabber does its costly step (copying the screen) once per picture sent and not at all
+  while nothing changed or the line is still busy with the last picture; through the web address it
+  grabs at most 10 frames a second (about 1/3 of the processor it used to)
+- logins survive a restart (an update, or the service bringing Stagelight back): only a fingerprint
+  of each login cookie is kept (logins.json in Stagelight's folder). An open panel carries on, and the
+  remote display reconnects by itself, retrying a little later each time while the PC can't be
+  reached; a direct connection that drops tries direct again before the web address
 - the remote display's video is H.264, which most PCs encode on the graphics card, and the
   screen-sharing part keeps running even when the settings window is minimised or closed (it's a
   tiny off-screen grabber), closing a minute after a session ends
@@ -121,7 +131,7 @@ Stagelight is made to stay out of OBS's way:
   round trip in ms: from the video connection itself (time and lost packets) when direct, and
   through the web address from how long pictures really take to arrive (measured by the PC)
 - while you're live, the remote display shares the upload with the stream and the stream comes
-  first: the picture stays at 1.2 Mbps and 15 fps (or 3 or 6 Mbps at 24 fps, picked under remote
+  first: the picture stays at 1 Mbps and 15 fps (or 3 or 6 Mbps at 24 fps, picked under remote
   display for a stream PC with plenty of upload), and drops to 0.4 Mbps and 8 fps as soon as
   OBS drops frames, struggles to send or reconnects, until the stream has been fine for a minute
 - file transfer (like AnyDesk's), a separate switch under the remote display, off by default: full

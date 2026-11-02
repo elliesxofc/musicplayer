@@ -20,7 +20,7 @@ const QUALITY = {
 /* While OBS is live, the picture shares the stream PC's upload with the stream, and the stream
    comes first: the picture is kept small, and smaller still as soon as OBS has trouble sending
    (dropped frames, congestion, reconnecting), until the stream has been fine for a minute. */
-const LIVE = { bitrate: 1_200_000, fps: 15 };
+const LIVE = { bitrate: 1_000_000, fps: 15 };
 const STRUGGLING = { bitrate: 400_000, fps: 8 };
 const CALM_MS = 60_000;
 
@@ -32,7 +32,7 @@ const SOFT = { fps: 15, height: 720 };
 const HOT = { fps: 10, height: 540, bitrate: 1_000_000 };
 
 // the most upload the stream PC lets the picture use (set in Stagelight, 0 = no limit), on top
-// liveMax: how much the picture may use while live (set in Stagelight: 1.2 Mbps unless the stream
+// liveMax: how much the picture may use while live (set in Stagelight: 1 Mbps unless the stream
 // PC's upload has plenty to spare); it still drops to STRUGGLING the moment OBS has trouble
 function limitFor(q, stream, guard, now = Date.now(), max = 0, cpu = {}, liveMax = 0) {
   const l = liveLimit(q, stream, guard, now, liveMax);
@@ -42,7 +42,8 @@ function limitFor(q, stream, guard, now = Date.now(), max = 0, cpu = {}, liveMax
     l.fps = Math.min(l.fps, HOT.fps); l.scale = Math.max(l.scale, q.height / HOT.height); l.bitrate = Math.min(l.bitrate, HOT.bitrate);
     l.saving = true; l.level = 'hot';
   }
-  if (max > 0 && max < l.bitrate) { l.bitrate = max; l.saving = true; if (l.level === 'full') l.level = 'capped'; }
+  // (while live it's the live setting that counts, so the two don't fight)
+  if (!(stream && stream.active) && max > 0 && max < l.bitrate) { l.bitrate = max; l.saving = true; if (l.level === 'full') l.level = 'capped'; }
   return l;
 }
 function liveLimit(q, stream, guard, now, liveMax = 0) {
@@ -57,7 +58,7 @@ function liveLimit(q, stream, guard, now, liveMax = 0) {
 const mbps = b => `${Math.round(b / 100_000) / 10} Mbps`;
 const NOTES = {
   full: (l, was) => (was === 'capped' ? 'no upload limit any more: full picture again' : was === 'hot' ? 'the stream PC has calmed down: full picture again' : 'the stream ended: full picture again'),
-  capped: l => `the stream PC lets the picture use up to ${mbps(l.bitrate)} of its upload`,
+  capped: l => `the picture uses up to ${mbps(l.bitrate)} (set on the stream PC)`,
   hot: 'the stream PC is busy: the picture is lowered so OBS keeps its processor',
   live: l => (l.liveRate > LIVE.bitrate ? `you're live: the picture uses up to ${mbps(l.bitrate)} (set on the stream PC), and less the moment the stream has trouble` : "you're live: the picture is kept light so the stream keeps its upload"),
   low: 'the stream is struggling: the picture is lowered to give it room',
@@ -263,8 +264,10 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     if (w.n - w.acked >= IN_FLIGHT) w.acked = w.n - 1;
     w.sent = relayOut.seq; w.n++;
     w.sentAt.set(w.n, Date.now()); if (w.sentAt.size > 8) w.sentAt.delete(w.sentAt.keys().next().value);
-    const num = Buffer.alloc(4); num.writeUInt32BE(w.n >>> 0);
-    if (!w.res.write(packet(3, Buffer.concat([num, relayOut.buf])))) w.busy = true;
+    // the header, then the picture itself (not copied into one buffer first)
+    const head = Buffer.alloc(9); head[0] = 3; head.writeUInt32BE(relayOut.buf.length + 4, 1); head.writeUInt32BE(w.n >>> 0, 5);
+    w.res.write(head);
+    if (!w.res.write(relayOut.buf)) w.busy = true;
   }
   // "picture n is here": room for the next one
   function relayAck(owner, n) {
@@ -292,7 +295,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   }
   ipcMain.on('frame', (e, data) => {
     if (!active || !active.relay || active.secure || !capture || e.sender !== capture.webContents) return;
-    relayOut.buf = Buffer.from(data); relayOut.seq++;
+    relayOut.buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength); relayOut.seq++; // the bytes as they came, not a copy
     for (const w of relayOut.watchers) relayPush(w);
   });
   setInterval(() => { for (const w of relayOut.watchers) if (!w.busy) w.res.write(packet(0)); }, 20_000).unref(); // keeps the web address from closing a quiet line

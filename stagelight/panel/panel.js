@@ -680,19 +680,23 @@ async function sigTick() {
   try {
     if (me.relay) {
       if (!me.relayLast) return sigShow(0);
-      const t0 = performance.now();
-      const r = await fetch('/api/me', { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
-      if (rd !== me) return;
-      if (!r || !r.ok) return sigShow(1);
-      const ms = performance.now() - t0;
-      me.sigMs = me.sigMs == null ? ms : me.sigMs * 0.6 + ms * 0.4; // smoothed, so one slow answer doesn't flicker
+      // the PC measures how long pictures take; only while it hasn't lately (a still screen) a tiny
+      // request there and back says how the line is
+      if (!(me.relayLag != null && Date.now() - me.relayLagAt < 6000)) {
+        const t0 = performance.now();
+        const r = await fetch('/api/me', { credentials: 'same-origin', cache: 'no-store' }).catch(() => null);
+        if (rd !== me) return;
+        if (!r || !r.ok) return sigShow(1);
+        const ms = performance.now() - t0;
+        me.sigMs = me.sigMs == null ? ms : me.sigMs * 0.6 + ms * 0.4; // smoothed, so one slow answer doesn't flicker
+      }
       const now = Date.now(), pics = me.relayPics || 0;
       me.sigFps = me.sigAt ? (pics - me.sigPics) / ((now - me.sigAt) / 1000) : null;
       me.sigAt = now; me.sigPics = pics;
       // how long pictures take to arrive (the PC measures it) counts too: a quick little request
       // says little when the pictures themselves crawl
       const lag = me.relayLag != null && now - me.relayLagAt < 10_000 ? me.relayLag : null;
-      const worst = Math.max(me.sigMs, lag || 0);
+      const worst = me.sigMs == null && lag == null ? null : Math.max(me.sigMs || 0, lag || 0);
       // the PC sends a picture every 2 s at least: none for a while means the line is stuck
       sigShow(now - me.relayLast > 6000 ? 1 : sigBars(worst), worst);
     } else if (me.pc && me.pc.connectionState === 'connected') {
@@ -752,6 +756,19 @@ function relaySendNow() {
     .catch(() => {})
     .finally(() => { me.relayPosting = false; if (rd === me && me.relayQueue && me.relayQueue.length) relaySendNow(); });
 }
+/* The stream PC couldn't be reached at all (Stagelight restarting, its service bringing it back,
+   the web address briefly losing it): try again by itself, a little later each time (up to 15 s),
+   for as long as the remote display is open here. A real "no" (a password, switched off) isn't. */
+const unreachable = err => err instanceof TypeError || /^error 5\d\d$/.test(String(err && err.message));
+function retryLater(gen, again) {
+  if (!rd || rd.gen !== gen) return;
+  rd.retryMs = Math.min(15000, (rd.retryMs || 1000) * 2);
+  const secs = Math.round(rd.retryMs / 1000);
+  rdState(`can't reach ${rd.pcName || 'the stream PC'} right now… trying again in ${secs} s`);
+  sigShow(0);
+  clearTimeout(rd.retryTimer);
+  rd.retryTimer = setTimeout(() => { if (rd && rd.gen === gen) again(); }, rd.retryMs);
+}
 async function relayConnect() {
   relayStop();
   if (rd.pc) { rd.pc.close(); rd.pc = null; rd.dc = null; }
@@ -764,6 +781,7 @@ async function relayConnect() {
   try {
     r = await api('/api/remote/start', { relay: true, password: rd.password, screen: $('#rdScreen').value, quality: $('#rdQuality').value });
   } catch (err) {
+    if (unreachable(err)) return retryLater(gen, relayConnect);
     rdState(err.message);
     if (/password|tries|access/.test(err.message)) { rdClose(false); toast(err.message, 4000); }
     return;
@@ -774,11 +792,28 @@ async function relayConnect() {
   rd.relayAbort = ctl; rd.relayQueue = [];
   rd.relayFlush = setInterval(relaySendNow, 50);
   let res;
-  try { res = await fetch('/api/remote/relay', { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal }); } catch { return; }
+  try { res = await fetch('/api/remote/relay', { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal }); } catch (err) { if (!ctl.signal.aborted) retryLater(gen, relayConnect); return; }
+  if (res.status >= 500 && rd && rd.gen === gen) return retryLater(gen, relayConnect);
   if (!res.ok || !res.body) { rdState("couldn't open the picture through the web address"); return; }
+  rd.retryMs = 0;
   rdConnected();
   const reader = res.body.getReader();
-  let buf = new Uint8Array(0), drawing = false, next = null;
+  let drawing = false, next = null;
+  // what has come so far, as the pieces it came in: joined only once a whole message is there
+  // (joining on every piece copied a big picture over and over)
+  const parts = []; let have = 0;
+  const peek = (n) => { // the first n bytes (n ≤ have)
+    if (n === 0) return new Uint8Array(0); // an empty message ("still here", every 20 s)
+    if (parts[0].length >= n) return parts[0].subarray(0, n);
+    const outb = new Uint8Array(n); let o = 0;
+    for (const c of parts) { const k = Math.min(c.length, n - o); outb.set(c.subarray(0, k), o); o += k; if (o === n) break; }
+    return outb;
+  };
+  const take = (n) => { // remove and return the first n bytes
+    const outb = peek(n); let left = n; have -= n;
+    while (left > 0) { const c = parts[0]; if (c.length <= left) { parts.shift(); left -= c.length; } else { parts[0] = c.subarray(left); left = 0; } }
+    return outb;
+  };
   const draw = async bytes => {
     if (drawing) { next = bytes; return; } // still drawing the last one: keep only the newest
     drawing = true;
@@ -800,12 +835,12 @@ async function relayConnect() {
       const { value, done } = await reader.read();
       if (done) break;
       if (rd && rd.gen === gen) rd.relayLast = Date.now();
-      const joined = new Uint8Array(buf.length + value.length); joined.set(buf); joined.set(value, buf.length); buf = joined;
-      while (buf.length >= 5) {
-        const len = new DataView(buf.buffer, buf.byteOffset + 1, 4).getUint32(0);
-        if (buf.length < 5 + len) break;
-        const kind = buf[0], body = buf.slice(5, 5 + len);
-        buf = buf.slice(5 + len);
+      parts.push(value); have += value.length;
+      while (have >= 5) {
+        const h = peek(5), len = new DataView(h.buffer, h.byteOffset + 1, 4).getUint32(0);
+        if (have < 5 + len) break;
+        const kind = h[0]; take(5);
+        const body = take(len);
         if (kind === 3 && body.length > 4) {
           // say it arrived straight away (the PC sends the next one then), and draw it
           const n = new DataView(body.buffer, body.byteOffset, 4).getUint32(0);
@@ -866,9 +901,14 @@ async function rdConnect() {
   pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };
   pc.onconnectionstatechange = () => {
     if (!rd || rd.pc !== pc) return;
-    if (pc.connectionState === 'connected') { clearTimeout(rd.fallTimer); rdConnected(); }
-    if (pc.connectionState === 'failed') fallBack("couldn't connect directly (a VPN or the network blocks it)");
-    if (pc.connectionState === 'disconnected') rdState('connection dropped… waiting');
+    clearTimeout(rd.dropTimer);
+    if (pc.connectionState === 'connected') { clearTimeout(rd.fallTimer); rd.directOk = true; rdConnected(); }
+    // a direct connection that worked and then dropped (Stagelight restarted, the network blinked):
+    // a new direct one first (the web address only if that doesn't work within 12 s); one that
+    // never worked: the web address straight away
+    const again = () => { if (rd && rd.pc === pc) { if (rd.directOk) rdConnect(); else fallBack("couldn't connect directly (a VPN or the network blocks it)"); } };
+    if (pc.connectionState === 'failed') again();
+    if (pc.connectionState === 'disconnected') { rdState('connection dropped… reconnecting'); rd.dropTimer = setTimeout(again, 4000); }
   };
   Object.assign(rd, { pc, dc });
   await pc.setLocalDescription(await pc.createOffer());
@@ -878,7 +918,9 @@ async function rdConnect() {
     if (!rd || rd.pc !== pc) return;
     rdUseControls(r);
     await pc.setRemoteDescription({ type: 'answer', sdp: r.sdp });
+    rd.retryMs = 0;
   } catch (err) {
+    if (rd && rd.pc === pc && unreachable(err)) { clearTimeout(rd.fallTimer); return retryLater(gen, rdConnect); }
     rdState(err.message);
     if (/password|tries|access/.test(err.message)) { rdClose(false); toast(err.message, 4000); }
   }
@@ -909,7 +951,7 @@ function rdClose(tell = true) {
   if (!rd) return;
   const was = rd;
   relayStop();
-  clearTimeout(was.fallTimer); clearTimeout(was.ackTimer); clearInterval(was.sigTimer);
+  clearTimeout(was.fallTimer); clearTimeout(was.ackTimer); clearInterval(was.sigTimer); clearTimeout(was.retryTimer); clearTimeout(was.dropTimer);
   rd = null;
   if (was.pc) was.pc.close();
   rdVideo.srcObject = null;

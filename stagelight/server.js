@@ -76,8 +76,22 @@ function mediaType(head) {
 
 const loopback = a => /^(127\.|::1$|::ffff:127\.)/.test(String(a || ''));
 
-function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false, onFiles = () => {}, getAccounts, getWeb = () => ({ on: false, host: '' }), log = () => {}, onWatchers = () => {} }) {
-  const sessions = new Map(); // token → { expires, ip }
+function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false, onFiles = () => {}, getAccounts, getWeb = () => ({ on: false, host: '' }), log = () => {}, onWatchers = () => {}, store = null }) {
+  /* Logins, by a fingerprint of their cookie (SHA-256): the cookie itself is never kept. They're
+     saved (store), so a restart (an update, or Stagelight's service bringing it back) doesn't log
+     everyone out: an open panel carries on by itself. */
+  const keyOf = token => crypto.createHash('sha256').update(String(token)).digest('base64url');
+  const sessions = new Map(); // fingerprint → { expires, ip, user, stamp }
+  try { for (const [k, s] of (store && store.load()) || []) if (typeof k === 'string' && s && s.expires > Date.now() && typeof s.user === 'string') sessions.set(k, { expires: s.expires, ip: String(s.ip || ''), user: s.user, stamp: s.stamp }); } catch { /* none saved */ }
+  let saveTimer = null;
+  const persist = () => {
+    if (!store || saveTimer) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      try { store.save([...sessions].filter(([, s]) => s.expires > Date.now()).map(([k, s]) => [k, { expires: s.expires, ip: s.ip, user: s.user, stamp: s.stamp }])); } catch { /* read-only disk */ }
+    }, 500);
+    if (saveTimer.unref) saveTimer.unref();
+  };
   const failures = new Map(); // ip → { count, lockedUntil, lockMs }
   const watchers = new Set(); // open event streams: { res, token }
   let server = null, port = 0;
@@ -112,13 +126,15 @@ function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false
   function sessionOf(req) {
     const m = new RegExp(`(?:^|;\\s*)${COOKIE}=([A-Za-z0-9_-]{20,100})`).exec(req.headers.cookie || '');
     if (!m) return null;
-    const s = sessions.get(m[1]);
+    const k = keyOf(m[1]);
+    const s = sessions.get(k);
     if (!s) return null;
-    if (Date.now() > s.expires) { sessions.delete(m[1]); return null; }
+    if (Date.now() > s.expires) { sessions.delete(k); persist(); return null; }
     // the account may have been removed (or its access changed) since logging in
     const account = findAccount(s.user);
-    if (!account || account.stamp !== s.stamp) { sessions.delete(m[1]); return null; }
-    return { token: m[1], ...s, role: account.role };
+    if (!account || account.stamp !== s.stamp) { sessions.delete(k); persist(); return null; }
+    // token: the fingerprint, which stands for this login everywhere else
+    return { token: k, ...s, role: account.role };
   }
 
   function readBody(req, max = 10_000) {
@@ -168,7 +184,8 @@ function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false
     const account = verify(ip, body.username, body.password, web);
     if (account.error) return send(res, account.error[0], { error: account.error[1] });
     const token = crypto.randomBytes(32).toString('base64url');
-    sessions.set(token, { expires: now + SESSION_MS, ip, user: account.name, stamp: account.stamp });
+    sessions.set(keyOf(token), { expires: now + SESSION_MS, ip, user: account.name, stamp: account.stamp });
+    persist();
     log(`${account.name} opened the panel from ${ip}${web ? ' (web address)' : ''}`);
     // through the web address it's HTTPS: the cookie is only ever sent over HTTPS
     send(res, 200, { ok: true }, undefined, { 'Set-Cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_MS / 1000}${web ? '; Secure' : ''}` });
@@ -249,7 +266,7 @@ function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false
     const isUpload = p === '/api/upload' && req.method === 'POST' && req.headers['x-stagelight'] === '1' && /^application\/octet-stream\b/.test(req.headers['content-type'] || '');
     if (!isUpload && (req.method !== 'POST' || !fromPanel(req))) return send(res, 403, { error: 'not from the panel' });
     if (p === '/api/logout') {
-      sessions.delete(session.token);
+      sessions.delete(session.token); persist();
       for (const w of watchers) if (w.token === session.token) w.res.end();
       return send(res, 200, { ok: true }, undefined, { 'Set-Cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${viaWeb(req) ? '; Secure' : ''}` });
     }
@@ -449,11 +466,12 @@ function createServer({ obs, remote = null, mediaDir = '', filesOn = () => false
     port: () => port,
     broadcast,
     // a new password: everyone has to log in again
-    logoutAll() { sessions.clear(); for (const w of watchers) w.res.end(); watchers.clear(); },
+    logoutAll() { sessions.clear(); persist(); for (const w of watchers) w.res.end(); watchers.clear(); },
     // one account removed or changed: only its logins end
     logoutUser(name) {
       const n = String(name).toLowerCase();
       for (const [t, s] of sessions) if (s.user.toLowerCase() === n) sessions.delete(t);
+      persist();
       for (const w of watchers) if (!sessions.has(w.token)) { w.res.end(); watchers.delete(w); }
     },
     sessionCount: () => [...sessions.values()].filter(s => Date.now() < s.expires).length,

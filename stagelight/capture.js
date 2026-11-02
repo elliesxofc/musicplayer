@@ -25,19 +25,20 @@ function frameSource() {
   const track = stream.getVideoTracks()[0];
   if (typeof MediaStreamTrackProcessor === 'function' && track) {
     const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
-    const src = { latest: null, done: false };
+    const src = { latest: null, done: false, seq: 0 };
     (async () => {
       try {
         for (;;) {
           const { value, done } = await reader.read();
           if (done || src.done) { if (value) value.close(); break; }
           if (src.latest) src.latest.close(); // only the newest frame is kept
-          src.latest = value;
+          src.latest = value; src.seq++;
         }
       } catch { /* the capture ended */ }
     })();
     return {
       image: () => src.latest,
+      seq: () => src.seq, // goes up with each new frame (Windows sends one only when the screen changed)
       size: () => (src.latest ? [src.latest.displayWidth, src.latest.displayHeight] : [0, 0]),
       stop: () => { src.done = true; reader.cancel().catch(() => {}); if (src.latest) { src.latest.close(); src.latest = null; } },
     };
@@ -46,6 +47,7 @@ function frameSource() {
   video.muted = true; video.srcObject = stream; video.play().catch(() => {});
   return {
     image: () => (video.readyState >= 2 ? video : null),
+    seq: (() => { let n = 0; return () => ++n; })(), // no way to tell: always "new"
     size: () => [video.videoWidth, video.videoHeight],
     stop: () => { video.srcObject = null; },
   };
@@ -58,45 +60,54 @@ function startRelay() {
   // picture may use (limit.bitrate: the quality picked, lowered while live or by the PC's setting)
   // lag: how long pictures take to reach the panel (measured there and back); floor: the quickest
   // lately (the line's own delay, which a smaller picture can't beat)
-  relay = { source, canvas, timer: null, prev: null, lastSent: 0, stop: source.stop, q: 0.7, shrink: 1, nextAt: 0, lag: null, floor: null, slowAt: 0 };
+  relay = { source, canvas, timer: null, prev: null, lastSent: 0, stop: source.stop, q: 0.7, shrink: 1, nextAt: 0, lag: null, floor: null, slowAt: 0, seen: -1, pending: false };
   const me = relay;
   const tick = async () => {
     if (relay !== me) return;
     const t0 = performance.now();
     try {
-      const img = source.image(), [vw, vh] = source.size();
-      if (img && vw) {
-        const sc = Math.max(1, (limit && limit.scale) || 1) * me.shrink;
-        const w = Math.round(vw / sc), h = Math.round(vh / sc);
-        // how much has changed? a small copy of the screen says it cheaply: nothing (send one every
-        // 2 s anyway), a little (a blinking dot, the mouse pointer: 3 a second at most), or a lot
-        tctx.drawImage(img, 0, 0, 160, 90);
-        const px = tctx.getImageData(0, 0, 160, 90).data;
-        let changed = me.prev ? 0 : Infinity;
-        if (me.prev) for (let i = 0; i < px.length; i += 4) if (Math.abs(px[i] - me.prev[i]) + Math.abs(px[i + 1] - me.prev[i + 1]) + Math.abs(px[i + 2] - me.prev[i + 2]) > 24) changed++;
-        const since = Date.now() - me.lastSent;
-        // within the upload it may use: the last picture's bytes must have had time to go
-        if (Date.now() >= me.nextAt && ((changed > 30) || (changed > 0 && since >= 330) || since > 2000)) {
+      const now = Date.now(), since = now - me.lastSent;
+      const fresh = source.seq() !== me.seen;
+      // nothing to do (and nothing drawn, the costly part) while the last picture's bytes are still
+      // going out within the upload it may use, or when the screen sent nothing new: a small change
+      // still waiting (pending) goes after 1/3 s, and one picture every 2 s anyway
+      if (now >= me.nextAt && (fresh || (me.pending && since >= 330) || since > 2000)) {
+        const img = source.image(), [vw, vh] = source.size();
+        if (img && vw) {
+          me.seen = source.seq();
+          const sc = Math.max(1, (limit && limit.scale) || 1) * me.shrink;
+          const w = Math.round(vw / sc), h = Math.round(vh / sc);
+          // one copy of the screen (the costly step); the small one for comparing is made from it
           if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
           ctx.drawImage(img, 0, 0, w, h);
-          const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: me.q });
-          if (relay !== me) return;
-          window.capture.frame(await blob.arrayBuffer());
-          me.prev = px; me.lastSent = Date.now();
-          // aim for about 6 pictures a second within the upload: a bigger picture than that lowers
-          // the quality (and below 0.4, the size); a smaller one brings them back
-          const rate = Math.max(200_000, (limit && limit.bitrate) || 3_000_000);
-          const aim = rate / 8 / 6;
-          me.nextAt = Date.now() + blob.size * 8 / rate * 1000;
-          // and pictures that take long to arrive (the line is slower than the quality allows):
-          // smaller ones, a step at a time; bigger again only once they arrive quickly
-          const late = me.lag != null && me.lag > me.floor + 220 && Date.now() - me.slowAt > 600;
-          const quick = me.lag == null || me.lag < me.floor + 90;
-          if (late) me.slowAt = Date.now();
-          if (blob.size > aim * 1.3 || late) {
-            if (me.q > 0.4) me.q = Math.max(0.4, me.q - 0.06); else me.shrink = Math.min(2.5, me.shrink * 1.15);
-          } else if (blob.size < aim * 0.6 && quick) {
-            if (me.shrink > 1) me.shrink = Math.max(1, me.shrink / 1.1); else me.q = Math.min(0.8, me.q + 0.03);
+          tctx.drawImage(canvas, 0, 0, 160, 90);
+          // how much has changed since the last picture sent: nothing, a little (a blinking dot, the
+          // mouse pointer: 3 a second at most), or a lot
+          const px = tctx.getImageData(0, 0, 160, 90).data;
+          let changed = me.prev ? 0 : Infinity;
+          if (me.prev) for (let i = 0; i < px.length; i += 4) if (Math.abs(px[i] - me.prev[i]) + Math.abs(px[i + 1] - me.prev[i + 1]) + Math.abs(px[i + 2] - me.prev[i + 2]) > 24) changed++;
+          me.pending = changed > 0;
+          if ((changed > 30) || (changed > 0 && since >= 330) || since > 2000) {
+            me.pending = false;
+            const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: me.q });
+            if (relay !== me) return;
+            window.capture.frame(await blob.arrayBuffer());
+            me.prev = px; me.lastSent = Date.now();
+            // aim for about 6 pictures a second within the upload: a bigger picture than that lowers
+            // the quality (and below 0.4, the size); a smaller one brings them back
+            const rate = Math.max(200_000, (limit && limit.bitrate) || 3_000_000);
+            const aim = rate / 8 / 6;
+            me.nextAt = Date.now() + blob.size * 8 / rate * 1000;
+            // and pictures that take long to arrive (the line is slower than the quality allows):
+            // smaller ones, a step at a time; bigger again only once they arrive quickly
+            const late = me.lag != null && me.lag > me.floor + 220 && Date.now() - me.slowAt > 600;
+            const quick = me.lag == null || me.lag < me.floor + 90;
+            if (late) me.slowAt = Date.now();
+            if (blob.size > aim * 1.3 || late) {
+              if (me.q > 0.4) me.q = Math.max(0.4, me.q - 0.06); else me.shrink = Math.min(2.5, me.shrink * 1.15);
+            } else if (blob.size < aim * 0.6 && quick) {
+              if (me.shrink > 1) me.shrink = Math.max(1, me.shrink / 1.1); else me.q = Math.min(0.8, me.q + 0.03);
+            }
           }
         }
       }
@@ -157,7 +168,8 @@ window.capture.onStart(async job => {
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: job.sourceId, maxWidth: job.width, maxHeight: job.height, maxFrameRate: job.fps } },
+      // through the web address at most 10 pictures a second go out: grabbing more costs for nothing
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: job.sourceId, maxWidth: job.width, maxHeight: job.height, maxFrameRate: job.relay ? Math.min(10, job.fps) : job.fps } },
     });
     if (job.relay) {
       limit = job.limit || limit;

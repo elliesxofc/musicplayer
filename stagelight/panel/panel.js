@@ -655,7 +655,7 @@ function sigShow(bars, ms = null, lost = null) {
   const el = $('#rdSig');
   el.dataset.bars = String(bars);
   $('#rdSigMs').textContent = ms != null && bars ? `${Math.round(ms)} ms` : '';
-  const t = `connection: ${SIG_WORDS[bars]}${ms != null ? ` · ${Math.round(ms)} ms there and back` : ''}${lost != null ? ` · ${(lost * 100).toFixed(1)}% lost` : ''}${rd && rd.relay ? ' · through the web address' : ''}`;
+  const t = `connection: ${SIG_WORDS[bars]}${ms != null ? ` · ${Math.round(ms)} ms ${rd && rd.relay ? 'for a picture to arrive' : 'there and back'}` : ''}${lost != null ? ` · ${(lost * 100).toFixed(1)}% lost` : ''}${rd && rd.relay ? `${rd.sigFps != null ? ` · ${rd.sigFps.toFixed(1)} pictures a second` : ''} · through the web address` : ''}`;
   el.title = t; el.setAttribute('aria-label', t);
 }
 const sigBars = (ms, lost = 0) => (ms == null ? 0 : ms < 80 && lost < 0.01 ? 4 : ms < 150 && lost < 0.03 ? 3 : ms < 300 && lost < 0.08 ? 2 : 1);
@@ -672,8 +672,15 @@ async function sigTick() {
       if (!r || !r.ok) return sigShow(1);
       const ms = performance.now() - t0;
       me.sigMs = me.sigMs == null ? ms : me.sigMs * 0.6 + ms * 0.4; // smoothed, so one slow answer doesn't flicker
+      const now = Date.now(), pics = me.relayPics || 0;
+      me.sigFps = me.sigAt ? (pics - me.sigPics) / ((now - me.sigAt) / 1000) : null;
+      me.sigAt = now; me.sigPics = pics;
+      // how long pictures take to arrive (the PC measures it) counts too: a quick little request
+      // says little when the pictures themselves crawl
+      const lag = me.relayLag != null && now - me.relayLagAt < 10_000 ? me.relayLag : null;
+      const worst = Math.max(me.sigMs, lag || 0);
       // the PC sends a picture every 2 s at least: none for a while means the line is stuck
-      sigShow(Date.now() - me.relayLast > 6000 ? 1 : sigBars(me.sigMs), me.sigMs);
+      sigShow(now - me.relayLast > 6000 ? 1 : sigBars(worst), worst);
     } else if (me.pc && me.pc.connectionState === 'connected') {
       const stats = await me.pc.getStats();
       if (rd !== me) return;
@@ -719,6 +726,18 @@ function relayStop() {
   clearInterval(rd.relayFlush);
   rd.relayAbort = null; rd.relayFlush = null; rd.relayQueue = [];
 }
+/* Mouse and keyboard through the web address: one batch at a time, the next once the last one
+   got there (on a slow line, batches sent side by side could arrive the other way round: a
+   button let go before it was pressed). Whatever comes meanwhile waits and goes in one batch. */
+function relaySendNow() {
+  const me = rd;
+  if (!me || me.relayPosting || !me.relayQueue || !me.relayQueue.length) return;
+  const events = me.relayQueue.splice(0);
+  me.relayPosting = true;
+  fetch('/api/remote/relay/input', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Stagelight': '1' }, body: JSON.stringify({ events }) })
+    .catch(() => {})
+    .finally(() => { me.relayPosting = false; if (rd === me && me.relayQueue && me.relayQueue.length) relaySendNow(); });
+}
 async function relayConnect() {
   relayStop();
   if (rd.pc) { rd.pc.close(); rd.pc = null; rd.dc = null; }
@@ -739,11 +758,7 @@ async function relayConnect() {
   rdUseControls(r);
   const ctl = new AbortController();
   rd.relayAbort = ctl; rd.relayQueue = [];
-  rd.relayFlush = setInterval(() => {
-    if (!rd || !rd.relayQueue.length) return;
-    const events = rd.relayQueue.splice(0);
-    fetch('/api/remote/relay/input', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Stagelight': '1' }, body: JSON.stringify({ events }) }).catch(() => {});
-  }, 50);
+  rd.relayFlush = setInterval(relaySendNow, 50);
   let res;
   try { res = await fetch('/api/remote/relay', { credentials: 'same-origin', cache: 'no-store', signal: ctl.signal }); } catch { return; }
   if (!res.ok || !res.body) { rdState("couldn't open the picture through the web address"); return; }
@@ -777,7 +792,12 @@ async function relayConnect() {
         if (buf.length < 5 + len) break;
         const kind = buf[0], body = buf.slice(5, 5 + len);
         buf = buf.slice(5 + len);
-        if (kind === 1) draw(body);
+        if (kind === 3 && body.length > 4) {
+          // say it arrived straight away (the PC sends the next one then), and draw it
+          const n = new DataView(body.buffer, body.byteOffset, 4).getUint32(0);
+          if (rd && rd.gen === gen && rd.relayQueue) { rd.relayQueue.push({ t: 'fa', n }); rd.relayPics = (rd.relayPics || 0) + 1; relaySendNow(); }
+          draw(body.subarray(4));
+        } else if (kind === 1) draw(body);
         else if (kind === 2) {
           let msg; try { msg = JSON.parse(new TextDecoder().decode(body)); } catch { continue; }
           if (msg.t === 'end' && rd && rd.gen === gen) { rdClose(false); toast(`remote display ended: ${msg.why || 'on the stream PC'}`, 4000); return; }
@@ -785,6 +805,7 @@ async function relayConnect() {
           if (msg.t === 'clip' && rd && rd.gen === gen) clipFromPc(msg.text);
           if (msg.t === 'ack' && rd && rd.gen === gen) clickArrived(msg.on, msg.blocked);
           if (msg.t === 'desk' && rd && rd.gen === gen) rd.secure = !!msg.secure; // the pictures come the usual way
+          if (msg.t === 'lag' && rd && rd.gen === gen && Number.isFinite(msg.ms)) { rd.relayLag = msg.ms; rd.relayLagAt = Date.now(); }
         }
       }
     }
@@ -896,7 +917,11 @@ function clickSent() {
     rd.ackTimer = null;
     if (!rd || rd.ackSaid) return;
     rd.ackSaid = true;
-    toast("the stream PC didn't answer that click: its mouse and keyboard may not be working. restart Stagelight on the stream PC (as administrator), or check the connection", 8000);
+    // through the web address on a slow line, the answer is usually just late
+    const slow = rd.relay || Number($('#rdSig').dataset.bars) <= 2;
+    toast(slow
+      ? "no answer from the stream PC for that click yet: the connection is slow right now (see the bars at the top). it may still land in a moment"
+      : "the stream PC didn't answer that click: its mouse and keyboard may not be working. restart Stagelight on the stream PC (as administrator), or check the connection", 8000);
   }, 5000);
 }
 function clickArrived(on, blocked) {

@@ -54,7 +54,9 @@ function startRelay() {
   const source = frameSource();
   const canvas = new OffscreenCanvas(16, 16), ctx = canvas.getContext('2d', { alpha: false });
   const tiny = new OffscreenCanvas(160, 90), tctx = tiny.getContext('2d', { willReadFrequently: true });
-  relay = { source, canvas, timer: null, prev: null, lastSent: 0, stop: source.stop };
+  // q: the JPEG quality, shrink: how much smaller than the screen; both follow the upload the
+  // picture may use (limit.bitrate: the quality picked, lowered while live or by the PC's setting)
+  relay = { source, canvas, timer: null, prev: null, lastSent: 0, stop: source.stop, q: 0.7, shrink: 1, nextAt: 0 };
   const me = relay;
   const tick = async () => {
     if (relay !== me) return;
@@ -62,7 +64,7 @@ function startRelay() {
     try {
       const img = source.image(), [vw, vh] = source.size();
       if (img && vw) {
-        const sc = Math.max(1, (limit && limit.scale) || 1);
+        const sc = Math.max(1, (limit && limit.scale) || 1) * me.shrink;
         const w = Math.round(vw / sc), h = Math.round(vh / sc);
         // how much has changed? a small copy of the screen says it cheaply: nothing (send one every
         // 2 s anyway), a little (a blinking dot, the mouse pointer: 3 a second at most), or a lot
@@ -71,14 +73,24 @@ function startRelay() {
         let changed = me.prev ? 0 : Infinity;
         if (me.prev) for (let i = 0; i < px.length; i += 4) if (Math.abs(px[i] - me.prev[i]) + Math.abs(px[i + 1] - me.prev[i + 1]) + Math.abs(px[i + 2] - me.prev[i + 2]) > 24) changed++;
         const since = Date.now() - me.lastSent;
-        if ((changed > 30) || (changed > 0 && since >= 330) || since > 2000) {
+        // within the upload it may use: the last picture's bytes must have had time to go
+        if (Date.now() >= me.nextAt && ((changed > 30) || (changed > 0 && since >= 330) || since > 2000)) {
           if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
           ctx.drawImage(img, 0, 0, w, h);
-          const busy = limit && (limit.level === 'hot' || limit.level === 'low');
-          const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: busy ? 0.5 : 0.78 });
+          const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: me.q });
           if (relay !== me) return;
           window.capture.frame(await blob.arrayBuffer());
           me.prev = px; me.lastSent = Date.now();
+          // aim for about 6 pictures a second within the upload: a bigger picture than that lowers
+          // the quality (and below 0.4, the size); a smaller one brings them back
+          const rate = Math.max(200_000, (limit && limit.bitrate) || 3_000_000);
+          const aim = rate / 8 / 6;
+          me.nextAt = Date.now() + blob.size * 8 / rate * 1000;
+          if (blob.size > aim * 1.3) {
+            if (me.q > 0.4) me.q = Math.max(0.4, me.q - 0.06); else me.shrink = Math.min(2.5, me.shrink * 1.15);
+          } else if (blob.size < aim * 0.6) {
+            if (me.shrink > 1) me.shrink = Math.max(1, me.shrink / 1.1); else me.q = Math.min(0.8, me.q + 0.03);
+          }
         }
       }
     } catch { /* a frame skipped */ }

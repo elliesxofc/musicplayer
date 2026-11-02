@@ -228,14 +228,41 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     if (soft !== cpu.soft) { cpu.soft = soft; streamChanged(stream); }
   });
   /* ───────────── through the web address: pictures out, mouse and keyboard in ─────────────
-     Each message to the panel: 1 byte kind (1 picture, 2 a note as JSON, 0 still here),
-     4 bytes length, then the bytes. A slow phone gets the newest picture, not a queue. */
+     Each message to the panel: 1 byte kind (3 a picture: its number, then the JPEG; 2 a note as
+     JSON; 0 still here), 4 bytes length, then the bytes. A slow phone gets the newest picture,
+     not a queue.
+     The panel says when each picture has arrived, and at most two are on their way at once. The
+     web address's line (cloudflared, then Cloudflare) takes whatever it's given straight away and
+     holds it, so without this, old pictures piled up there by the second and everything behind
+     them waited, the answers to clicks too. */
   const relayOut = { seq: 0, buf: null, note: '', watchers: new Set() };
+  const IN_FLIGHT = 2;
   const packet = (kind, body = Buffer.alloc(0)) => { const h = Buffer.alloc(5); h[0] = kind; h.writeUInt32BE(body.length, 1); return Buffer.concat([h, body]); };
   function relayPush(w) {
     if (w.busy || !relayOut.buf || w.sent === relayOut.seq) return;
-    w.sent = relayOut.seq;
-    if (!w.res.write(packet(1, relayOut.buf))) w.busy = true;
+    // no word from the panel for a while (a lost answer): carry on rather than stop for good
+    if (w.n - w.acked >= IN_FLIGHT && Date.now() - w.ackAt < 4000) return;
+    if (w.n - w.acked >= IN_FLIGHT) w.acked = w.n - 1;
+    w.sent = relayOut.seq; w.n++;
+    w.sentAt.set(w.n, Date.now()); if (w.sentAt.size > 8) w.sentAt.delete(w.sentAt.keys().next().value);
+    const num = Buffer.alloc(4); num.writeUInt32BE(w.n >>> 0);
+    if (!w.res.write(packet(3, Buffer.concat([num, relayOut.buf])))) w.busy = true;
+  }
+  // "picture n is here": room for the next one
+  function relayAck(owner, n) {
+    for (const w of relayOut.watchers) {
+      if (w.owner !== owner || !Number.isFinite(n) || n > w.n) continue;
+      if (n > w.acked) { w.acked = n; w.ackAt = Date.now(); }
+      // how long a picture really takes to reach the panel (for its connection bars)
+      const at = w.sentAt.get(n);
+      if (at) {
+        w.sentAt.delete(n);
+        const ms = Date.now() - at;
+        w.lag = w.lag == null ? ms : w.lag * 0.7 + ms * 0.3;
+        if (Date.now() - w.lagSaid > 2000) { w.lagSaid = Date.now(); w.res.write(packet(2, Buffer.from(JSON.stringify({ t: 'lag', ms: Math.round(w.lag) })))); }
+      }
+      relayPush(w);
+    }
   }
   function relaySay(msg) { for (const w of relayOut.watchers) w.res.write(packet(2, Buffer.from(JSON.stringify(msg)))); }
   function relayClose(why) {
@@ -253,7 +280,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   const relayAllowed = owner => !!(active && active.relay && active.owner === owner);
   function relayWatch(res, owner) {
     if (!relayAllowed(owner)) return false;
-    const w = { res, sent: 0, busy: false };
+    const w = { res, owner, sent: 0, busy: false, n: 0, acked: 0, ackAt: Date.now(), sentAt: new Map(), lag: null, lagSaid: 0 };
     relayOut.watchers.add(w);
     res.on('drain', () => { w.busy = false; relayPush(w); });
     res.on('close', () => relayOut.watchers.delete(w));
@@ -263,6 +290,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   }
   function relayInput(owner, msg) {
     if (!active || !active.relay || active.owner !== owner) return false;
+    if (msg && msg.t === 'fa') { relayAck(owner, Number(msg.n)); return true; }
     handleInput(msg);
     return true;
   }

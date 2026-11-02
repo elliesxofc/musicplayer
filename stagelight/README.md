@@ -111,9 +111,14 @@ Stagelight is made to stay out of OBS's way:
 - the panel shows who's connected by name; the address stays on the stream PC (its bar and log)
 - give the stream PC its own name (settings → more, like "LILIANA-SERVER"): the panel shows it
   on the remote display card and in the remote display's bar instead of Windows' name
+- through the web address (Cloudflare) the remote display waits for the panel to say each picture
+  arrived before sending more (at most two on their way), sizes the pictures to the upload it may
+  use (lower while live), and sends mouse and keyboard one batch at a time, in order. Before, the
+  tunnel held seconds of old pictures and clicks waited behind them: on a slow line clicks now
+  answer in under a second instead of 10+ seconds
 - the remote display's bar shows the connection's strength as Wi-Fi-style bars (📶), with the
   round trip in ms: from the video connection itself (time and lost packets) when direct, and
-  from a tiny request there and back (and whether pictures keep coming) through the web address
+  through the web address from how long pictures really take to arrive (measured by the PC)
 - while you're live, the remote display shares the upload with the stream and the stream comes
   first: the picture stays at 1.2 Mbps and 15 fps, and drops to 0.4 Mbps and 8 fps as soon as
   OBS drops frames, struggles to send or reconnects, until the stream has been fine for a minute

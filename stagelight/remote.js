@@ -32,8 +32,10 @@ const SOFT = { fps: 15, height: 720 };
 const HOT = { fps: 10, height: 540, bitrate: 1_000_000 };
 
 // the most upload the stream PC lets the picture use (set in Stagelight, 0 = no limit), on top
-function limitFor(q, stream, guard, now = Date.now(), max = 0, cpu = {}) {
-  const l = liveLimit(q, stream, guard, now);
+// liveMax: how much the picture may use while live (set in Stagelight: 1.2 Mbps unless the stream
+// PC's upload has plenty to spare); it still drops to STRUGGLING the moment OBS has trouble
+function limitFor(q, stream, guard, now = Date.now(), max = 0, cpu = {}, liveMax = 0) {
+  const l = liveLimit(q, stream, guard, now, liveMax);
   l.scale = 1;
   if (cpu.soft) { l.fps = Math.min(l.fps, SOFT.fps); l.scale = Math.max(1, q.height / SOFT.height); }
   if (cpu.hot) {
@@ -43,20 +45,21 @@ function limitFor(q, stream, guard, now = Date.now(), max = 0, cpu = {}) {
   if (max > 0 && max < l.bitrate) { l.bitrate = max; l.saving = true; if (l.level === 'full') l.level = 'capped'; }
   return l;
 }
-function liveLimit(q, stream, guard, now) {
+function liveLimit(q, stream, guard, now, liveMax = 0) {
   if (!stream || !stream.active) { guard.until = 0; return { bitrate: q.bitrate, fps: q.fps, saving: false, level: 'full' }; }
   const dropped = guard.skipped != null && stream.skipped > guard.skipped && (stream.skipped - guard.skipped) >= Math.max(3, (stream.total - guard.total) * 0.005);
   guard.skipped = stream.skipped; guard.total = stream.total;
   if (stream.reconnecting || stream.congestion > 0.2 || dropped) guard.until = now + CALM_MS;
-  const l = guard.until > now ? STRUGGLING : LIVE;
-  return { bitrate: Math.min(q.bitrate, l.bitrate), fps: Math.min(q.fps, l.fps), saving: true, level: l === STRUGGLING ? 'low' : 'live' };
+  const live = liveMax > LIVE.bitrate ? { bitrate: liveMax, fps: 24 } : LIVE;
+  const l = guard.until > now ? STRUGGLING : live;
+  return { bitrate: Math.min(q.bitrate, l.bitrate), fps: Math.min(q.fps, l.fps), saving: true, level: l === STRUGGLING ? 'low' : 'live', liveRate: l.bitrate };
 }
 const mbps = b => `${Math.round(b / 100_000) / 10} Mbps`;
 const NOTES = {
   full: (l, was) => (was === 'capped' ? 'no upload limit any more: full picture again' : was === 'hot' ? 'the stream PC has calmed down: full picture again' : 'the stream ended: full picture again'),
   capped: l => `the stream PC lets the picture use up to ${mbps(l.bitrate)} of its upload`,
   hot: 'the stream PC is busy: the picture is lowered so OBS keeps its processor',
-  live: "you're live: the picture is kept light so the stream keeps its upload",
+  live: l => (l.liveRate > LIVE.bitrate ? `you're live: the picture uses up to ${mbps(l.bitrate)} (set on the stream PC), and less the moment the stream has trouble` : "you're live: the picture is kept light so the stream keeps its upload"),
   low: 'the stream is struggling: the picture is lowered to give it room',
 };
 
@@ -333,7 +336,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     const q = QUALITY[quality] || QUALITY.smooth;
     const guard = {};
     cpu.soft = false; // found out again for each session
-    const limit = limitFor(q, stream, guard, Date.now(), s.max, cpu);
+    const limit = limitFor(q, stream, guard, Date.now(), s.max, cpu, s.liveMax);
     if (limit.level !== 'full') limit.note = note(limit);
     const id = nextJob++;
     const win = captureWindow();
@@ -416,7 +419,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   function streamChanged(next) {
     stream = next;
     if (!active || !capture || capture.isDestroyed()) return;
-    const limit = limitFor(active.q, stream, active.guard, Date.now(), getSettings().max, cpu);
+    const limit = limitFor(active.q, stream, active.guard, Date.now(), getSettings().max, cpu, getSettings().liveMax);
     if (limit.level === active.level && limit.bitrate === active.bitrate && limit.fps === active.fps && limit.scale === active.scale) return;
     if (limit.level === 'low' && active.level !== 'low') log('remote display: the stream is struggling, the picture is lowered');
     const was = active.level, wasRate = active.bitrate;

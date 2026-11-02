@@ -213,7 +213,11 @@ static class Helper {
           case "H": Mouse(0x1000, int.Parse(p[1])); break;
           case "K": Key(ushort.Parse(p[1]), p[2] == "1", p[3] == "1"); break;
           case "T": Text(Encoding.UTF8.GetString(Convert.FromBase64String(p[1]))); break;
-          case "S": stdout.WriteLine("shot " + ShotOnDesk(int.Parse(p[1]), long.Parse(p[2]))); break;
+          case "S": { // a picture, or why there's none ("shoterr …")
+            string r = ShotOnDesk(int.Parse(p[1]), long.Parse(p[2]));
+            stdout.WriteLine(r.StartsWith("!") ? "shoterr " + r.Substring(1) : "shot " + r);
+            break;
+          }
         }
       } catch (Exception e) { stdout.WriteLine("error " + e.Message.Replace("\r", " ").Replace("\n", " ")); }
     }
@@ -263,9 +267,15 @@ static class Helper {
 
   // pictures are taken on a thread of their own, put on the screen that takes input now (drawing
   // can leave windows behind on a thread, and a thread with windows can't change screens)
+  // (a reason starting with "!" when there's no picture, so the panel can say why)
   static string ShotOnDesk(int width, long quality) {
-    string result = ""; IntPtr d = desk;
-    var t = new Thread(() => { try { if (d != IntPtr.Zero) Native.SetThreadDesktop(d); result = Shot(width, quality); } catch { } });
+    string result = "!it took too long"; IntPtr d = desk;
+    var t = new Thread(() => {
+      try {
+        if (d != IntPtr.Zero && !Native.SetThreadDesktop(d)) { result = "!couldn't switch to the " + deskName + " screen (Windows error " + Marshal.GetLastWin32Error() + ")"; return; }
+        result = Shot(width, quality);
+      } catch (Exception e) { result = "!" + e.Message.Replace("\r", " ").Replace("\n", " "); }
+    });
     t.Start(); t.Join(5000);
     return result;
   }
@@ -275,8 +285,28 @@ static class Helper {
     if (sw <= 0 || sh <= 0) return "";
     width = Math.Max(160, Math.Min(sw, width));
     int height = (int)Math.Round((double)sh * width / sw);
-    using (var full = new Bitmap(sw, sh, PixelFormat.Format24bppRgb)) {
-      using (var g = Graphics.FromImage(full)) g.CopyFromScreen(0, 0, 0, 0, new System.Drawing.Size(sw, sh), CopyPixelOperation.SourceCopy);
+    // copied with Windows' own drawing calls (like VNC): .NET's CopyFromScreen fails on the
+    // protected screens ("the handle is invalid"), which left the panel black there
+    IntPtr src = Native.GetDC(IntPtr.Zero);
+    if (src == IntPtr.Zero) throw new Exception("no access to the " + deskName + " screen (Windows error " + Marshal.GetLastWin32Error() + ")");
+    IntPtr mem = IntPtr.Zero, hbmp = IntPtr.Zero, old = IntPtr.Zero;
+    Bitmap fullBmp;
+    try {
+      mem = Native.CreateCompatibleDC(src);
+      hbmp = Native.CreateCompatibleBitmap(src, sw, sh);
+      if (mem == IntPtr.Zero || hbmp == IntPtr.Zero) throw new Exception("Windows couldn't make room for the picture");
+      old = Native.SelectObject(mem, hbmp);
+      if (!Native.BitBlt(mem, 0, 0, sw, sh, src, 0, 0, 0x00CC0020 /* SRCCOPY */ | 0x40000000 /* CAPTUREBLT */))
+        throw new Exception("Windows didn't let the " + deskName + " screen be copied (error " + Marshal.GetLastWin32Error() + ")");
+      Native.SelectObject(mem, old); old = IntPtr.Zero;
+      fullBmp = Image.FromHbitmap(hbmp);
+    } finally {
+      if (old != IntPtr.Zero) Native.SelectObject(mem, old);
+      if (hbmp != IntPtr.Zero) Native.DeleteObject(hbmp);
+      if (mem != IntPtr.Zero) Native.DeleteDC(mem);
+      Native.ReleaseDC(IntPtr.Zero, src);
+    }
+    using (var full = fullBmp) {
       using (var small = new Bitmap(width, height, PixelFormat.Format24bppRgb)) {
         using (var g = Graphics.FromImage(small)) { g.InterpolationMode = InterpolationMode.HighQualityBilinear; g.DrawImage(full, 0, 0, width, height); }
         ImageCodecInfo jpeg = null;
@@ -317,6 +347,14 @@ static class Native {
 
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+  [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr GetDC(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+  [DllImport("gdi32.dll", SetLastError = true)] public static extern IntPtr CreateCompatibleDC(IntPtr dc);
+  [DllImport("gdi32.dll", SetLastError = true)] public static extern IntPtr CreateCompatibleBitmap(IntPtr dc, int w, int h);
+  [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+  [DllImport("gdi32.dll", SetLastError = true)] public static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
+  [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+  [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr dc);
   [DllImport("user32.dll", SetLastError = true)] public static extern bool SetThreadDesktop(IntPtr desk);
   [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr desk);
   [DllImport("user32.dll", SetLastError = true)] public static extern bool GetUserObjectInformation(IntPtr obj, int index, byte[] info, int length, out int needed);

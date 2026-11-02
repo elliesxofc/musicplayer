@@ -94,6 +94,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
   onFailed: why => say({ t: 'note', text: `mouse and keyboard don't work on the stream PC: Windows didn't let Stagelight's helper (PowerShell) start (${why.slice(0, 120)}). antivirus can do this; restarting Stagelight tries again.` }),
   onDesk: name => secureScreen(!!name && name !== 'Default'),
   onShot: b64 => secureShot(b64),
+  onShotFail: why => shotFailed(why),
   });
 
   /* ───────────── Windows' protected screens (with Stagelight's service) ─────────────
@@ -111,6 +112,7 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     log(`remote display: ${secure ? 'a Windows prompt or the lock screen is up' : 'back to the desktop'}`);
     say({ t: 'desk', secure });
     if (secure) {
+      shotFails = 0; shotFailSaid = false;
       say({ t: 'note', text: 'the stream PC shows a Windows prompt or the lock screen: shown here a few times a second (ctrl + alt + del is under keys)' });
       askShot();
     }
@@ -121,8 +123,21 @@ function createRemote({ root, icon, getSettings, log = () => {}, onChange = () =
     input.shot(active.relay ? 1280 : 1024, active.relay ? 60 : 50);
     shotWait = setTimeout(askShot, 3000); // no answer: ask again
   }
+  // the service couldn't take a picture of it: say why (once), and keep trying
+  let shotFails = 0, shotFailSaid = false;
+  function shotFailed(why) {
+    if (!active || !active.secure) return;
+    if (++shotFails >= 2 && !shotFailSaid) {
+      shotFailSaid = true;
+      log(`remote display: no picture of the Windows prompt or lock screen (${why})`);
+      say({ t: 'shotfail', why });
+    }
+    clearTimeout(shotWait);
+    shotWait = setTimeout(askShot, 1500);
+  }
   function secureShot(b64) {
     if (!active || !active.secure || !b64) return;
+    shotFails = 0;
     if (active.relay) {
       relayOut.buf = Buffer.from(b64, 'base64'); relayOut.seq++;
       for (const w of relayOut.watchers) relayPush(w);

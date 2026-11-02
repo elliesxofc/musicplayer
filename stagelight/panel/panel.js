@@ -599,9 +599,23 @@ const rdStage = $('#rdStage'), rdVideo = $('#rdVideo'), rdCanvas = $('#rdCanvas'
 const rdView = () => (rd && (rd.relay || rd.secure) ? { el: rdCanvas, w: rdCanvas.width, h: rdCanvas.height } : { el: rdVideo, w: rdVideo.videoWidth, h: rdVideo.videoHeight });
 /* A Windows prompt or the lock screen on the stream PC (seen through Stagelight's service): over
    the direct connection its pictures come as messages and show in place of the video */
+// the words over the picture while a prompt or the lock screen is up and no picture of it has come
+function secureMsg(text) { $('#rdSecureMsg').hidden = !text; $('#rdSecureMsg').textContent = text || ''; }
+function secureState(on) {
+  if (!rd) return;
+  const was = rd.secure;
+  rd.secure = !!on;
+  if (rd.secure && !was) { rd.secureGot = false; secureMsg('the stream PC shows a Windows prompt or the lock screen: waiting for a picture of it…'); }
+  if (!rd.secure) secureMsg('');
+}
+function secureFail(why) {
+  if (!rd || !rd.secure || rd.secureGot) return;
+  secureMsg(`no picture of the Windows prompt or lock screen came (${String(why || '').slice(0, 160)}). it's still up on the stream PC: keys → ctrl + alt + del works, or someone at the PC can answer it.`);
+}
+function secureGot() { if (rd && rd.secure && !rd.secureGot) { rd.secureGot = true; secureMsg(''); } }
 function rdSecure(on) {
   if (!rd) return;
-  rd.secure = !!on;
+  secureState(on);
   if (!rd.relay) { rdVideo.hidden = rd.secure; rdCanvas.hidden = !rd.secure; }
   placeDot();
 }
@@ -797,6 +811,7 @@ async function relayConnect() {
           const n = new DataView(body.buffer, body.byteOffset, 4).getUint32(0);
           if (rd && rd.gen === gen && rd.relayQueue) { rd.relayQueue.push({ t: 'fa', n }); rd.relayPics = (rd.relayPics || 0) + 1; relaySendNow(); }
           draw(body.subarray(4));
+          if (rd && rd.gen === gen && rd.secure) secureGot();
         } else if (kind === 1) draw(body);
         else if (kind === 2) {
           let msg; try { msg = JSON.parse(new TextDecoder().decode(body)); } catch { continue; }
@@ -804,7 +819,8 @@ async function relayConnect() {
           if (msg.t === 'note' && typeof msg.text === 'string') toast(msg.text.slice(0, 240), msg.text.length > 100 ? 8000 : 4000);
           if (msg.t === 'clip' && rd && rd.gen === gen) clipFromPc(msg.text);
           if (msg.t === 'ack' && rd && rd.gen === gen) clickArrived(msg.on, msg.blocked);
-          if (msg.t === 'desk' && rd && rd.gen === gen) rd.secure = !!msg.secure; // the pictures come the usual way
+          if (msg.t === 'desk' && rd && rd.gen === gen) secureState(msg.secure); // the pictures come the usual way
+          if (msg.t === 'shotfail' && rd && rd.gen === gen) secureFail(msg.why);
           if (msg.t === 'lag' && rd && rd.gen === gen && Number.isFinite(msg.ms)) { rd.relayLag = msg.ms; rd.relayLagAt = Date.now(); }
         }
       }
@@ -816,7 +832,7 @@ async function relayConnect() {
 
 async function rdConnect() {
   if (!rd) return;
-  rd.secure = false;
+  rd.secure = false; secureMsg("");
   if (rd.relay) return relayConnect();
   if (rd.pc) rd.pc.close();
   rd.sigPrev = null; sigShow(0);
@@ -843,7 +859,8 @@ async function rdConnect() {
     if (msg.t === 'clip' && rd && rd.pc === pc) clipFromPc(msg.text);
     if (msg.t === 'ack' && rd && rd.pc === pc) clickArrived(msg.on, msg.blocked);
     if (msg.t === 'desk' && rd && rd.pc === pc) rdSecure(msg.secure);
-    if (msg.t === 'shot' && rd && rd.pc === pc) rdShot(msg.data);
+    if (msg.t === 'shot' && rd && rd.pc === pc) { rdShot(msg.data); secureGot(); }
+    if (msg.t === 'shotfail' && rd && rd.pc === pc) secureFail(msg.why);
   };
   pc.addTransceiver('video', { direction: 'recvonly' });
   pc.ontrack = e => { rdVideo.srcObject = e.streams[0] || new MediaStream([e.track]); };

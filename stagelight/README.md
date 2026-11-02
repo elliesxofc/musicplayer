@@ -159,7 +159,8 @@ Stagelight is made to stay out of OBS's way:
   compiler that comes with Windows) runs as SYSTEM, so the remote display's mouse and keyboard
   also work on Windows' "do you want to allow" prompts and the lock screen, **ctrl + alt + del**
   (under keys) works, and those protected screens show in the panel (a few pictures a second;
-  normal screen sharing can't see them). It's copied to Program Files, and only a Stagelight
+  normal screen sharing can't see them; they're copied with Windows' own drawing calls, like VNC,
+  and if a picture can't be taken the panel says why instead of staying black). It's copied to Program Files, and only a Stagelight
   running as administrator can use it (its pipe is for administrators and SYSTEM). Without it,
   the PowerShell helper does the clicking as before
 - **set up by itself**: installing Stagelight asks Windows once (Stagelight runs as administrator for

@@ -162,6 +162,8 @@ h1, h2, h3 { margin: 0; }
 .rd-bar select { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: rgba(0, 0, 0, .3); color: var(--ink); padding: 0 10px; font: inherit; font-size: 14px; max-width: 46vw; }
 .rd-state { flex: 1; min-width: 90px; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rd-state.on { color: var(--ok); }
+/* a Windows prompt or the lock screen on the stream PC, before (or instead of) its picture */
+.rd-secure-msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; max-width: min(520px, calc(100% - 32px)); margin: 0; padding: 14px 18px; border-radius: 14px; background: rgba(18, 14, 36, .94); border: 1px solid var(--line); color: var(--ink); font-size: 14px; line-height: 1.5; text-align: center; pointer-events: none; }
 /* the connection's strength, like Wi-Fi bars: 4 great … 1 weak, 0 nothing yet */
 .rd-sig { display: inline-flex; align-items: center; gap: 5px; flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .rd-sig svg { width: 20px; height: 16px; }

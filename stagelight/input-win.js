@@ -144,7 +144,7 @@ const available = () => process.platform === 'win32' || !!process.env.STAGELIGHT
    D (which screen takes input), S (a picture of it) and sas (ctrl + alt + del). */
 const SERVICE_PIPE = process.env.STAGELIGHT_SERVICE_PIPE || (process.platform === 'win32' ? '\\\\.\\pipe\\stagelight-service' : '');
 
-function createInput({ log = () => {}, onBlocked = () => {}, onClicked = () => {}, onFailed = () => {}, onDesk = () => {}, onShot = () => {} } = {}) {
+function createInput({ log = () => {}, onBlocked = () => {}, onClicked = () => {}, onFailed = () => {}, onDesk = () => {}, onShot = () => {}, onShotFail = () => {} } = {}) {
   let child = null;      // the PowerShell helper
   let service = null;    // the connection to the service
   let connecting = null; // trying the service first: commands wait meanwhile
@@ -166,6 +166,7 @@ function createInput({ log = () => {}, onBlocked = () => {}, onClicked = () => {
         else if (/^clicked/.test(line)) onClicked(line.slice(8).trim().slice(0, 60));
         else if (/^desk /.test(line)) onDesk(line.slice(5).trim().slice(0, 60));
         else if (/^shot /.test(line)) onShot(line.slice(5).trim());
+        else if (/^shoterr /.test(line)) onShotFail(line.slice(8).trim().slice(0, 160));
         else if (/error/.test(line)) log(`mouse/keyboard: ${line.trim().slice(0, 200)}`);
       }
     };

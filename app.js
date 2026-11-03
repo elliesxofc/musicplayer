@@ -313,7 +313,7 @@ function syncIcon() {
   set('#iconSvg', themed ? `${d}.svg` : 'icons/icon.svg');
   set('#iconPng', themed ? `${d}-32.png` : 'icons/favicon-32.png');
   set('#iconTouch', themed ? `${d}-180.png` : 'icons/apple-touch-icon.png');
-  set('#manifestLink', themed ? `${d}.webmanifest` : 'manifest.webmanifest?v=53');
+  set('#manifestLink', themed ? `${d}.webmanifest` : 'manifest.webmanifest?v=54');
   if (desktop && desktop.setIcon) desktop.setIcon(themed ? id : null).catch(() => {});
 }
 function setupThemeIcon() {
@@ -565,6 +565,8 @@ const viz = (() => {
   const shape = VizCore.shaper();
   let ctx = null, analyser = null, freq = null, color = '#fff', color2 = '#fff';
   let analyserL = null, analyserR = null, freqL = null, freqR = null; // for stereo
+  let mainGain = null, split = null;
+  const extra = new Map(); // other <audio> elements (the crossfade's fading song) → their gain
   // speed: how quickly the bars jump up and fall back (1 = moonlit's usual)
   const smoothing = () => Math.min(0.95, Math.max(0.3, 0.95 - 0.13 * opts.speed));
 
@@ -576,11 +578,14 @@ const viz = (() => {
       const make = () => { const a = ctx.createAnalyser(); a.fftSize = 2048; a.smoothingTimeConstant = smoothing(); return a; };
       analyser = make();
       freq = new Uint8Array(analyser.frequencyBinCount);
-      src.connect(analyser);
+      // a volume knob of our own per player, for crossfades (the user's volume stays on the element)
+      mainGain = ctx.createGain();
+      src.connect(mainGain);
+      mainGain.connect(analyser);
       analyser.connect(ctx.destination);
       // left and right on their own, only listened to (they don't go to the speakers)
-      const split = ctx.createChannelSplitter(2);
-      src.connect(split);
+      split = ctx.createChannelSplitter(2);
+      mainGain.connect(split);
       analyserL = make(); analyserR = make();
       split.connect(analyserL, 0); split.connect(analyserR, 1);
       freqL = new Uint8Array(analyserL.frequencyBinCount); freqR = new Uint8Array(analyserR.frequencyBinCount);
@@ -588,6 +593,21 @@ const viz = (() => {
       const sink = prefs.get('sinkId', '');
       if (sink && ctx.setSinkId) ctx.setSinkId(sink).catch(() => toast("your chosen sound output isn't connected, so music is on the default device", 6000));
     } catch { ctx = null; }
+  }
+
+  // Sends another <audio> element through the same graph (same output device, same
+  // visualizer) and returns its gain. An element can only be attached once, so it's kept.
+  function attach(el) {
+    if (!ctx) return null;
+    if (!extra.has(el)) {
+      try {
+        const g = ctx.createGain();
+        ctx.createMediaElementSource(el).connect(g);
+        g.connect(analyser); g.connect(split);
+        extra.set(el, g);
+      } catch { return null; }
+    }
+    return extra.get(el);
   }
 
   // n levels (0-255), bass → treble; with stereo: n for the left channel, then n for the right
@@ -762,7 +782,7 @@ const viz = (() => {
     if (!analyser || audio.paused) return null;
     return Array.from(read(n, stereo), Math.round);
   }
-  return { ensureAudioGraph, refreshColor, setEnabled, sample, configure, opts: () => opts, getCtx: () => ctx };
+  return { ensureAudioGraph, refreshColor, setEnabled, sample, configure, opts: () => opts, getCtx: () => ctx, gain: () => mainGain, attach };
 })();
 
 /* ───────────── library rendering ───────────── */
@@ -1218,6 +1238,7 @@ function syncFav(pulse) {
 
 /* ───────────── playback ───────────── */
 function clearNowPlaying() {
+  endCrossfade();
   state.currentId = null;
   audio.removeAttribute('src');
   audio.load();
@@ -1237,8 +1258,9 @@ function clearNowPlaying() {
 async function loadTrack(id, startAt = 0) {
   const t = byId(id);
   if (!t) return;
+  if (!xfade.handing) endCrossfade();
   state.currentId = id;
-  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  if (audioUrl && !(xfade.on && xfade.url === audioUrl)) URL.revokeObjectURL(audioUrl);
   audioUrl = URL.createObjectURL(t.file);
   audio.src = audioUrl;
   if (startAt) audio.addEventListener('loadedmetadata', () => { audio.currentTime = startAt; }, { once: true });
@@ -1289,7 +1311,7 @@ function play() {
   // NotSupportedError is handled by the 'error' listener below, which skips the song
   audio.play().catch(err => { if (err.name === 'NotAllowedError') toast('tap play to start the music'); });
 }
-function pause() { state.wantPlaying = false; audio.pause(); }
+function pause() { state.wantPlaying = false; endCrossfade(); audio.pause(); }
 function togglePlay() { audio.paused ? play() : pause(); }
 
 function currentQueue() {
@@ -1416,7 +1438,7 @@ function updateTime() {
   el.dur.textContent = fmt(Number.isFinite(d) ? d : byId(state.currentId)?.duration || 0);
   if (!seeking) { el.seek.value = d ? Math.round((c / d) * 1000) : 0; setFill(el.seek); }
 }
-audio.addEventListener('timeupdate', () => { updateTime(); saveProgress(); });
+audio.addEventListener('timeupdate', () => { updateTime(); saveProgress(); maybeCrossfade(); });
 audio.addEventListener('loadedmetadata', () => {
   updateTime();
   const t = byId(state.currentId);
@@ -1440,10 +1462,116 @@ function saveProgress(force) {
   prefs.set('last', { id: state.currentId, time: audio.currentTime || 0 });
 }
 
+/* ───────────── crossfade ─────────────
+   Like Spotify: the last seconds of a song fade out while the next one fades in.
+   The main player moves on to the next song (so everything else just follows it), and a
+   second player, `fader`, plays the end of the old song from the same spot, fading away.
+   Only when a song runs out by itself: skipping, picking a song or seeking stays instant. */
+const fader = new Audio();
+fader.preload = 'auto';
+const xfade = { on: false, handing: false, url: null, armed: false, started: false, timer: 0 };
+const crossfadeSecs = () => prefs.get('crossfade', 6);
+
+// equal-power curves, so the middle of the fade isn't quieter than the songs
+function fadeCurve(up) {
+  const c = new Float32Array(64);
+  for (let i = 0; i < 64; i++) { const x = i / 63; c[i] = up ? Math.sin(x * Math.PI / 2) : Math.cos(x * Math.PI / 2); }
+  return c;
+}
+// (a curve may not overlap other changes, so anything planned is cleared first)
+function curveGain(g, up, secs) {
+  const t = g.context.currentTime;
+  g.gain.cancelScheduledValues(t);
+  try { g.gain.setValueCurveAtTime(fadeCurve(up), t, secs); }
+  catch { g.gain.setValueAtTime(up ? 0 : 1, t); g.gain.linearRampToValueAtTime(up ? 1 : 0, t + secs); }
+}
+function rampGain(g, to, secs) {
+  if (!g) return;
+  const t = g.context.currentTime;
+  g.gain.cancelScheduledValues(t);
+  g.gain.setValueAtTime(g.gain.value, t);
+  g.gain.linearRampToValueAtTime(to, t + secs);
+}
+
+function maybeCrossfade() {
+  const len = Math.min(crossfadeSecs(), (audio.duration || 0) / 3);
+  if (xfade.on || !len || audio.paused || seeking || state.repeat === 'one' || !Number.isFinite(audio.duration)) return;
+  const left = audio.duration - audio.currentTime;
+  if (left > len + 2) { if (xfade.armed) { fader.removeAttribute('src'); fader.load(); xfade.armed = false; } return; }
+  if (!viz.getCtx() || !viz.gain() || !viz.attach(fader)) return; // no sound graph: songs just follow each other
+  const up = upNext();
+  if (!up || !up.id) return; // the end of the list: the song plays to its end as usual
+  // a moment early, get the fading player ready on the old song so it starts without a gap
+  if (!xfade.armed) { fader.src = audioUrl; fader.load(); xfade.armed = true; }
+  if (left <= len && left > 0.4 && fader.readyState >= 1) startCrossfade(left);
+}
+
+function startCrossfade(left) {
+  const ctx = viz.getCtx(), main = viz.gain(), out = viz.attach(fader);
+  Object.assign(xfade, { on: true, url: audioUrl, started: false });
+  const from = audio.currentTime;
+  out.gain.cancelScheduledValues(ctx.currentTime);
+  out.gain.setValueAtTime(0, ctx.currentTime);
+  fader.volume = audio.volume;
+  fader.currentTime = from;
+  fader.play().catch(() => {});
+  fader.addEventListener('playing', function go() {
+    if (!xfade.on) return;
+    // the old song carries on in the fader (from where it is now) and fades out...
+    const now = ctx.currentTime, secs = Math.max(0.3, left - (audio.currentTime - from));
+    if (Math.abs(fader.currentTime - audio.currentTime) > 0.08) fader.currentTime = audio.currentTime;
+    curveGain(out, false, secs);
+    main.gain.cancelScheduledValues(now);
+    main.gain.setValueAtTime(0, now);
+    // ...while the main player moves on to the next song, the usual way
+    xfade.handing = true;
+    try { next(true); } finally { xfade.handing = false; }
+    const len = secs;
+    audio.addEventListener('playing', () => {
+      if (!xfade.on) return;
+      xfade.started = true;
+      curveGain(main, true, len);
+    }, { once: true });
+    clearTimeout(xfade.timer);
+    xfade.timer = setTimeout(() => endCrossfade(true), (secs + 0.5) * 1000);
+  }, { once: true });
+}
+
+// Stops the fading song (at once, or `finished` when it has faded out by itself) and
+// puts the main player back at full volume.
+function endCrossfade(finished = false) {
+  if (!xfade.on && !xfade.armed) return;
+  clearTimeout(xfade.timer);
+  const wasOn = xfade.on, fadingIn = xfade.started;
+  xfade.on = xfade.armed = xfade.started = false;
+  fader.pause();
+  fader.removeAttribute('src');
+  fader.load();
+  if (xfade.url && xfade.url !== audioUrl) URL.revokeObjectURL(xfade.url);
+  xfade.url = null;
+  const main = viz.gain();
+  // (when it finished by itself, the new song's fade-in is already on its way up to full)
+  if (wasOn && main && !(finished && fadingIn)) rampGain(main, 1, 0.12);
+}
+// pausing mid-fade (media keys, the tray...) or seeking in the new song: no more fading
+audio.addEventListener('pause', () => { if (xfade.started) endCrossfade(); });
+audio.addEventListener('seeking', () => { if (xfade.started) endCrossfade(); });
+fader.addEventListener('ended', () => { if (xfade.on) endCrossfade(true); });
+
+function setupCrossfade() {
+  const r = $('#crossfade'), v = $('#crossfadeVal');
+  const show = () => { const s = +r.value; v.textContent = s ? `${s} s` : 'off'; setFill(r); };
+  r.value = crossfadeSecs();
+  show();
+  r.addEventListener('input', () => { prefs.set('crossfade', +r.value); show(); if (!+r.value) endCrossfade(); });
+}
+setupCrossfade();
+
 /* volume */
 function setVolume(v, remember = true) {
   v = Math.max(0, Math.min(1, v));
   audio.volume = v;
+  fader.volume = v;
   el.vol.value = v;
   setFill(el.vol);
   el.volIcon.setAttribute('href', v === 0 ? '#i-mute' : '#i-volume');

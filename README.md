@@ -33,6 +33,7 @@ drag audio files onto the page or tap **add songs**.
 - reads song titles, artists, albums and cover art from mp3 tags. other files
   use their filename (`Artist - Title.mp3`).
 - loved songs, search, shuffle, repeat (all / one)
+- crossfade between songs like Spotify (0–12 s, 6 s by default, in customize → playback)
 - picks up where you left off
 - seven themes: midnight rose, strawberry milk, cherry noir, bubblegum, sakura dusk, rosé gold, pure black. moonlit's icon can match the theme (browser tab, installed phone app, and the desktop app's window, taskbar and tray icon)
 - **playlists**: save any list (all songs, loved, or a playlist) as an `.m3u8` playlist file, and import `.m3u8` / `.m3u` files from moonlit or other players (VLC, foobar2000, Winamp…). imported playlists find their songs in your library; in the desktop app, songs the playlist points to on the PC are added too

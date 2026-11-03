@@ -9,7 +9,7 @@
   <link rel="icon" id="iconSvg" href="icons/icon.svg" type="image/svg+xml">
   <link rel="icon" id="iconPng" href="icons/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" id="iconTouch" href="icons/apple-touch-icon.png">
-  <link rel="manifest" id="manifestLink" href="manifest.webmanifest?v=53">
+  <link rel="manifest" id="manifestLink" href="manifest.webmanifest?v=54">
   <script>
     /* the icon in the theme's colours (before anything reads the icon or the manifest) */
     try {
@@ -30,7 +30,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=DM+Sans:opsz,wght@9..40,400..600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=53">
+  <link rel="stylesheet" href="style.css?v=54">
 </head>
 <body data-theme="midnight-rose">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -392,6 +392,12 @@
       <p><button class="link-btn" id="vizReset" type="button">reset the visualizer</button></p>
     </section>
     <section>
+      <p class="eyebrow">playback</p>
+      <label class="field viz-range"><span>crossfade <b id="crossfadeVal"></b></span>
+        <input type="range" id="crossfade" min="0" max="12" step="1" aria-label="crossfade between songs, in seconds"></label>
+      <p class="hint small">the end of a song fades into the next one, like Spotify. slide it all the way left to turn it off. skipping a song stays instant.</p>
+    </section>
+    <section>
       <p class="eyebrow">you</p>
       <label class="field"><span>your name</span><input type="text" id="nameInput" maxlength="32" placeholder="for the greeting"></label>
       <label class="field"><span>watermark</span><input type="text" id="wmInput" maxlength="40" placeholder="optional, e.g. @yourname"></label>
@@ -603,10 +609,10 @@
   <input type="file" id="folderInput" webkitdirectory multiple hidden>
   <input type="file" id="fileInput" accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac" multiple hidden>
 
-  <script src="vizcore.js?v=53"></script>
-  <script src="app.js?v=53"></script>
-  <script src="obs.js?v=53"></script>
-  <script src="live.js?v=53"></script>
-  <script src="requests.js?v=53"></script>
+  <script src="vizcore.js?v=54"></script>
+  <script src="app.js?v=54"></script>
+  <script src="obs.js?v=54"></script>
+  <script src="live.js?v=54"></script>
+  <script src="requests.js?v=54"></script>
 </body>
 </html>

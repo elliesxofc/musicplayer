@@ -1,0 +1,111 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "moonlit",
+  "mainBinaryName": "moonlit",
+  "version": "2.0.0",
+  "identifier": "io.github.elliesxofc.moonlit",
+  "build": {
+    "frontendDist": "dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "elliesxofc",
+    "copyright": "made for elliesxofc",
+    "category": "Music",
+    "shortDescription": "a little private music player, just for you",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "mp3"
+        ],
+        "name": "MP3 audio",
+        "description": "MP3 audio (moonlit)",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "m4a"
+        ],
+        "name": "MPEG-4 audio",
+        "description": "MPEG-4 audio (moonlit)",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "aac"
+        ],
+        "name": "AAC audio",
+        "description": "AAC audio (moonlit)",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "flac"
+        ],
+        "name": "FLAC audio",
+        "description": "FLAC audio (moonlit)",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "wav"
+        ],
+        "name": "WAV audio",
+        "description": "WAV audio (moonlit)",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "ogg"
+        ],
+        "name": "Ogg audio",
+        "description": "Ogg audio (moonlit)",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "opus"
+        ],
+        "name": "Opus audio",
+        "description": "Opus audio (moonlit)",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "aiff"
+        ],
+        "name": "AIFF audio",
+        "description": "AIFF audio (moonlit)",
+        "role": "Viewer"
+      }
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "installer-hooks.nsh"
+      }
+    }
+  }
+}

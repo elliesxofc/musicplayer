@@ -65,12 +65,14 @@ resize sources and add text, websites and colour boxes, and an optional remote d
 whole PC (like AnyDesk or Parsec) with mouse and keyboard, off unless switched on. works on the same Wi-Fi, or from anywhere
 through Tailscale. download it from the **Actions** tab → **stagelight app**.
 
-## desktop app (Windows / Mac / Linux)
+## desktop app (Windows)
 
-the same player as a real program, built with Electron. made for an always-on
-stream PC: it never gets put to sleep, writes the OBS song file without asking
-for permission every time, and can start with the PC and resume playing by itself
-(sliders panel → **desktop app**).
+the same player as a real program, written in **Rust** ([Tauri](https://tauri.app)). it
+shows the player in Windows' own browser engine (WebView2, already part of Windows 10/11)
+instead of carrying a whole browser inside, so the installer is a fraction of the old size,
+it opens faster and uses less memory. made for an always-on stream PC: it writes the OBS
+song file without asking for permission every time, and can start with the PC and resume
+playing by itself (sliders panel → **desktop app**).
 
 **easiest: download it.** open the repo's **Actions** tab → **desktop app** →
 the latest run → download **moonlit-windows** (unzip it):
@@ -80,12 +82,18 @@ the latest run → download **moonlit-windows** (unzip it):
 Windows may say "Windows protected your PC" because the app isn't signed:
 click **More info → Run anyway**.
 
-**or run it from the source code** (needs [Node.js](https://nodejs.org) LTS):
+**coming from moonlit 1.x (the Electron version):** just install 2.0. the installer replaces
+the old app, and the first time moonlit 2 opens it brings your whole library over (songs,
+covers, loved songs, playlists, settings, the chat bot and Spotify connection). the old
+moonlit opens for a moment while that happens, then closes by itself. the previous
+Electron version can still be built from the Actions tab (**moonlit-windows-electron**).
+
+**or build it from the source code** (needs [Rust](https://rustup.rs) and [Node.js](https://nodejs.org)):
 
 ```
-npm install
-npm start          # opens moonlit
-npm run dist:win   # builds the Windows installer into dist/ (run this on Windows)
+cd tauri
+cargo run                                    # opens moonlit
+npx @tauri-apps/cli@2 build --bundles nsis   # builds the Windows installer (run this on Windows)
 ```
 
 **make it your default music player (Windows):** install with `moonlit-setup`, then right-click any song → **Open with** →
@@ -101,8 +109,9 @@ song then plays it in moonlit (and adds it to your library the first time).
   file with the Spotify title, artist, album and cover
 - m4a (fastest, no re-encoding) or mp3; 3 downloads at once, each in 4 parallel chunks
 - saved to Music/moonlit (changeable) and added to your library automatically
-- uses [yt-dlp](https://github.com/yt-dlp/yt-dlp), downloaded on first use and kept up to date,
-  and a bundled ffmpeg
+- uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) (kept up to date), ffmpeg and
+  [Deno](https://deno.com) (the JavaScript engine YouTube needs), all downloaded the first
+  time you download a song, so they don't make the installer bigger
 
 only download what you're allowed to, and keep in mind streaming copyrighted songs can get a
 stream muted or taken down.

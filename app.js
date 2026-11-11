@@ -313,7 +313,7 @@ function syncIcon() {
   set('#iconSvg', themed ? `${d}.svg` : 'icons/icon.svg');
   set('#iconPng', themed ? `${d}-32.png` : 'icons/favicon-32.png');
   set('#iconTouch', themed ? `${d}-180.png` : 'icons/apple-touch-icon.png');
-  set('#manifestLink', themed ? `${d}.webmanifest` : 'manifest.webmanifest?v=54');
+  set('#manifestLink', themed ? `${d}.webmanifest` : 'manifest.webmanifest?v=55');
   if (desktop && desktop.setIcon) desktop.setIcon(themed ? id : null).catch(() => {});
 }
 function setupThemeIcon() {
@@ -2439,7 +2439,8 @@ $('#installBtn').onclick = async () => {
   syncInstallUi();
 };
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+// (the desktop app has its files built in: no offline copy needed, and none to go stale)
+if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !desktop) {
   const hadWorker = !!navigator.serviceWorker.controller;
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').then(reg => {
@@ -2456,7 +2457,50 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 }
 
 /* ───────────── boot ───────────── */
+/* ───────────── moving in from the old (Electron) moonlit, once ─────────────
+   The Rust app can't open the old app's storage, so it asks the old app to hand the library
+   over (see tauri/src/moving.rs). Here it goes into this app's library, then the page
+   starts again with everything in place. Only when this library is still empty. */
+async function moveIn() {
+  const mv = desktop && desktop.move;
+  if (!mv) return false;
+  let st = await mv.status().catch(() => null);
+  if (!st || st.done || (!st.available && !st.ready)) return false;
+  const have = await DB.all().catch(() => []);
+  // already has songs: leave it be (unless a move was half done: then it carries on, same songs, same ids)
+  if (have.length && !st.ready) { await mv.done().catch(() => {}); return false; }
+  if (!st.ready) {
+    toast('bringing your songs over from the old moonlit… (the old one opens for a moment)', 0);
+    const r = await mv.run().catch(err => ({ ok: false, error: String(err) }));
+    if (!r || !r.ok) { toast(`couldn't bring your songs over: ${r && r.error ? r.error : 'something went wrong'}`, 9000); return false; }
+  }
+  const data = await mv.take().catch(() => null);
+  if (!data || !Array.isArray(data.tracks)) return false;
+  let n = 0;
+  for (const t of data.tracks) {
+    const rec = {};
+    for (const [k, v] of Object.entries(t)) {
+      if (v && v.__blob) {
+        const bytes = await mv.blob(t.id, k).catch(() => null);
+        if (!bytes) continue;
+        rec[k] = v.name ? new File([bytes], v.name, { type: v.type, lastModified: v.lastModified || Date.now() }) : new Blob([bytes], { type: v.type });
+      } else rec[k] = v;
+    }
+    if (!rec.id || !rec.file) continue;
+    await DB.put(rec);
+    if (++n % 10 === 0) toast(`bringing your songs over… ${n} of ${data.tracks.length}`, 0);
+  }
+  for (const [k, v] of Object.entries(data.prefs || {})) {
+    try { if (k.startsWith('moonlit:')) localStorage.setItem(k, v); } catch { /* full */ }
+  }
+  await mv.done().catch(() => {});
+  toast(`all ${n} songs are here ♡`, 4000);
+  setTimeout(() => location.reload(), 1200);
+  return true;
+}
+
 (async function init() {
+  if (await moveIn().catch(() => false)) return;
   buildThemeGrid();
   buildFloaties();
   setupVizSettings();

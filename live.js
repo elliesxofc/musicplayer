@@ -131,6 +131,39 @@
   };
   C.onStatus(s => setStatus($('#chatStatus'), s));
 
+  /* ───────────── Discord: the same commands, with your own bot ───────────── */
+  const DC = D.discord;
+  if (DC) {
+    const dOn = $('#dcOn'), dToken = $('#dcToken'), dChannel = $('#dcChannel');
+    const showDiscord = info => {
+      if (!info) return;
+      setStatus($('#dcStatus'), info.status);
+      if (info.hasToken) dToken.placeholder = 'saved ✓ (paste a new one to replace it)';
+      const link = $('#dcInvite');
+      link.hidden = !info.invite;
+      if (info.invite) link.href = info.invite;
+    };
+    async function saveDiscord() {
+      const next = { enabled: dOn.checked, channel: dChannel.value };
+      if (dToken.value.trim()) next.token = dToken.value;
+      const info = await DC.set(next);
+      if (next.token) dToken.value = '';
+      if (info && info.channel !== undefined) dChannel.value = info.channel;
+      showDiscord(info);
+    }
+    dOn.onchange = () => saveDiscord();
+    $('#dcSave').onclick = () => saveDiscord().then(() => toast('saved'));
+    DC.onStatus(async s => { setStatus($('#dcStatus'), s); showDiscord(await DC.get()); });
+    $('#discordBox').hidden = false;
+    DC.get().then(info => {
+      if (!info) return;
+      dOn.checked = info.enabled;
+      dChannel.value = info.channel;
+      $('#dcSetup').open = !info.hasToken;
+      showDiscord(info);
+    });
+  }
+
   /* ───────────── !uptime and !aboutme ─────────────
      !uptime: how long the stream has been live, from OBS (stream control has to be connected).
      !aboutme: where the music comes from, a message you can change ({placeholders} filled in). */
@@ -172,13 +205,14 @@
   }
 
   const lastInfo = {};
-  C.onCommand(async ({ cmd }) => {
+  C.onCommand(async ({ cmd, to }) => {
     if (cmd !== 'uptime' && cmd !== 'aboutme') return;
     if (!prefs.get(cmd === 'uptime' ? 'cmdUptime' : 'cmdAbout', true)) return;
-    // one answer every 10 seconds per command, however many people ask
-    if (Date.now() - (lastInfo[cmd] || 0) < 10_000) return;
-    lastInfo[cmd] = Date.now();
-    C.say(cmd === 'uptime' ? await uptimeAnswer() : aboutAnswer());
+    // one answer every 10 seconds per command (and per place: YouTube or Discord), however many people ask
+    const key = `${cmd}${to ? ':discord' : ''}`;
+    if (Date.now() - (lastInfo[key] || 0) < 10_000) return;
+    lastInfo[key] = Date.now();
+    C.say(cmd === 'uptime' ? await uptimeAnswer() : aboutAnswer(), to);
   });
 
   const cmdUptime = $('#cmdUptime'), cmdAbout = $('#cmdAbout'), aboutText = $('#aboutText');

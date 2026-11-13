@@ -1,6 +1,6 @@
 [package]
 name = "moonlit"
-version = "2.0.0"
+version = "2.1.0"
 description = "a little private music player, just for you"
 authors = ["elliesxofc"]
 edition = "2021"
@@ -29,7 +29,7 @@ urlencoding = "2"
 unicode-normalization = "0.1"
 flate2 = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-tokio-tungstenite = "0.24"
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 futures-util = "0.3"
 aes-gcm = "0.10"
 

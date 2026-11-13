@@ -1,4 +1,4 @@
-/* moonlit · song requests from YouTube chat (desktop app only), like the song request app:
+/* moonlit · song requests from YouTube chat and Discord (desktop app only), like the song request app:
      !sr <song or YouTube link>   request a song: your library first, otherwise YouTube
      !queue                       the next 3 requested songs
      !skip                        skip the current song (mods and the channel owner)
@@ -40,7 +40,6 @@
   const ownerAny = () => prefs.get('srOwnerAny', true);
   const isMod = u => u.mod || isOwner(u);
   const songName = t => [t.artist, t.title].filter(Boolean).join(' - ') || t.title;
-  const say = text => C.say(text);
 
   const cooldowns = new Map();  // viewer → when they may request again
   const pending = [];           // requests being found / downloaded: { by, userId, query, cancelled }
@@ -72,7 +71,7 @@
   }
 
   /* ───────────── commands ───────────── */
-  async function request(user, query) {
+  async function request(user, query, say) {
     if (!query) return say(`${user.name}, type !sr and a song name or a YouTube link.`);
     if (blockedIn(query)) return say(`${user.name}, that song can't be requested.`);
     const mod = isMod(user);
@@ -134,14 +133,14 @@
     }
   }
 
-  function queue() {
+  function queue(say) {
     if (!songRequests.length) return say('There are no songs in the queue.');
     const next3 = songRequests.slice(0, 3).map((r, i) => `${i + 1}. ${songName(byId(r.id) || { title: '?' })}`).join(', ');
     const more = songRequests.length > 3 ? ` (+${songRequests.length - 3} more)` : '';
     say(`Next ${Math.min(3, songRequests.length)} song${songRequests.length === 1 ? '' : 's'} in the queue: ${next3}${more}`);
   }
 
-  function skip(user) {
+  function skip(user, say) {
     if (!isMod(user)) return say(`${user.name}, only mods can skip songs.`);
     const t = byId(state.currentId);
     if (!t) return;
@@ -149,7 +148,7 @@
     next();
   }
 
-  function wrongSong(user) {
+  function wrongSong(user, say) {
     // the newest request from this viewer: still downloading, or already in the queue
     const p = [...pending].reverse().find(x => x.userId === user.id && !x.cancelled);
     const q = [...songRequests].reverse().find(r => r.userId === user.id);
@@ -168,12 +167,14 @@
     say(`${user.name}, ${name} was removed from the queue.`);
   }
 
-  C.onCommand(({ cmd, args, user }) => {
+  C.onCommand(({ cmd, args, user, to }) => {
     if (!on()) return;
-    if (cmd === 'sr') request(user, args);
-    else if (cmd === 'queue') queue();
-    else if (cmd === 'skip') skip(user);
-    else if (cmd === 'wrongsong') wrongSong(user);
+    // answers go back where the command came from: YouTube chat, or the Discord message
+    const say = text => C.say(text, to);
+    if (cmd === 'sr') request(user, args, say);
+    else if (cmd === 'queue') queue(say);
+    else if (cmd === 'skip') skip(user, say);
+    else if (cmd === 'wrongsong') wrongSong(user, say);
   });
 
   /* ───────────── requested downloads are temporary ─────────────

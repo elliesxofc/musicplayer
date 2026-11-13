@@ -62,6 +62,12 @@
       // how many overlays are open (in OBS or a browser), so the bars are only sampled when seen
       onWatchers: cb => on('overlay:watchers', n => cb(n)),
     },
+    // the same commands in your Discord server, with your own bot
+    discord: {
+      get: () => call('discord_get'),
+      set: settings => call('discord_set', { next: settings || {} }),
+      onStatus: cb => on('discord:status', s => cb(s)),
+    },
     chat: {
       get: () => call('chat_get'),
       set: settings => call('chat_set', { next: settings || {} }),
@@ -69,7 +75,8 @@
       liveStart: () => call('chat_live_start'),
       onStatus: cb => on('chat:status', s => cb(s)),
       onCommand: cb => on('chat:command', c => cb(c)),
-      say: text => fire('chat_say', { text: String(text) }),
+      // `to`: where a command came from when it wasn't YouTube (a Discord message), so the answer goes back there
+      say: (text, to) => fire('chat_say', { text: String(text), to: to || null }),
       resolveChannel: input => call('channels_resolve', { input: String(input) }),
     },
     spotify: {

@@ -514,15 +514,32 @@ fn request_command() -> &'static Regex {
     R.get_or_init(|| Regex::new(r"(?is)^!(sr|songrequest|queue|q|skip|wrongsong|uptime|aboutme)(?:\s+(.*))?$").unwrap())
 }
 
-async fn answer(item: &Value) {
-    let text = runs_text(item.get("message").unwrap_or(&Value::Null)).trim().to_string();
-    let badges: Vec<String> = item.get("authorBadges").and_then(|b| b.as_array()).cloned().unwrap_or_default().iter()
-        .filter_map(|b| b.pointer("/liveChatAuthorBadgeRenderer/icon/iconType").and_then(|t| t.as_str()).map(String::from)).collect();
-    if let Some(c) = request_command().captures(&text) {
-        // song requests, !uptime and !aboutme: handled by the player (it knows the library, the queue and OBS)
+/// A chat command moonlit answers, as (command, what came after it): "nowplaying", or one the
+/// player handles (sr, queue, skip, wrongsong, uptime, aboutme). The same for YouTube and Discord.
+pub fn command(text: &str) -> Option<(String, String)> {
+    let text = text.trim();
+    if let Some(c) = request_command().captures(text) {
         let cmd = c[1].to_lowercase();
         let cmd = match cmd.as_str() { "songrequest" => "sr".to_string(), "q" => "queue".to_string(), _ => cmd };
         let args: String = c.get(2).map(|m| m.as_str().trim()).unwrap_or("").chars().take(300).collect();
+        return Some((cmd, args));
+    }
+    // only !nowplaying: shorter names like !song are often taken by other bots (Nightbot, …)
+    let lower = text.to_lowercase();
+    let after = lower.strip_prefix("!nowplaying")?;
+    if after.chars().next().map(|c| c.is_alphanumeric() || c == '_').unwrap_or(false) {
+        return None;
+    }
+    Some(("nowplaying".into(), String::new()))
+}
+
+async fn answer(item: &Value) {
+    let text = runs_text(item.get("message").unwrap_or(&Value::Null));
+    let badges: Vec<String> = item.get("authorBadges").and_then(|b| b.as_array()).cloned().unwrap_or_default().iter()
+        .filter_map(|b| b.pointer("/liveChatAuthorBadgeRenderer/icon/iconType").and_then(|t| t.as_str()).map(String::from)).collect();
+    let Some((cmd, args)) = command(&text) else { return };
+    if cmd != "nowplaying" {
+        // song requests, !uptime and !aboutme: handled by the player (it knows the library, the queue and OBS)
         emit("chat:command", json!({
             "cmd": cmd, "args": args,
             "user": {
@@ -532,11 +549,6 @@ async fn answer(item: &Value) {
                 "owner": badges.iter().any(|b| b == "OWNER"),
             }
         }));
-        return;
-    }
-    // only !nowplaying: shorter names like !song are often taken by other bots (Nightbot, …)
-    let lower = text.to_lowercase();
-    if !lower.starts_with("!nowplaying") || lower[11..].chars().next().map(|c| c.is_ascii_alphanumeric() || c == '_').unwrap_or(false) {
         return;
     }
     let now = crate::config::now_ms();
@@ -593,9 +605,13 @@ pub fn chat_preview() -> String {
     reply_for(&overlay::get().now())
 }
 
-// an answer from the player (song requests), split into 200-character messages
+// an answer from the player (song requests), split into 200-character messages; `to` is where
+// the command came from when that wasn't YouTube (a Discord message)
 #[tauri::command]
-pub async fn chat_say(text: String) {
+pub async fn chat_say(text: String, to: Option<Value>) {
+    if let Some(d) = to.as_ref().and_then(|t| t.get("discord")) {
+        return crate::discord::say(d, &text).await;
+    }
     let text: String = text.chars().take(1000).collect();
     for part in split_message(&text, 200) {
         send(part).await;
@@ -641,6 +657,18 @@ mod tests {
         assert_eq!(live_reload_continuation(c, v), "0ofMyANhGlhDaWtxSndvWVZVTmZZVVZoT0VzdFJVOUtNMFEyWjA5ek4waGplVTVuRWd0a1VYYzBkemxYWjFoalVSb1Q2cWpkdVFFTkNndGtVWGMwZHpsWFoxaGpVU0FCMAGCAQIIAQ%3D%3D");
         assert_eq!(send_message_params(c, v), "Q2lrcUp3b1lWVU5mWVVWaE9Fc3RSVTlLTTBRMlowOXpOMGhqZVU1bkVndGtVWGMwZHpsWFoxaGpVUkFDR0FRJTNE");
     }
+    #[test]
+    fn commands() {
+        let c = |t: &str| command(t).map(|(a, b)| format!("{}|{}", a, b));
+        assert_eq!(c("!nowplaying").as_deref(), Some("nowplaying|"));
+        assert_eq!(c("!NowPlaying please").as_deref(), Some("nowplaying|"));
+        assert_eq!(c("!nowplayingx"), None);
+        assert_eq!(c("!SongRequest  Faded  ").as_deref(), Some("sr|Faded"));
+        assert_eq!(c("!q").as_deref(), Some("queue|"));
+        assert_eq!(c("!skipped"), None);
+        assert_eq!(c("hello !sr x"), None);
+    }
+
     #[test]
     fn split() {
         let t = "word ".repeat(100);

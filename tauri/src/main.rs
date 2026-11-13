@@ -7,6 +7,7 @@
 mod channels;
 mod chat;
 mod config;
+mod discord;
 mod downloader;
 mod files;
 mod httpd;
@@ -278,6 +279,7 @@ fn main() {
             files::files_pending, files::file_info, files::file_bytes,
             files::playlist_open, files::playlist_save,
             chat::chat_get, chat::chat_set, chat::chat_preview, chat::chat_live_start, chat::chat_say,
+            discord::discord_get, discord::discord_set,
             channels::channels_resolve,
             spotify::spotify_get, spotify::spotify_connect, spotify::spotify_control, spotify::spotify_disconnect,
             spotify::spotify_local, spotify::spotify_open,
@@ -377,6 +379,7 @@ fn main() {
             tauri::async_runtime::spawn(async move { ov.start().await; });
 
             chat::start_saved();
+            discord::start_saved();
             spotify::init();
             Ok(())
         })

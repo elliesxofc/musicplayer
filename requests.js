@@ -110,7 +110,11 @@
       if (!track) return say(`${user.name}, something went wrong adding that song.`);
       // downloaded just for this request: deleted again once it has played (your own songs never are)
       if (!had.has(track.id) && cleanupOn()) markTemporary(track.id, result.file);
-      if (job.cancelled) { dropIfTemporary(track.id); return; } // taken back (!wrongsong) while it downloaded
+      if (job.cancelled) { // taken back (!wrongsong) while it downloaded
+        dropIfTemporary(track.id);
+        if (say.always) say(`${user.name}, that request was taken back.`);
+        return;
+      }
     }
     // not added: no cooldown for that
     if (track.id === state.currentId && !audio.paused) { cooldowns.delete(user.id); return say(`${user.name}, ${songName(track)} is playing right now.`); }
@@ -143,7 +147,7 @@
   function skip(user, say) {
     if (!isMod(user)) return say(`${user.name}, only mods can skip songs.`);
     const t = byId(state.currentId);
-    if (!t) return;
+    if (!t) { if (say.always) say('nothing is playing right now.'); return; }
     say(`${user.name} skipped ${songName(t)}.`);
     next();
   }
@@ -168,9 +172,12 @@
   }
 
   C.onCommand(({ cmd, args, user, to }) => {
-    if (!on()) return;
-    // answers go back where the command came from: YouTube chat, or the Discord message
+    if (!['sr', 'queue', 'skip', 'wrongsong'].includes(cmd)) return;
+    // answers go back where the command came from: YouTube chat, or the Discord command
     const say = text => C.say(text, to);
+    // a Discord command always gets an answer (it shows "thinking…" until it does)
+    say.always = !!to;
+    if (!on()) { if (say.always) say('song requests are off right now.'); return; }
     if (cmd === 'sr') request(user, args, say);
     else if (cmd === 'queue') queue(say);
     else if (cmd === 'skip') skip(user, say);

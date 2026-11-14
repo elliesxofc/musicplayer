@@ -207,11 +207,13 @@
   const lastInfo = {};
   C.onCommand(async ({ cmd, to }) => {
     if (cmd !== 'uptime' && cmd !== 'aboutme') return;
-    if (!prefs.get(cmd === 'uptime' ? 'cmdUptime' : 'cmdAbout', true)) return;
-    // one answer every 10 seconds per command (and per place: YouTube or Discord), however many people ask
-    const key = `${cmd}${to ? ':discord' : ''}`;
-    if (Date.now() - (lastInfo[key] || 0) < 10_000) return;
-    lastInfo[key] = Date.now();
+    // Discord commands always get an answer (they show "thinking…" until they do)
+    if (!prefs.get(cmd === 'uptime' ? 'cmdUptime' : 'cmdAbout', true)) { if (to) C.say('that command is off right now.', to); return; }
+    // YouTube chat: one answer every 10 seconds per command, however many people ask
+    if (!to) {
+      if (Date.now() - (lastInfo[cmd] || 0) < 10_000) return;
+      lastInfo[cmd] = Date.now();
+    }
     C.say(cmd === 'uptime' ? await uptimeAnswer() : aboutAnswer(), to);
   });
 

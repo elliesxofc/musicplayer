@@ -508,21 +508,20 @@
       <p class="hint small chat-preview" id="chatPreview"></p>
       <div class="sr-box" id="discordBox" hidden>
         <p class="eyebrow">discord</p>
-        <p class="hint small">the same commands in your Discord server: <b>!nowplaying</b>, <b>!sr</b>, <b>!queue</b>, <b>!skip</b>, <b>!wrongsong</b>, <b>!uptime</b> and <b>!aboutme</b>. your own bot answers by replying to the message. the server's owner and people whose roles can manage messages count as mods. the settings above and below (song requests, limits, blocked words) count for Discord too.</p>
-        <label class="check"><input type="checkbox" id="dcOn"> answer commands in my Discord server</label>
+        <p class="hint small">the same commands in your Discord server, as slash commands: <b>/nowplaying</b>, <b>/sr</b>, <b>/queue</b>, <b>/skip</b>, <b>/wrongsong</b>, <b>/uptime</b> and <b>/aboutme</b> (type <b>/</b> in Discord and they show up). your own bot answers them. the server's owner and people whose roles can manage messages count as mods. the settings above and below (song requests, limits, blocked words) count for Discord too.</p>
+        <label class="check"><input type="checkbox" id="dcOn"> answer / commands in my Discord server</label>
         <details class="sp-web" id="dcSetup">
           <summary>make your bot (once, about 2 minutes)</summary>
           <ol class="steps">
             <li>open <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">discord.com/developers/applications</a>, click <b>New Application</b> and give it a name (like "moonlit"). that's the bot's name in your server.</li>
             <li>go to <b>Bot</b>, click <b>Reset Token</b> and copy the token into <b>bot token</b> below.</li>
-            <li>on the same <b>Bot</b> page, turn on <b>Message Content Intent</b> (so the bot can read "!sr …") and save.</li>
             <li>save here, then click <b>add the bot to my server</b> (it shows up once the bot is online) and pick your server.</li>
           </ol>
         </details>
         <label class="field"><span>bot token</span>
           <input type="password" id="dcToken" spellcheck="false" autocomplete="off" placeholder="paste the token from the Bot page">
         </label>
-        <label class="field"><span>only answer in one channel (optional: right-click the channel → <b>Copy Link</b>)</span>
+        <label class="field"><span>only answer in one channel (optional: right-click the channel → <b>Copy Link</b>). elsewhere, the bot tells the person where to ask</span>
           <input type="text" id="dcChannel" spellcheck="false" autocomplete="off" placeholder="every channel the bot can see">
         </label>
         <p class="hint small">the token is saved encrypted, only on this PC. anyone with it can control the bot, so never share it.</p>

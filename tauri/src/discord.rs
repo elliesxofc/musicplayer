@@ -1,24 +1,23 @@
-//! !nowplaying and song requests in your Discord server: the same commands as the YouTube chat
-//! (!nowplaying, !sr, !queue, !skip, !wrongsong, !uptime, !aboutme), answered by your own bot.
-//! You make the bot once in Discord's developer portal, paste its token here, and add it to
-//! your server. moonlit connects to Discord's gateway (the live connection every bot uses),
-//! reads messages that start with "!", and replies to the message that asked.
+//! !nowplaying and song requests in your Discord server, as slash commands: /nowplaying, /sr,
+//! /queue, /skip, /wrongsong, /uptime and /aboutme (the same as !… in the YouTube chat),
+//! answered by your own bot. You make the bot once in Discord's developer portal, paste its
+//! token here, and add it to your server. moonlit connects to Discord's gateway (the live
+//! connection every bot uses), adds the commands to each server the bot is in, and answers them.
 //! Mods: the server's owner and anyone whose roles can manage messages (or the server).
 
 use crate::{chat, config, emit, overlay, secrets};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 
-const REPLY_GAP_MS: f64 = 3000.0; // one !nowplaying answer every 3 seconds at most
-// guilds, guild messages, message content (the last one has to be switched on for the bot)
-const INTENTS: u64 = (1 << 0) | (1 << 9) | (1 << 15);
-// what the bot needs in a channel: view channels, send messages, read message history
-pub const INVITE_PERMISSIONS: u64 = 1024 | 2048 | 65536;
+// only "guilds": slash commands reach the bot without reading anyone's messages
+const INTENTS: u64 = 1 << 0;
+// what the bot needs in a channel: view channels, send messages
+pub const INVITE_PERMISSIONS: u64 = 1024 | 2048;
 const ADMINISTRATOR: u64 = 1 << 3;
 const MANAGE_GUILD: u64 = 1 << 5;
 const MANAGE_MESSAGES: u64 = 1 << 13;
@@ -36,15 +35,15 @@ fn gateway() -> String {
 }
 
 #[derive(Default, Clone)]
-struct Guild { owner: String, roles: HashMap<String, u64> }
+struct Guild { owner: String }
 
 struct Bot {
     run: AtomicU64,
     status: Mutex<Value>,
     token: Mutex<String>,
-    me: Mutex<(String, String)>, // the bot's id (also its app id, for the invite link) and name
+    me: Mutex<(String, String)>, // the bot's app id (for the invite link and answers) and name
     guilds: Mutex<HashMap<String, Guild>>,
-    last_reply: Mutex<f64>,
+    answered: Mutex<HashSet<String>>, // commands that already have their first answer
 }
 
 fn bot() -> &'static Bot {
@@ -55,7 +54,7 @@ fn bot() -> &'static Bot {
         token: Mutex::new(String::new()),
         me: Mutex::new((String::new(), String::new())),
         guilds: Mutex::new(HashMap::new()),
-        last_reply: Mutex::new(0.0),
+        answered: Mutex::new(HashSet::new()),
     })
 }
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> { m.lock().unwrap_or_else(|e| e.into_inner()) }
@@ -83,22 +82,23 @@ pub fn clean_token(input: &str) -> String {
     t.trim().to_string()
 }
 
-/// what a member's roles allow in a server (@everyone's role has the server's own ID)
-fn permissions(guild: &Guild, guild_id: &str, member_roles: &[String]) -> u64 {
-    let mut p = guild.roles.get(guild_id).copied().unwrap_or(0);
-    for r in member_roles { p |= guild.roles.get(r).copied().unwrap_or(0); }
-    p
-}
 fn is_mod(perms: u64) -> bool {
     perms & (ADMINISTRATOR | MANAGE_GUILD | MANAGE_MESSAGES | MODERATE_MEMBERS) != 0
 }
 
-fn roles_of(list: &Value) -> HashMap<String, u64> {
-    list.as_array().into_iter().flatten().filter_map(|r| {
-        let id = r.get("id")?.as_str()?.to_string();
-        let p = r.get("permissions").and_then(|p| p.as_str()).and_then(|p| p.parse().ok()).unwrap_or(0);
-        Some((id, p))
-    }).collect()
+/// the slash commands, as Discord lists them when you type "/"
+fn commands() -> Value {
+    let plain = |name: &str, description: &str| json!({ "name": name, "description": description, "type": 1 });
+    json!([
+        plain("nowplaying", "the song that's playing right now"),
+        { "name": "sr", "type": 1, "description": "request a song: from the library, or YouTube",
+          "options": [{ "type": 3, "name": "song", "description": "a song name or a YouTube link", "required": true, "max_length": 300 }] },
+        plain("queue", "the next requested songs"),
+        plain("skip", "skip the song that's playing (mods)"),
+        plain("wrongsong", "take back your last request"),
+        plain("uptime", "how long the stream has been live"),
+        plain("aboutme", "where the music comes from"),
+    ])
 }
 
 /* ───────────── settings ───────────── */
@@ -220,7 +220,6 @@ fn closed(code: u16) -> After {
     let stop = |m: &str| { set_status(m, "warn"); After::Stop };
     match code {
         4004 => stop("Discord didn't take the token. copy it again (Bot → Reset Token) and save"),
-        4014 => stop("turn on Message Content Intent (developer portal → your app → Bot), then save again"),
         4013 | 4012 | 4011 | 4010 => stop(&format!("Discord closed the connection (code {}). update moonlit", code)),
         _ => { set_status("Discord closed the connection, reconnecting", "warn"); After::Retry }
     }
@@ -229,63 +228,91 @@ fn closed(code: u16) -> After {
 async fn dispatch(kind: &str, d: &Value) {
     match kind {
         "READY" => {
-            let id = d["user"]["id"].as_str().unwrap_or("").to_string();
+            let id = d["application"]["id"].as_str().or(d["user"]["id"].as_str()).unwrap_or("").to_string();
             let name = d["user"]["username"].as_str().unwrap_or("").to_string();
             *lock(&bot().me) = (id, name);
             emit("discord:status", lock(&bot().status).clone()); // the page refreshes the invite link
             guild_count_status();
         }
-        "GUILD_CREATE" | "GUILD_UPDATE" => {
+        "GUILD_CREATE" => {
             let Some(id) = d["id"].as_str() else { return };
-            let g = Guild { owner: d["owner_id"].as_str().unwrap_or("").to_string(), roles: roles_of(&d["roles"]) };
-            lock(&bot().guilds).insert(id.to_string(), g);
+            lock(&bot().guilds).insert(id.to_string(), Guild { owner: d["owner_id"].as_str().unwrap_or("").to_string() });
             guild_count_status();
+            let id = id.to_string();
+            tauri::async_runtime::spawn(async move { add_commands(&id).await });
+        }
+        "GUILD_UPDATE" => {
+            let Some(id) = d["id"].as_str() else { return };
+            lock(&bot().guilds).insert(id.to_string(), Guild { owner: d["owner_id"].as_str().unwrap_or("").to_string() });
         }
         "GUILD_DELETE" => {
             if let Some(id) = d["id"].as_str() { lock(&bot().guilds).remove(id); }
             guild_count_status();
         }
-        "GUILD_ROLE_CREATE" | "GUILD_ROLE_UPDATE" => {
-            let (Some(g), Some(r)) = (d["guild_id"].as_str(), d["role"]["id"].as_str()) else { return };
-            let p = d["role"]["permissions"].as_str().and_then(|p| p.parse().ok()).unwrap_or(0);
-            if let Some(guild) = lock(&bot().guilds).get_mut(g) { guild.roles.insert(r.to_string(), p); }
-        }
-        "GUILD_ROLE_DELETE" => {
-            let (Some(g), Some(r)) = (d["guild_id"].as_str(), d["role_id"].as_str()) else { return };
-            if let Some(guild) = lock(&bot().guilds).get_mut(g) { guild.roles.remove(r); }
-        }
-        "MESSAGE_CREATE" => on_message(d).await,
+        "INTERACTION_CREATE" => on_command(d).await,
         _ => {}
     }
 }
 
-async fn on_message(d: &Value) {
-    if d["author"]["bot"].as_bool().unwrap_or(false) || d["webhook_id"].is_string() { return; }
-    let Some(guild_id) = d["guild_id"].as_str() else { return }; // servers only, not DMs
-    let channel = d["channel_id"].as_str().unwrap_or("").to_string();
+/// puts the slash commands in a server (they show up right away there)
+async fn add_commands(guild: &str) {
+    let app = lock(&bot().me).0.clone();
+    let token = lock(&bot().token).clone();
+    if app.is_empty() || token.is_empty() { return; }
+    let res = http().put(format!("{}/applications/{}/guilds/{}/commands", api(), app, guild))
+        .header("Authorization", format!("Bot {}", token)).json(&commands()).send().await;
+    match res {
+        Ok(r) if r.status().is_success() => {}
+        Ok(r) if r.status().as_u16() == 403 => set_status("the bot can't add its / commands: add it to your server again with the link below", "warn"),
+        Ok(r) => set_status(&format!("couldn't add the / commands (Discord said {})", r.status().as_u16()), "warn"),
+        Err(e) => set_status(&format!("couldn't add the / commands ({})", short(&e.to_string())), "warn"),
+    }
+}
+
+async fn on_command(d: &Value) {
+    if d["type"].as_u64() != Some(2) { return; } // only slash commands
+    let id = d["id"].as_str().unwrap_or("").to_string();
+    let token = d["token"].as_str().unwrap_or("").to_string();
+    let Some(guild_id) = d["guild_id"].as_str() else { return };
+    if id.is_empty() || token.is_empty() { return; }
+    let channel = d["channel_id"].as_str().unwrap_or("");
     let (_, _, only) = settings();
-    if !only.is_empty() && only != channel { return; }
-    let Some((cmd, args)) = chat::command(d["content"].as_str().unwrap_or("")) else { return };
-    let to = json!({ "channel": channel, "message": d["id"].as_str().unwrap_or("") });
+    if !only.is_empty() && only != channel {
+        // only the person who asked sees this
+        let body = json!({ "type": 4, "data": { "content": format!("I only answer in <#{}>.", only), "flags": 64, "allowed_mentions": { "parse": [] } } });
+        let _ = http().post(format!("{}/interactions/{}/{}/callback", api(), id, token)).json(&body).send().await;
+        return;
+    }
+    let cmd = d["data"]["name"].as_str().unwrap_or("").to_string();
+    let args: String = d["data"]["options"].as_array().into_iter().flatten()
+        .find(|o| o["name"] == "song").and_then(|o| o["value"].as_str()).unwrap_or("").trim().chars().take(300).collect();
+    // "thinking…" first: Discord wants an answer within 3 seconds, downloads take longer
+    let deferred = http().post(format!("{}/interactions/{}/{}/callback", api(), id, token)).json(&json!({ "type": 5 })).send().await;
+    if !deferred.map(|r| r.status().is_success()).unwrap_or(false) { return; }
+    let to = json!({ "token": token });
+    // nothing should stay "thinking…": after 14 minutes (Discord allows 15), say so
+    let t = token.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(14 * 60)).await;
+        if !lock(&bot().answered).remove(&t) { say(&json!({ "token": t }), "couldn't answer that one, sorry.").await; }
+        lock(&bot().answered).remove(&t);
+    });
     if cmd == "nowplaying" {
-        let now = config::now_ms();
-        {
-            let mut last = lock(&bot().last_reply);
-            if now - *last < REPLY_GAP_MS { return; }
-            *last = now;
-        }
         return say(&to, &chat::reply_for(&overlay::get().now())).await;
     }
-    let author_id = d["author"]["id"].as_str().unwrap_or("").to_string();
-    let roles: Vec<String> = d["member"]["roles"].as_array().into_iter().flatten().filter_map(|r| r.as_str().map(String::from)).collect();
-    let guild = lock(&bot().guilds).get(guild_id).cloned().unwrap_or_default();
-    let owner = !guild.owner.is_empty() && guild.owner == author_id;
-    let name = [&d["member"]["nick"], &d["author"]["global_name"], &d["author"]["username"]]
+    if !["sr", "queue", "skip", "wrongsong", "uptime", "aboutme"].contains(&cmd.as_str()) {
+        return say(&to, "moonlit doesn't know that command.").await;
+    }
+    let user = if d["member"]["user"].is_object() { &d["member"]["user"] } else { &d["user"] };
+    let author_id = user["id"].as_str().unwrap_or("").to_string();
+    let owner = lock(&bot().guilds).get(guild_id).map(|g| !g.owner.is_empty() && g.owner == author_id).unwrap_or(false);
+    let perms = d["member"]["permissions"].as_str().and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+    let name = [&d["member"]["nick"], &user["global_name"], &user["username"]]
         .iter().find_map(|v| v.as_str().filter(|s| !s.is_empty())).unwrap_or("someone").to_string();
-    // the player answers these (it knows the library, the queue and OBS), back to this message
+    // the player answers these (it knows the library, the queue and OBS), back to this command
     emit("chat:command", json!({
         "cmd": cmd, "args": args,
-        "user": { "id": format!("discord:{}", author_id), "name": name, "mod": owner || is_mod(permissions(&guild, guild_id, &roles)), "owner": owner },
+        "user": { "id": format!("discord:{}", author_id), "name": name, "mod": owner || is_mod(perms), "owner": owner },
         "to": { "discord": to },
     }));
 }
@@ -299,40 +326,30 @@ fn http() -> reqwest::Client {
         .build().unwrap_or_default()).clone()
 }
 
-/// A reply to the message that asked (Discord allows 2000 characters; longer answers go in parts).
-/// Nobody gets pinged: not the person asking, and not an @everyone inside a song's name.
+/// The answer to a slash command (Discord allows 2000 characters; longer answers go in parts).
+/// The first fills in the "thinking…" message, more come after it. Nobody gets pinged, not even
+/// by an @everyone inside a song's name.
 pub async fn say(to: &Value, text: &str) {
-    let channel = to["channel"].as_str().unwrap_or("");
-    let message = to["message"].as_str().unwrap_or("");
-    let token = lock(&bot().token).clone();
-    if channel.is_empty() || !channel.chars().all(|c| c.is_ascii_digit()) || token.is_empty() { return; }
+    let token = to["token"].as_str().unwrap_or("").to_string();
+    let app = lock(&bot().me).0.clone();
+    let ok = |s: &str| !s.is_empty() && s.len() < 1000 && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    if !ok(&token) || app.is_empty() { return; }
     let text: String = text.chars().take(4000).collect();
-    for (i, part) in chat::split_message(&text, 1900).into_iter().enumerate() {
-        let mut body = json!({ "content": part, "allowed_mentions": { "parse": [], "replied_user": false } });
-        if i == 0 && !message.is_empty() {
-            body["message_reference"] = json!({ "message_id": message, "fail_if_not_exists": false });
-        }
+    for part in chat::split_message(&text, 1900) {
+        let first = lock(&bot().answered).insert(token.clone());
+        let body = json!({ "content": part, "allowed_mentions": { "parse": [] } });
+        let hook = format!("{}/webhooks/{}/{}", api(), app, token);
         for _attempt in 0..2 {
-            let res = http().post(format!("{}/channels/{}/messages", api(), channel))
-                .header("Authorization", format!("Bot {}", token))
-                .json(&body).send().await;
-            match res {
+            let req = if first { http().patch(format!("{}/messages/@original", hook)) } else { http().post(&hook) };
+            match req.json(&body).send().await {
                 Ok(r) if r.status().is_success() => break,
                 Ok(r) if r.status().as_u16() == 429 => {
                     let v: Value = r.json().await.unwrap_or(Value::Null);
                     let secs = v["retry_after"].as_f64().unwrap_or(1.0).clamp(0.1, 10.0);
                     tokio::time::sleep(Duration::from_secs_f64(secs)).await;
                 }
-                Ok(r) => {
-                    let why = match r.status().as_u16() {
-                        403 => "the bot isn't allowed to write in that channel: give it Send Messages there".to_string(),
-                        401 => "Discord didn't take the token. copy it again and save".to_string(),
-                        n => format!("Discord said {}", n),
-                    };
-                    set_status(&format!("couldn't answer ({})", why), "warn");
-                    return;
-                }
-                Err(e) => { set_status(&format!("couldn't answer ({})", short(&e.to_string())), "warn"); return; }
+                Ok(r) => { set_status(&format!("couldn't answer a command (Discord said {})", r.status().as_u16()), "warn"); return; }
+                Err(e) => { set_status(&format!("couldn't answer a command ({})", short(&e.to_string())), "warn"); return; }
             }
         }
     }
@@ -344,7 +361,7 @@ pub fn discord_get() -> Value {
     let (enabled, token, channel) = settings();
     let app = lock(&bot().me).0.clone();
     let invite = if app.is_empty() { String::new() } else {
-        format!("https://discord.com/oauth2/authorize?client_id={}&scope=bot&permissions={}", app, INVITE_PERMISSIONS)
+        format!("https://discord.com/oauth2/authorize?client_id={}&scope=bot+applications.commands&permissions={}", app, INVITE_PERMISSIONS)
     };
     json!({ "enabled": enabled, "hasToken": !token.is_empty(), "channel": channel, "invite": invite, "status": lock(&bot().status).clone() })
 }
@@ -397,13 +414,16 @@ mod tests {
 
     #[test]
     fn mods() {
-        let mut g = Guild::default();
-        g.roles.insert("1".into(), 1024 | 2048);          // @everyone (the server's ID)
-        g.roles.insert("2".into(), MANAGE_MESSAGES);      // Moderator
-        g.roles.insert("3".into(), 0);
-        assert!(!is_mod(permissions(&g, "1", &["3".into()])));
-        assert!(is_mod(permissions(&g, "1", &["3".into(), "2".into()])));
-        g.roles.insert("1".into(), ADMINISTRATOR);
-        assert!(is_mod(permissions(&g, "1", &[])));
+        assert!(!is_mod(1024 | 2048));
+        assert!(is_mod(MANAGE_MESSAGES | 1024));
+        assert!(is_mod(ADMINISTRATOR));
+    }
+
+    #[test]
+    fn command_list() {
+        let c = commands();
+        let names: Vec<&str> = c.as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["nowplaying", "sr", "queue", "skip", "wrongsong", "uptime", "aboutme"]);
+        for x in c.as_array().unwrap() { assert!(x["description"].as_str().unwrap().len() <= 100); }
     }
 }

@@ -67,6 +67,9 @@
       get: () => call('discord_get'),
       set: settings => call('discord_set', { next: settings || {} }),
       onStatus: cb => on('discord:status', s => cb(s)),
+      // someone is typing /sr: the page answers with library songs and that person's request rules
+      onSuggest: cb => on('discord:suggest', q => cb(q)),
+      suggestions: (req, answer) => fire('discord_suggestions', { req: String(req), answer: answer || {} }),
     },
     chat: {
       get: () => call('chat_get'),

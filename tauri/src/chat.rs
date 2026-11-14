@@ -278,7 +278,11 @@ pub async fn youtube_page(url: &str) -> Result<(u16, String), String> {
 }
 
 async fn post(path: &str, body: Value, creds: &Map<String, Value>) -> Result<Value, String> {
-    let mut req = http().post(format!("{}{}?key={}", ORIGIN, path, KEY))
+    #[allow(unused_mut)]
+    let mut origin = ORIGIN.to_string();
+    #[cfg(debug_assertions)]
+    if let Ok(o) = std::env::var("MOONLIT_YOUTUBE_API") { origin = o; }
+    let mut req = http().post(format!("{}{}?key={}", origin, path, KEY))
         .header("Content-Type", "application/json")
         .header("Accept-Language", "en")
         .header("User-Agent", API_UA);
@@ -295,6 +299,44 @@ async fn post(path: &str, body: Value, creds: &Map<String, Value>) -> Result<Val
         return Err(msg);
     }
     Ok(v)
+}
+
+/// YouTube's own search (the one on youtube.com), videos only: quick enough for Discord's
+/// suggestions while someone types. Each result looks like a yt-dlp search entry.
+pub async fn search_videos(query: &str) -> Result<Vec<Value>, String> {
+    let v = post("/youtubei/v1/search", json!({ "query": query, "params": "EgIQAQ==" }), &Map::new()).await?;
+    Ok(search_results(&v))
+}
+
+pub fn search_results(v: &Value) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut stack = vec![v];
+    while let Some(x) = stack.pop() {
+        if let Some(r) = x.get("videoRenderer") {
+            let id = r["videoId"].as_str().unwrap_or("");
+            if id.is_empty() { continue; }
+            let len = runs_text(&r["lengthText"]);
+            let duration = len.split(':').try_fold(0f64, |acc, p| p.trim().parse::<f64>().ok().map(|n| acc * 60.0 + n));
+            let owner = &r["ownerText"]["runs"][0];
+            let handle = owner.pointer("/navigationEndpoint/browseEndpoint/canonicalBaseUrl").and_then(|u| u.as_str()).unwrap_or("");
+            out.push(json!({
+                "id": id, "title": runs_text(&r["title"]),
+                "channel": owner["text"].as_str().unwrap_or(""),
+                "channel_id": owner.pointer("/navigationEndpoint/browseEndpoint/browseId").and_then(|u| u.as_str()).unwrap_or(""),
+                "channel_url": if handle.is_empty() { String::new() } else { format!("{}{}", ORIGIN, handle) },
+                "duration": duration.filter(|_| !len.is_empty()),
+                // no length: a live stream or a premiere
+                "live_status": if len.is_empty() { "is_live" } else { "not_live" },
+            }));
+            continue;
+        }
+        match x {
+            Value::Object(m) => stack.extend(m.values().rev()),
+            Value::Array(a) => stack.extend(a.iter().rev()),
+            _ => {}
+        }
+    }
+    out
 }
 
 fn runs_text(v: &Value) -> String {

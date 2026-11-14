@@ -44,6 +44,7 @@ struct Bot {
     me: Mutex<(String, String)>, // the bot's app id (for the invite link and answers) and name
     guilds: Mutex<HashMap<String, Guild>>,
     answered: Mutex<HashSet<String>>, // commands that already have their first answer
+    asking: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Value>>>, // suggestions the page is finding
 }
 
 fn bot() -> &'static Bot {
@@ -55,6 +56,7 @@ fn bot() -> &'static Bot {
         me: Mutex::new((String::new(), String::new())),
         guilds: Mutex::new(HashMap::new()),
         answered: Mutex::new(HashSet::new()),
+        asking: Mutex::new(HashMap::new()),
     })
 }
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> { m.lock().unwrap_or_else(|e| e.into_inner()) }
@@ -92,7 +94,7 @@ fn commands() -> Value {
     json!([
         plain("nowplaying", "the song that's playing right now"),
         { "name": "sr", "type": 1, "description": "request a song: from the library, or YouTube",
-          "options": [{ "type": 3, "name": "song", "description": "a song name or a YouTube link", "required": true, "max_length": 300 }] },
+          "options": [{ "type": 3, "name": "song", "description": "a song name or a YouTube link (pick one from the list, or type your own)", "required": true, "max_length": 300, "autocomplete": true }] },
         plain("queue", "the next requested songs"),
         plain("skip", "skip the song that's playing (mods)"),
         plain("wrongsong", "take back your last request"),
@@ -271,7 +273,68 @@ async fn add_commands(guild: &str) {
     }
 }
 
+/// who used a command: { id, name, mod, owner }, like a YouTube chat viewer
+fn user_of(d: &Value, guild_id: &str) -> Value {
+    let user = if d["member"]["user"].is_object() { &d["member"]["user"] } else { &d["user"] };
+    let author_id = user["id"].as_str().unwrap_or("").to_string();
+    let owner = lock(&bot().guilds).get(guild_id).map(|g| !g.owner.is_empty() && g.owner == author_id).unwrap_or(false);
+    let perms = d["member"]["permissions"].as_str().and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+    let name = [&d["member"]["nick"], &user["global_name"], &user["username"]]
+        .iter().find_map(|v| v.as_str().filter(|s| !s.is_empty())).unwrap_or("someone").to_string();
+    json!({ "id": format!("discord:{}", author_id), "name": name, "mod": owner || is_mod(perms), "owner": owner })
+}
+
+fn cut(s: &str, max: usize) -> String {
+    if s.chars().count() <= max { return s.to_string(); }
+    s.chars().take(max - 1).collect::<String>() + "…"
+}
+
+/// The list Discord shows while someone types /sr: songs from the library first (the page knows
+/// those, and the request rules for this person), then YouTube results that pass the rules.
+/// Discord wants it within 3 seconds.
+async fn on_typing(d: &Value) {
+    let id = d["id"].as_str().unwrap_or("").to_string();
+    let token = d["token"].as_str().unwrap_or("").to_string();
+    let Some(guild_id) = d["guild_id"].as_str() else { return };
+    let query: String = d["data"]["options"].as_array().into_iter().flatten()
+        .find(|o| o["focused"].as_bool() == Some(true)).and_then(|o| o["value"].as_str()).unwrap_or("").trim().chars().take(100).collect();
+    let (_, _, only) = settings();
+    let here = only.is_empty() || d["channel_id"].as_str() == Some(only.as_str());
+    let mut choices: Vec<Value> = Vec::new();
+    if here && d["data"]["name"] == "sr" {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        lock(&bot().asking).insert(id.clone(), tx);
+        emit("discord:suggest", json!({ "req": id, "query": query, "user": user_of(d, guild_id) }));
+        let page = tokio::time::timeout(Duration::from_millis(1200), rx).await.ok().and_then(|r| r.ok()).unwrap_or(Value::Null);
+        lock(&bot().asking).remove(&id);
+        if page["on"].as_bool() == Some(true) {
+            for l in page["library"].as_array().into_iter().flatten().take(10) {
+                let (Some(name), Some(value)) = (l["name"].as_str(), l["value"].as_str()) else { continue };
+                if value.is_empty() || value.chars().count() > 100 { continue; }
+                choices.push(json!({ "name": cut(&format!("📁 {}", name), 100), "value": value }));
+            }
+            let r = &page["rules"];
+            let looks_like_link = query.contains("://") || query.contains("youtu");
+            if query.chars().count() >= 2 && !looks_like_link && r.is_object() {
+                let list = |k: &str| r[k].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>();
+                let found = tokio::time::timeout(Duration::from_millis(1500), crate::downloader::suggest(
+                    &query, &list("channels"), r["anyChannel"].as_bool().unwrap_or(false), r["maxSeconds"].as_f64().unwrap_or(600.0), &list("blocked"),
+                )).await.unwrap_or_default();
+                for (vid, title, channel, secs) in found.into_iter().take(25usize.saturating_sub(choices.len()).min(10)) {
+                    let time = format!("{}:{:02}", (secs as u64) / 60, (secs as u64) % 60);
+                    let tail = format!(" · {} · {}", cut(&channel, 30), time);
+                    let name = format!("▶ {}{}", cut(&title, 100 - 2 - tail.chars().count()), tail);
+                    choices.push(json!({ "name": name, "value": format!("https://youtu.be/{}", vid) }));
+                }
+            }
+        }
+    }
+    let body = json!({ "type": 8, "data": { "choices": choices } });
+    let _ = http().post(format!("{}/interactions/{}/{}/callback", api(), id, token)).json(&body).send().await;
+}
+
 async fn on_command(d: &Value) {
+    if d["type"].as_u64() == Some(4) { return on_typing(d).await; } // someone is typing /sr
     if d["type"].as_u64() != Some(2) { return; } // only slash commands
     let id = d["id"].as_str().unwrap_or("").to_string();
     let token = d["token"].as_str().unwrap_or("").to_string();
@@ -305,18 +368,8 @@ async fn on_command(d: &Value) {
     if !["sr", "queue", "skip", "wrongsong", "uptime", "aboutme"].contains(&cmd.as_str()) {
         return say(&to, "moonlit doesn't know that command.").await;
     }
-    let user = if d["member"]["user"].is_object() { &d["member"]["user"] } else { &d["user"] };
-    let author_id = user["id"].as_str().unwrap_or("").to_string();
-    let owner = lock(&bot().guilds).get(guild_id).map(|g| !g.owner.is_empty() && g.owner == author_id).unwrap_or(false);
-    let perms = d["member"]["permissions"].as_str().and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
-    let name = [&d["member"]["nick"], &user["global_name"], &user["username"]]
-        .iter().find_map(|v| v.as_str().filter(|s| !s.is_empty())).unwrap_or("someone").to_string();
     // the player answers these (it knows the library, the queue and OBS), back to this command
-    emit("chat:command", json!({
-        "cmd": cmd, "args": args,
-        "user": { "id": format!("discord:{}", author_id), "name": name, "mod": owner || is_mod(perms), "owner": owner },
-        "to": { "discord": to },
-    }));
+    emit("chat:command", json!({ "cmd": cmd, "args": args, "user": user_of(d, guild_id), "to": { "discord": to } }));
 }
 
 /* ───────────── answering ───────────── */
@@ -358,6 +411,12 @@ pub async fn say(to: &Value, text: &str) {
 }
 
 /* ───────────── what the page asks ───────────── */
+// the page's part of the suggestions: { on, library: [{ name, value }], rules }
+#[tauri::command]
+pub fn discord_suggestions(req: String, answer: Value) {
+    if let Some(tx) = lock(&bot().asking).remove(&req) { let _ = tx.send(answer); }
+}
+
 #[tauri::command]
 pub fn discord_get() -> Value {
     let (enabled, token, channel) = settings();

@@ -70,6 +70,38 @@
     return best;
   }
 
+  // what this person may request from YouTube. full access for the stream owner: any channel,
+  // any length (blocked words still count)
+  function rulesFor(user) {
+    const full = ownerAny() && isOwner(user);
+    return { channels: channels(), anyChannel: full || (isMod(user) && modsAnySong()) || prefs.get('srAny', false), maxSeconds: full ? 3600 : maxMinutes() * 60, blocked: blockedWords() };
+  }
+
+  // the library songs Discord suggests while someone types /sr (best fits first)
+  function libraryMatches(query, n) {
+    const words = norm(query).split(' ').filter(Boolean);
+    const found = [];
+    for (const t of state.tracks) {
+      const hay = `${norm(t.artist)} ${norm(t.title)} ${norm(t.album)}`;
+      if (!words.every(w => hay.includes(w))) continue;
+      if (blockedIn(`${t.title} ${t.artist} ${t.album}`)) continue;
+      const starts = words.length && norm(t.title).startsWith(words.join(' ')) ? 0 : 1;
+      found.push({ t, score: starts * 1000 + hay.length });
+    }
+    return found.sort((a, b) => a.score - b.score).slice(0, n).map(x => x.t);
+  }
+  if (D.discord && D.discord.onSuggest) {
+    D.discord.onSuggest(({ req, query, user }) => {
+      if (!on()) return D.discord.suggestions(req, { on: false });
+      // the value shows in Discord ("used /sr song: …"): the song's name when that finds this exact song
+      const library = libraryMatches(query || '', 10).map(t => {
+        const name = songName(t);
+        return { name, value: name.length <= 100 && findInLibrary(name) === t ? name : `library:${t.id}` };
+      });
+      D.discord.suggestions(req, { on: true, library, rules: rulesFor(user) });
+    });
+  }
+
   /* ───────────── commands ───────────── */
   async function request(user, query, say) {
     if (!query) return say(`${user.name}, type !sr and a song name or a YouTube link.`);
@@ -84,17 +116,17 @@
     if (!mod) cooldowns.set(user.id, Date.now() + COOLDOWN);
 
     const link = /https?:\/\/|(^|\s)(www\.)?(youtube\.com|youtu\.be)\//i.test(query);
-    let track = link ? null : findInLibrary(query);
+    // a library song picked from Discord's suggestions
+    const picked = /^library:(.+)$/.exec(query);
+    if (picked && !byId(picked[1])) { cooldowns.delete(user.id); return say(`${user.name}, that song isn't in the library anymore.`); }
+    let track = picked ? byId(picked[1]) : link ? null : findInLibrary(query);
     // library songs follow the blocked words too
     if (track && blockedIn(`${track.title} ${track.artist} ${track.album}`)) { cooldowns.delete(user.id); return say(`${user.name}, that song can't be requested.`); }
     if (!track) {
       const job = { by: user.name, userId: user.id, query, cancelled: false, at: Date.now() };
       pending.push(job);
       render();
-      // full access for the stream owner: any channel, any length (blocked words still count)
-      const full = ownerAny() && isOwner(user);
-      const rules = { channels: channels(), anyChannel: full || (mod && modsAnySong()) || prefs.get('srAny', false), maxSeconds: full ? 3600 : maxMinutes() * 60, blocked: blockedWords() };
-      const result = await D.download.request(query, rules).catch(err => ({ ok: false, reason: 'error', error: err.message }));
+      const result = await D.download.request(query, rulesFor(user)).catch(err => ({ ok: false, reason: 'error', error: err.message }));
       pending.splice(pending.indexOf(job), 1);
       render();
       if (!result.ok) {

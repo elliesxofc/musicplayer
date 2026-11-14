@@ -729,6 +729,26 @@ async fn request(query: String, channels_list: Vec<String>, any_channel: bool, m
     r.unwrap_or_else(|e| json!({ "ok": false, "reason": "error", "error": e }))
 }
 
+/// Songs for Discord's suggestions while someone types /sr: YouTube's search results that pass
+/// the same rules as a request (allowed channel, not too long, not live, no blocked words),
+/// best fit first, as (video id, title, channel, seconds).
+pub async fn suggest(query: &str, channels_list: &[String], any_channel: bool, max_seconds: f64, blocked: &[String]) -> Vec<(String, String, String, f64)> {
+    let Ok(found) = crate::chat::search_videos(query).await else { return Vec::new() };
+    pick_suggestions(found, query, channels_list, any_channel, max_seconds, blocked)
+}
+fn pick_suggestions(found: Vec<Value>, query: &str, channels_list: &[String], any_channel: bool, max_seconds: f64, blocked: &[String]) -> Vec<(String, String, String, f64)> {
+    let keys: Vec<String> = channels_list.iter().map(|l| channels::channel_key(l)).filter(|k| !k.is_empty()).collect();
+    let mut scored: Vec<(i64, usize, Value)> = found.into_iter().take(20).enumerate().map(|(i, e)| (request_score(&e, query), i, e)).collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().map(|x| x.2)
+        .filter(|e| sv(e, "live_status") != "is_live")
+        .filter(|e| e["duration"].as_f64().map(|d| d <= max_seconds).unwrap_or(false))
+        .filter(|e| !blocked_by(&format!("{} {}", sv(e, "title"), sv(e, "channel")), blocked))
+        .filter(|e| any_channel || allowed_channel(e, &keys))
+        .map(|e| (sv(&e, "id"), sv(&e, "title"), sv(&e, "channel"), e["duration"].as_f64().unwrap_or(0.0)))
+        .collect()
+}
+
 // a channel (or a video's channel) through yt-dlp, when YouTube's page couldn't be read
 pub async fn channel_of(url: &str, video: bool) -> Result<Option<(String, String)>, String> {
     ensure_ready().await?;
@@ -811,6 +831,34 @@ pub fn dl_request_files() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suggestions_follow_the_rules() {
+        let v = |id: &str, title: &str, ch: &str, chid: &str, handle: &str, len: &str| json!({ "videoRenderer": {
+            "videoId": id, "title": { "runs": [{ "text": title }] },
+            "ownerText": { "runs": [{ "text": ch, "navigationEndpoint": { "browseEndpoint": { "browseId": chid, "canonicalBaseUrl": handle } } }] },
+            "lengthText": if len.is_empty() { Value::Null } else { json!({ "simpleText": len }) },
+        }});
+        let page = json!({ "contents": { "twoColumnSearchResultsRenderer": { "primaryContents": { "sectionListRenderer": { "contents": [
+            { "itemSectionRenderer": { "contents": [
+                v("a1", "Alan Walker - Faded", "Alan Walker", "UCJrOtniJ0-NWz37R30urifQ", "/@Alanwalkermusic", "3:32"),
+                { "adSlotRenderer": {} },
+                v("n1", "Faded (NCS Release)", "NoCopyrightSounds", "UC_aEa8K-EOJ3D6gOs7HcyNg", "/@NoCopyrightSounds", "4:01"),
+                v("n2", "Faded 10 hour loop", "NoCopyrightSounds", "UC_aEa8K-EOJ3D6gOs7HcyNg", "/@NoCopyrightSounds", "10:00:00"),
+                v("n3", "Faded live", "NoCopyrightSounds", "UC_aEa8K-EOJ3D6gOs7HcyNg", "/@NoCopyrightSounds", ""),
+                v("t1", "Faded nazi remix", "TheFatRat", "UCa_UMppcMsHIzb5LDx1u9zQ", "/@TheFatRat", "3:00"),
+            ] } }
+        ] } } } } });
+        let found = crate::chat::search_results(&page);
+        assert_eq!(found.len(), 5);
+        assert_eq!(found[0]["duration"], json!(212.0));
+        let channels = vec!["UC_aEa8K-EOJ3D6gOs7HcyNg  # NoCopyrightSounds".to_string(), "@TheFatRat".to_string()];
+        let blocked = vec!["nazi".to_string()];
+        let viewer: Vec<String> = pick_suggestions(found.clone(), "faded", &channels, false, 600.0, &blocked).into_iter().map(|x| x.0).collect();
+        assert_eq!(viewer, ["n1"]);
+        let owner: Vec<String> = pick_suggestions(found, "faded", &channels, true, 3600.0, &blocked).into_iter().map(|x| x.0).collect();
+        assert_eq!(owner, ["a1", "n1"]);
+    }
     #[test]
     fn csv() {
         let j = read_playlist_csv("\u{feff}Track Name,Artist Name(s),Album Name,Duration (ms)\n\"Song, with comma\",\"A, B\",Alb,123000\n");

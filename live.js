@@ -142,6 +142,10 @@
       const link = $('#dcInvite');
       link.hidden = !info.invite;
       if (info.invite) link.href = info.invite;
+      const account = $('#dcAccount');
+      account.hidden = !info.account;
+      if (info.account) account.href = info.account;
+      $('#dcAnywhere').hidden = !info.connected || !!info.everywhere;
     };
     async function saveDiscord() {
       const next = { enabled: dOn.checked, channel: dChannel.value };

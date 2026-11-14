@@ -508,7 +508,7 @@
       <p class="hint small chat-preview" id="chatPreview"></p>
       <div class="sr-box" id="discordBox" hidden>
         <p class="eyebrow">discord</p>
-        <p class="hint small">the same commands in your Discord server, as slash commands: <b>/nowplaying</b>, <b>/sr</b>, <b>/queue</b>, <b>/skip</b>, <b>/wrongsong</b>, <b>/uptime</b> and <b>/aboutme</b> (type <b>/</b> in Discord and they show up). while someone types a song in <b>/sr</b>, Discord lists matching songs from your library and from YouTube to pick from (only ones that person is allowed to request). your own bot answers them. the server's owner and people whose roles can manage messages count as mods. the settings above and below (song requests, limits, blocked words) count for Discord too.</p>
+        <p class="hint small">the same commands in your Discord server, as slash commands: <b>/nowplaying</b>, <b>/sr</b>, <b>/queue</b>, <b>/skip</b>, <b>/wrongsong</b>, <b>/uptime</b> and <b>/aboutme</b> (type <b>/</b> in Discord and they show up). they work in your server, in DMs with the bot, and, once you add moonlit to your Discord account, in any server or DM. while someone types a song in <b>/sr</b>, Discord lists matching songs from your library and from YouTube to pick from (only ones that person is allowed to request). your own bot answers them. the server's owner and people whose roles can manage messages count as mods. the settings above and below (song requests, limits, blocked words) count for Discord too.</p>
         <label class="check"><input type="checkbox" id="dcOn"> answer / commands in my Discord server</label>
         <details class="sp-web" id="dcSetup">
           <summary>make your bot (once, about 2 minutes)</summary>
@@ -530,6 +530,8 @@
           <span class="obs-status" id="dcStatus">off</span>
         </div>
         <a class="link-btn" id="dcInvite" href="#" target="_blank" rel="noopener" hidden>add the bot to my server</a>
+        <a class="link-btn" id="dcAccount" href="#" target="_blank" rel="noopener" hidden>use the commands anywhere: add moonlit to my Discord account</a>
+        <p class="hint small" id="dcAnywhere" hidden>the commands work in your server and in DMs with the bot. to use them in <b>any</b> server or DM too: in the developer portal open your app → <b>Installation</b>, tick <b>User Install</b>, save, then save here again.</p>
       </div>
       <div class="sr-box" id="infoBox">
         <p class="eyebrow">more commands</p>

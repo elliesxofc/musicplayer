@@ -1,6 +1,6 @@
 [package]
 name = "moonlit"
-version = "2.2.0"
+version = "2.3.0"
 description = "a little private music player, just for you"
 authors = ["elliesxofc"]
 edition = "2021"

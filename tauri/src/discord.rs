@@ -44,6 +44,8 @@ struct Bot {
     me: Mutex<(String, String)>, // the bot's app id (for the invite link and answers) and name
     guilds: Mutex<HashMap<String, Guild>>,
     answered: Mutex<HashSet<String>>, // commands that already have their first answer
+    app_owner: Mutex<String>, // who made the bot (you): the stream owner, wherever a command comes from
+    everywhere: Mutex<bool>,  // the commands can be added to an account (Discord's "User Install")
     asking: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Value>>>, // suggestions the page is finding
 }
 
@@ -56,6 +58,8 @@ fn bot() -> &'static Bot {
         me: Mutex::new((String::new(), String::new())),
         guilds: Mutex::new(HashMap::new()),
         answered: Mutex::new(HashSet::new()),
+        app_owner: Mutex::new(String::new()),
+        everywhere: Mutex::new(false),
         asking: Mutex::new(HashMap::new()),
     })
 }
@@ -89,9 +93,11 @@ fn is_mod(perms: u64) -> bool {
 }
 
 /// the slash commands, as Discord lists them when you type "/"
-fn commands() -> Value {
+fn commands(everywhere: bool) -> Value {
+    // where they work: servers with the bot, DMs with it, and (added to an account) anywhere else
+    let (installs, places) = if everywhere { (json!([0, 1]), json!([0, 1, 2])) } else { (json!([0]), json!([0, 1])) };
     let plain = |name: &str, description: &str| json!({ "name": name, "description": description, "type": 1 });
-    json!([
+    let mut list = json!([
         plain("nowplaying", "the song that's playing right now"),
         { "name": "sr", "type": 1, "description": "request a song: from the library, or YouTube",
           "options": [{ "type": 3, "name": "song", "description": "a song name or a YouTube link (pick one from the list, or type your own)", "required": true, "max_length": 300, "autocomplete": true }] },
@@ -100,7 +106,12 @@ fn commands() -> Value {
         plain("wrongsong", "take back your last request"),
         plain("uptime", "how long the stream has been live"),
         plain("aboutme", "where the music comes from"),
-    ])
+    ]);
+    for c in list.as_array_mut().into_iter().flatten() {
+        c["integration_types"] = installs.clone();
+        c["contexts"] = places.clone();
+    }
+    list
 }
 
 /* ───────────── settings ───────────── */
@@ -237,13 +248,14 @@ async fn dispatch(kind: &str, d: &Value) {
             *lock(&bot().me) = (id, name);
             emit("discord:status", lock(&bot().status).clone()); // the page refreshes the invite link
             guild_count_status();
+            tauri::async_runtime::spawn(async { setup().await });
         }
         "GUILD_CREATE" => {
             let Some(id) = d["id"].as_str() else { return };
             lock(&bot().guilds).insert(id.to_string(), Guild { owner: d["owner_id"].as_str().unwrap_or("").to_string() });
             guild_count_status();
             let id = id.to_string();
-            tauri::async_runtime::spawn(async move { add_commands(&id).await });
+            tauri::async_runtime::spawn(async move { clear_server_commands(&id).await });
         }
         "GUILD_UPDATE" => {
             let Some(id) = d["id"].as_str() else { return };
@@ -258,27 +270,61 @@ async fn dispatch(kind: &str, d: &Value) {
     }
 }
 
-/// puts the slash commands in a server (they show up right away there)
-async fn add_commands(guild: &str) {
+fn authed(r: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    r.header("Authorization", format!("Bot {}", lock(&bot().token).clone()))
+}
+
+/// Once connected: who owns the bot, and the slash commands for everywhere (Discord's global
+/// commands): in servers with the bot, in DMs with it, and, for people who add moonlit to
+/// their account, in any server or DM.
+async fn setup() {
     let app = lock(&bot().me).0.clone();
-    let token = lock(&bot().token).clone();
-    if app.is_empty() || token.is_empty() { return; }
-    let res = http().put(format!("{}/applications/{}/guilds/{}/commands", api(), app, guild))
-        .header("Authorization", format!("Bot {}", token)).json(&commands()).send().await;
+    if app.is_empty() { return; }
+    if let Ok(r) = authed(http().get(format!("{}/oauth2/applications/@me", api()))).send().await {
+        let v: Value = r.json().await.unwrap_or(Value::Null);
+        let owner = v["team"]["owner_user_id"].as_str().or(v["owner"]["id"].as_str()).unwrap_or("").to_string();
+        *lock(&bot().app_owner) = owner;
+    }
+    let put = |list: Value| authed(http().put(format!("{}/applications/{}/commands", api(), app))).json(&list).send();
+    let res = put(commands(true)).await;
+    let res = match res {
+        Ok(r) if r.status().is_success() => { *lock(&bot().everywhere) = true; Ok(r) }
+        // User Install is off for this bot: servers and DMs with the bot only
+        Ok(r) if r.status().as_u16() == 400 => { *lock(&bot().everywhere) = false; put(commands(false)).await }
+        other => other,
+    };
     match res {
-        Ok(r) if r.status().is_success() => {}
-        Ok(r) if r.status().as_u16() == 403 => set_status("the bot can't add its / commands: add it to your server again with the link below", "warn"),
+        Ok(r) if r.status().is_success() => { emit("discord:status", lock(&bot().status).clone()); }
         Ok(r) => set_status(&format!("couldn't add the / commands (Discord said {})", r.status().as_u16()), "warn"),
         Err(e) => set_status(&format!("couldn't add the / commands ({})", short(&e.to_string())), "warn"),
     }
 }
 
+/// moonlit 2.1–2.2 put the commands in each server; now they're everywhere, so those copies go
+/// (otherwise every command would be listed twice)
+async fn clear_server_commands(guild: &str) {
+    let app = lock(&bot().me).0.clone();
+    if app.is_empty() { return; }
+    let _ = authed(http().put(format!("{}/applications/{}/guilds/{}/commands", api(), app, guild))).json(&json!([])).send().await;
+}
+
+/// a server the bot is in (yours): there, its owner and mods count, and the one-channel setting
+fn my_server(d: &Value) -> Option<String> {
+    let g = d["guild_id"].as_str()?;
+    lock(&bot().guilds).contains_key(g).then(|| g.to_string())
+}
+
 /// who used a command: { id, name, mod, owner }, like a YouTube chat viewer
-fn user_of(d: &Value, guild_id: &str) -> Value {
+/// You (the bot's owner) count as the stream owner everywhere; a server's owner and mods only
+/// count in your servers (not in other servers where someone added moonlit to their account).
+fn user_of(d: &Value) -> Value {
     let user = if d["member"]["user"].is_object() { &d["member"]["user"] } else { &d["user"] };
     let author_id = user["id"].as_str().unwrap_or("").to_string();
-    let owner = lock(&bot().guilds).get(guild_id).map(|g| !g.owner.is_empty() && g.owner == author_id).unwrap_or(false);
-    let perms = d["member"]["permissions"].as_str().and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+    let mine = my_server(d);
+    let app_owner = lock(&bot().app_owner).clone();
+    let owner = (!app_owner.is_empty() && app_owner == author_id)
+        || mine.as_ref().and_then(|g| lock(&bot().guilds).get(g).map(|g| !g.owner.is_empty() && g.owner == author_id)).unwrap_or(false);
+    let perms = if mine.is_some() { d["member"]["permissions"].as_str().and_then(|p| p.parse::<u64>().ok()).unwrap_or(0) } else { 0 };
     let name = [&d["member"]["nick"], &user["global_name"], &user["username"]]
         .iter().find_map(|v| v.as_str().filter(|s| !s.is_empty())).unwrap_or("someone").to_string();
     json!({ "id": format!("discord:{}", author_id), "name": name, "mod": owner || is_mod(perms), "owner": owner })
@@ -295,16 +341,15 @@ fn cut(s: &str, max: usize) -> String {
 async fn on_typing(d: &Value) {
     let id = d["id"].as_str().unwrap_or("").to_string();
     let token = d["token"].as_str().unwrap_or("").to_string();
-    let Some(guild_id) = d["guild_id"].as_str() else { return };
     let query: String = d["data"]["options"].as_array().into_iter().flatten()
         .find(|o| o["focused"].as_bool() == Some(true)).and_then(|o| o["value"].as_str()).unwrap_or("").trim().chars().take(100).collect();
     let (_, _, only) = settings();
-    let here = only.is_empty() || d["channel_id"].as_str() == Some(only.as_str());
+    let here = only.is_empty() || my_server(d).is_none() || d["channel_id"].as_str() == Some(only.as_str());
     let mut choices: Vec<Value> = Vec::new();
     if here && d["data"]["name"] == "sr" {
         let (tx, rx) = tokio::sync::oneshot::channel();
         lock(&bot().asking).insert(id.clone(), tx);
-        emit("discord:suggest", json!({ "req": id, "query": query, "user": user_of(d, guild_id) }));
+        emit("discord:suggest", json!({ "req": id, "query": query, "user": user_of(d) }));
         let page = tokio::time::timeout(Duration::from_millis(1200), rx).await.ok().and_then(|r| r.ok()).unwrap_or(Value::Null);
         lock(&bot().asking).remove(&id);
         if page["on"].as_bool() == Some(true) {
@@ -338,11 +383,11 @@ async fn on_command(d: &Value) {
     if d["type"].as_u64() != Some(2) { return; } // only slash commands
     let id = d["id"].as_str().unwrap_or("").to_string();
     let token = d["token"].as_str().unwrap_or("").to_string();
-    let Some(guild_id) = d["guild_id"].as_str() else { return };
     if id.is_empty() || token.is_empty() { return; }
     let channel = d["channel_id"].as_str().unwrap_or("");
     let (_, _, only) = settings();
-    if !only.is_empty() && only != channel {
+    // the one-channel setting is for your servers; DMs and other places still work
+    if !only.is_empty() && only != channel && my_server(d).is_some() {
         // only the person who asked sees this
         let body = json!({ "type": 4, "data": { "content": format!("I only answer in <#{}>.", only), "flags": 64, "allowed_mentions": { "parse": [] } } });
         let _ = http().post(format!("{}/interactions/{}/{}/callback", api(), id, token)).json(&body).send().await;
@@ -369,7 +414,7 @@ async fn on_command(d: &Value) {
         return say(&to, "moonlit doesn't know that command.").await;
     }
     // the player answers these (it knows the library, the queue and OBS), back to this command
-    emit("chat:command", json!({ "cmd": cmd, "args": args, "user": user_of(d, guild_id), "to": { "discord": to } }));
+    emit("chat:command", json!({ "cmd": cmd, "args": args, "user": user_of(d), "to": { "discord": to } }));
 }
 
 /* ───────────── answering ───────────── */
@@ -424,7 +469,12 @@ pub fn discord_get() -> Value {
     let invite = if app.is_empty() { String::new() } else {
         format!("https://discord.com/oauth2/authorize?client_id={}&scope=bot+applications.commands&permissions={}", app, INVITE_PERMISSIONS)
     };
-    json!({ "enabled": enabled, "hasToken": !token.is_empty(), "channel": channel, "invite": invite, "status": lock(&bot().status).clone() })
+    // add moonlit to your Discord account: the commands then work in any server or DM
+    let account = if app.is_empty() || !*lock(&bot().everywhere) { String::new() } else {
+        format!("https://discord.com/oauth2/authorize?client_id={}&integration_type=1&scope=applications.commands", app)
+    };
+    json!({ "enabled": enabled, "hasToken": !token.is_empty(), "channel": channel, "invite": invite, "account": account,
+            "everywhere": *lock(&bot().everywhere), "connected": !app.is_empty(), "status": lock(&bot().status).clone() })
 }
 
 // token: a new one to save, '' to forget it, or left out to keep the saved one
@@ -482,9 +532,10 @@ mod tests {
 
     #[test]
     fn command_list() {
-        let c = commands();
+        let c = commands(true);
         let names: Vec<&str> = c.as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
         assert_eq!(names, ["nowplaying", "sr", "queue", "skip", "wrongsong", "uptime", "aboutme"]);
-        for x in c.as_array().unwrap() { assert!(x["description"].as_str().unwrap().len() <= 100); }
+        for x in c.as_array().unwrap() { assert!(x["description"].as_str().unwrap().len() <= 100); assert_eq!(x["contexts"], json!([0, 1, 2])); }
+        assert_eq!(commands(false)[0]["integration_types"], json!([0]));
     }
 }

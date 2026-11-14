@@ -190,6 +190,8 @@ async fn connect(me: u64) -> After {
                         let identify = json!({ "op": 2, "d": {
                             "token": token, "intents": INTENTS,
                             "properties": { "os": std::env::consts::OS, "browser": "moonlit", "device": "moonlit" },
+                            // the bot shows as "do not disturb" in the member list
+                            "presence": { "status": "dnd", "since": null, "activities": [], "afk": false },
                         }});
                         if tx.send(Message::Text(identify.to_string())).await.is_err() { return After::Retry; }
                     }

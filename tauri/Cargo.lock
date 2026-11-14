@@ -2352,7 +2352,7 @@ dependencies = [
 
 [[package]]
 name = "moonlit"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
